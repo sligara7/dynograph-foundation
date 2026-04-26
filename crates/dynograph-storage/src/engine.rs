@@ -1060,7 +1060,6 @@ impl StorageEngine {
                 ];
                 let handle_for = |cf: CfId| -> Result<_, DynoError> {
                     handles[cf as usize]
-                        .clone()
                         .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf.as_str())))
                 };
 
