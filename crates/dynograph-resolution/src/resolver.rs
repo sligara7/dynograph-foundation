@@ -2,7 +2,7 @@
 //! into the three-tier resolution system.
 
 use dynograph_core::ResolutionConfig;
-use dynograph_vector::{cosine_similarity, HnswIndex};
+use dynograph_vector::{HnswIndex, cosine_similarity};
 
 use crate::fuzzy;
 
@@ -33,6 +33,17 @@ pub struct EntityResolver {
     vector_threshold: f32,
 }
 
+impl Default for EntityResolver {
+    /// Default thresholds: auto-merge at 90, fuzzy zone 70-89, vector cutoff 0.85.
+    fn default() -> Self {
+        Self {
+            auto_merge_threshold: 90,
+            fuzzy_threshold: 70,
+            vector_threshold: 0.85,
+        }
+    }
+}
+
 impl EntityResolver {
     /// Create a resolver from a schema ResolutionConfig.
     pub fn from_config(config: &ResolutionConfig) -> Self {
@@ -40,15 +51,6 @@ impl EntityResolver {
             auto_merge_threshold: config.auto_merge_threshold,
             fuzzy_threshold: config.fuzzy_threshold,
             vector_threshold: config.vector_threshold as f32,
-        }
-    }
-
-    /// Create a resolver with default thresholds.
-    pub fn default() -> Self {
-        Self {
-            auto_merge_threshold: 90,
-            fuzzy_threshold: 70,
-            vector_threshold: 0.85,
         }
     }
 
@@ -97,36 +99,36 @@ impl EntityResolver {
             }
 
             // Tier 2: Tiebreaker zone — use vector similarity
-            if best.fuzzy_score >= self.fuzzy_threshold {
-                if let (Some(embedding), Some(index)) = (query_embedding, vector_index) {
-                    // Search for vector matches among candidates in the zone
-                    for c in candidates.iter_mut() {
-                        if c.fuzzy_score < self.fuzzy_threshold {
-                            break; // Below zone, stop checking
-                        }
-                        if let Some(vec) = index.get_vector(&c.id) {
-                            let vscore = cosine_similarity(embedding, vec);
-                            c.vector_score = Some(vscore);
-                        }
+            if best.fuzzy_score >= self.fuzzy_threshold
+                && let (Some(embedding), Some(index)) = (query_embedding, vector_index)
+            {
+                // Search for vector matches among candidates in the zone
+                for c in candidates.iter_mut() {
+                    if c.fuzzy_score < self.fuzzy_threshold {
+                        break; // Below zone, stop checking
                     }
-
-                    // Find best combined candidate in the zone
-                    let best_vector = candidates
-                        .iter()
-                        .filter(|c| c.fuzzy_score >= self.fuzzy_threshold)
-                        .filter_map(|c| c.vector_score.map(|v| (c, v)))
-                        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-
-                    if let Some((best_c, vscore)) = best_vector {
-                        if vscore >= self.vector_threshold {
-                            return (
-                                ResolutionResult::VectorMerge {
-                                    candidate: best_c.id.clone(),
-                                },
-                                candidates,
-                            );
-                        }
+                    if let Some(vec) = index.get_vector(&c.id) {
+                        let vscore = cosine_similarity(embedding, vec);
+                        c.vector_score = Some(vscore);
                     }
+                }
+
+                // Find best combined candidate in the zone
+                let best_vector = candidates
+                    .iter()
+                    .filter(|c| c.fuzzy_score >= self.fuzzy_threshold)
+                    .filter_map(|c| c.vector_score.map(|v| (c, v)))
+                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+                if let Some((best_c, vscore)) = best_vector
+                    && vscore >= self.vector_threshold
+                {
+                    return (
+                        ResolutionResult::VectorMerge {
+                            candidate: best_c.id.clone(),
+                        },
+                        candidates,
+                    );
                 }
             }
         }

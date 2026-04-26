@@ -102,10 +102,7 @@ pub fn token_sort_ratio(s1: &str, s2: &str) -> u32 {
 }
 
 fn sort_tokens(s: &str) -> String {
-    let mut tokens: Vec<&str> = s
-        .split_whitespace()
-        .filter(|t| !t.is_empty())
-        .collect();
+    let mut tokens: Vec<&str> = s.split_whitespace().filter(|t| !t.is_empty()).collect();
     tokens.sort_unstable();
     tokens.join(" ")
 }

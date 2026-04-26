@@ -9,4 +9,4 @@ mod fuzzy;
 mod resolver;
 
 pub use fuzzy::{jaro_winkler, token_sort_ratio};
-pub use resolver::{EntityResolver, ResolutionResult, Candidate};
+pub use resolver::{Candidate, EntityResolver, ResolutionResult};

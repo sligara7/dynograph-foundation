@@ -4,8 +4,11 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use dynograph_core::{Schema, Value, DynoError};
-use rocksdb::{DB, Options, BlockBasedOptions, ColumnFamilyDescriptor, IteratorMode, SliceTransform, WriteBatch};
+use dynograph_core::{DynoError, Schema, Value};
+use rocksdb::{
+    BlockBasedOptions, ColumnFamilyDescriptor, DB, IteratorMode, Options, SliceTransform,
+    WriteBatch,
+};
 
 use crate::cache::{CacheConfig, ReadCache};
 
@@ -82,7 +85,13 @@ fn cf_options(cf_name: &str) -> Options {
 
 /// Column family identifier — avoids String allocations in the write buffer.
 #[derive(Debug, Clone, Copy)]
-enum CfId { Nodes, Edges, AdjOut, AdjIn, NodeIdx }
+enum CfId {
+    Nodes,
+    Edges,
+    AdjOut,
+    AdjIn,
+    NodeIdx,
+}
 
 impl CfId {
     fn from_str(s: &str) -> Option<Self> {
@@ -152,8 +161,9 @@ impl StorageEngine {
             .map(|name| ColumnFamilyDescriptor::new(*name, cf_options(name)))
             .collect();
 
-        let db = DB::open_cf_descriptors(&opts, Path::new(path), cf_descriptors)
-            .map_err(|e| DynoError::Storage(format!("Failed to open RocksDB at {}: {}", path, e)))?;
+        let db = DB::open_cf_descriptors(&opts, Path::new(path), cf_descriptors).map_err(|e| {
+            DynoError::Storage(format!("Failed to open RocksDB at {}: {}", path, e))
+        })?;
 
         Ok(Self {
             schema,
@@ -178,7 +188,11 @@ impl StorageEngine {
         if let Some(ref mut buffer) = self.write_buffer {
             let cf_id = CfId::from_str(cf)
                 .ok_or_else(|| DynoError::Storage(format!("Unknown CF: {}", cf)))?;
-            buffer.push(BufferedWrite { cf: cf_id, key, value });
+            buffer.push(BufferedWrite {
+                cf: cf_id,
+                key,
+                value,
+            });
             return Ok(());
         }
 
@@ -186,7 +200,13 @@ impl StorageEngine {
         self.read_cache.lock().unwrap().invalidate(&key);
 
         match &mut self.backend {
-            Backend::Memory { nodes, edges, adj_out, adj_in, node_idx } => {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => {
                 let store = match cf {
                     CF_NODES => nodes,
                     CF_EDGES => edges,
@@ -199,7 +219,8 @@ impl StorageEngine {
                 Ok(())
             }
             Backend::Rocks { db } => {
-                let cf_handle = db.cf_handle(cf)
+                let cf_handle = db
+                    .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
                 db.put_cf(&cf_handle, &key, &value)
                     .map_err(|e| DynoError::Storage(e.to_string()))
@@ -218,7 +239,10 @@ impl StorageEngine {
 
             let result = self.backend_get(cf, key)?;
             if let Some(ref data) = result {
-                self.read_cache.lock().unwrap().put(key.to_vec(), data.clone());
+                self.read_cache
+                    .lock()
+                    .unwrap()
+                    .put(key.to_vec(), data.clone());
             }
             return Ok(result);
         }
@@ -228,7 +252,13 @@ impl StorageEngine {
 
     fn backend_get(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, DynoError> {
         match &self.backend {
-            Backend::Memory { nodes, edges, adj_out, adj_in, node_idx } => {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => {
                 let store = match cf {
                     CF_NODES => nodes,
                     CF_EDGES => edges,
@@ -240,7 +270,8 @@ impl StorageEngine {
                 Ok(store.get(key).cloned())
             }
             Backend::Rocks { db } => {
-                let cf_handle = db.cf_handle(cf)
+                let cf_handle = db
+                    .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
                 db.get_cf(&cf_handle, key)
                     .map_err(|e| DynoError::Storage(e.to_string()))
@@ -251,7 +282,13 @@ impl StorageEngine {
     fn delete(&mut self, cf: &str, key: &[u8]) -> Result<bool, DynoError> {
         self.read_cache.lock().unwrap().invalidate(key);
         match &mut self.backend {
-            Backend::Memory { nodes, edges, adj_out, adj_in, node_idx } => {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => {
                 let store = match cf {
                     CF_NODES => nodes,
                     CF_EDGES => edges,
@@ -263,10 +300,12 @@ impl StorageEngine {
                 Ok(store.remove(key).is_some())
             }
             Backend::Rocks { db } => {
-                let cf_handle = db.cf_handle(cf)
+                let cf_handle = db
+                    .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
                 // Check existence first
-                let existed = db.get_cf(&cf_handle, key)
+                let existed = db
+                    .get_cf(&cf_handle, key)
                     .map_err(|e| DynoError::Storage(e.to_string()))?
                     .is_some();
                 if existed {
@@ -279,9 +318,19 @@ impl StorageEngine {
     }
 
     /// Scan all keys with a given prefix in a column family.
+    #[allow(
+        clippy::type_complexity,
+        reason = "raw KV pairs straight out of RocksDB; an alias would only obscure"
+    )]
     fn prefix_scan(&self, cf: &str, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DynoError> {
         match &self.backend {
-            Backend::Memory { nodes, edges, adj_out, adj_in, node_idx } => {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => {
                 let store = match cf {
                     CF_NODES => nodes,
                     CF_EDGES => edges,
@@ -290,15 +339,20 @@ impl StorageEngine {
                     CF_NODE_IDX => node_idx,
                     _ => return Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
                 };
-                Ok(store.iter()
+                Ok(store
+                    .iter()
                     .filter(|(k, _)| k.starts_with(prefix))
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect())
             }
             Backend::Rocks { db } => {
-                let cf_handle = db.cf_handle(cf)
+                let cf_handle = db
+                    .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                let iter = db.iterator_cf(&cf_handle, IteratorMode::From(prefix, rocksdb::Direction::Forward));
+                let iter = db.iterator_cf(
+                    &cf_handle,
+                    IteratorMode::From(prefix, rocksdb::Direction::Forward),
+                );
                 let mut results = Vec::new();
                 for item in iter {
                     let (key, value) = item.map_err(|e| DynoError::Storage(e.to_string()))?;
@@ -315,7 +369,13 @@ impl StorageEngine {
     /// Delete all keys with a given prefix in a column family.
     fn prefix_delete(&mut self, cf: &str, prefix: &[u8]) -> Result<(), DynoError> {
         match &mut self.backend {
-            Backend::Memory { nodes, edges, adj_out, adj_in, node_idx } => {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => {
                 let store = match cf {
                     CF_NODES => nodes,
                     CF_EDGES => edges,
@@ -328,11 +388,16 @@ impl StorageEngine {
                 Ok(())
             }
             Backend::Rocks { db } => {
-                let cf_handle = db.cf_handle(cf)
+                let cf_handle = db
+                    .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
                 // Collect keys to delete first (can't delete while iterating)
-                let keys: Vec<Vec<u8>> = db.iterator_cf(&cf_handle, IteratorMode::From(prefix, rocksdb::Direction::Forward))
-                    .take_while(|item| item.as_ref().map_or(false, |(k, _)| k.starts_with(prefix)))
+                let keys: Vec<Vec<u8>> = db
+                    .iterator_cf(
+                        &cf_handle,
+                        IteratorMode::From(prefix, rocksdb::Direction::Forward),
+                    )
+                    .take_while(|item| item.as_ref().is_ok_and(|(k, _)| k.starts_with(prefix)))
                     .filter_map(|item| item.ok().map(|(k, _)| k.to_vec()))
                     .collect();
                 for key in keys {
@@ -370,8 +435,12 @@ impl StorageEngine {
     ) -> Result<(), DynoError> {
         let indexed = self.indexed_property_names(node_type);
         for prop_name in indexed {
-            let Some(value) = properties.get(&prop_name) else { continue };
-            let Some(bytes) = crate::keys::value_to_index_bytes(value) else { continue };
+            let Some(value) = properties.get(&prop_name) else {
+                continue;
+            };
+            let Some(bytes) = crate::keys::value_to_index_bytes(value) else {
+                continue;
+            };
             let key = crate::keys::node_idx_key(graph_id, node_type, &prop_name, &bytes, node_id);
             self.put(CF_NODE_IDX, key, Vec::new())?;
         }
@@ -389,8 +458,12 @@ impl StorageEngine {
     ) -> Result<(), DynoError> {
         let indexed = self.indexed_property_names(node_type);
         for prop_name in indexed {
-            let Some(value) = properties.get(&prop_name) else { continue };
-            let Some(bytes) = crate::keys::value_to_index_bytes(value) else { continue };
+            let Some(value) = properties.get(&prop_name) else {
+                continue;
+            };
+            let Some(bytes) = crate::keys::value_to_index_bytes(value) else {
+                continue;
+            };
             let key = crate::keys::node_idx_key(graph_id, node_type, &prop_name, &bytes, node_id);
             self.delete(CF_NODE_IDX, &key)?;
         }
@@ -408,8 +481,8 @@ impl StorageEngine {
         self.schema.validate_node(node_type, &properties)?;
 
         let key = crate::keys::node_key(graph_id, node_type, node_id);
-        let value = rmp_serde::to_vec(&properties)
-            .map_err(|e| DynoError::Serialization(e.to_string()))?;
+        let value =
+            rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;
 
         self.put(CF_NODES, key, value)?;
         if self.schema.has_indexed_properties(node_type) {
@@ -519,8 +592,8 @@ impl StorageEngine {
 
         self.schema.validate_node(node_type, &properties)?;
 
-        let value = rmp_serde::to_vec(&properties)
-            .map_err(|e| DynoError::Serialization(e.to_string()))?;
+        let value =
+            rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;
         self.put(CF_NODES, key, value)?;
 
         // Diff indexed properties: drop entries whose old value no longer
@@ -541,6 +614,10 @@ impl StorageEngine {
     }
 
     /// Create an edge with schema validation.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "edges are inherently 4-endpoint values; a builder would only push the count out of one signature into another"
+    )]
     pub fn create_edge(
         &mut self,
         graph_id: &str,
@@ -557,8 +634,8 @@ impl StorageEngine {
         let adj_out = crate::keys::adj_out_key(graph_id, from_id, edge_type, to_id);
         let adj_in = crate::keys::adj_in_key(graph_id, to_id, edge_type, from_id);
 
-        let value = rmp_serde::to_vec(&properties)
-            .map_err(|e| DynoError::Serialization(e.to_string()))?;
+        let value =
+            rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;
 
         self.put(CF_EDGES, edge_key, value.clone())?;
         self.put(CF_ADJ_OUT, adj_out, value.clone())?;
@@ -614,8 +691,8 @@ impl StorageEngine {
             properties.insert(k, v);
         }
 
-        let value = rmp_serde::to_vec(&properties)
-            .map_err(|e| DynoError::Serialization(e.to_string()))?;
+        let value =
+            rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;
 
         let adj_out = crate::keys::adj_out_key(graph_id, from_id, edge_type, to_id);
         let adj_in = crate::keys::adj_in_key(graph_id, to_id, edge_type, from_id);
@@ -684,8 +761,7 @@ impl StorageEngine {
 
         let mut results = Vec::with_capacity(entries.len());
         for (key, _) in entries {
-            let Some(node_id_bytes) = crate::keys::node_idx_key_node_id(&key, &value_prefix)
-            else {
+            let Some(node_id_bytes) = crate::keys::node_idx_key_node_id(&key, &value_prefix) else {
                 continue;
             };
             let node_id = String::from_utf8_lossy(node_id_bytes).to_string();
@@ -705,7 +781,11 @@ impl StorageEngine {
     }
 
     /// Scan all nodes of a given type in a graph.
-    pub fn scan_nodes(&self, graph_id: &str, node_type: &str) -> Result<Vec<StoredNode>, DynoError> {
+    pub fn scan_nodes(
+        &self,
+        graph_id: &str,
+        node_type: &str,
+    ) -> Result<Vec<StoredNode>, DynoError> {
         let prefix = crate::keys::node_type_prefix(graph_id, node_type);
         let entries = self.prefix_scan(CF_NODES, &prefix)?;
         let mut results = Vec::new();
@@ -746,10 +826,10 @@ impl StorageEngine {
             let edge_type = String::from_utf8_lossy(parts[0]).to_string();
             let to_id = String::from_utf8_lossy(parts[1]).to_string();
 
-            if let Some(filter) = edge_type_filter {
-                if edge_type != filter {
-                    continue;
-                }
+            if let Some(filter) = edge_type_filter
+                && edge_type != filter
+            {
+                continue;
             }
 
             let properties: HashMap<String, Value> = rmp_serde::from_slice(&bytes)
@@ -788,10 +868,10 @@ impl StorageEngine {
             let edge_type = String::from_utf8_lossy(parts[0]).to_string();
             let from_id = String::from_utf8_lossy(parts[1]).to_string();
 
-            if let Some(filter) = edge_type_filter {
-                if edge_type != filter {
-                    continue;
-                }
+            if let Some(filter) = edge_type_filter
+                && edge_type != filter
+            {
+                continue;
             }
 
             let properties: HashMap<String, Value> = rmp_serde::from_slice(&bytes)
@@ -818,7 +898,9 @@ impl StorageEngine {
     /// buffered operations atomically.
     pub fn begin_batch(&mut self) {
         if self.write_buffer.is_some() {
-            tracing::warn!("begin_batch() called while batch already active — committing previous batch");
+            tracing::warn!(
+                "begin_batch() called while batch already active — committing previous batch"
+            );
             let _ = self.commit_batch();
         }
         self.write_buffer = Some(Vec::new());
@@ -852,22 +934,39 @@ impl StorageEngine {
         }
 
         match &mut self.backend {
-            Backend::Memory { nodes, edges, adj_out, adj_in, node_idx } => {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => {
                 for w in buffer {
                     match w.cf {
-                        CfId::Nodes => { nodes.insert(w.key, w.value); }
-                        CfId::Edges => { edges.insert(w.key, w.value); }
-                        CfId::AdjOut => { adj_out.insert(w.key, w.value); }
-                        CfId::AdjIn => { adj_in.insert(w.key, w.value); }
-                        CfId::NodeIdx => { node_idx.insert(w.key, w.value); }
+                        CfId::Nodes => {
+                            nodes.insert(w.key, w.value);
+                        }
+                        CfId::Edges => {
+                            edges.insert(w.key, w.value);
+                        }
+                        CfId::AdjOut => {
+                            adj_out.insert(w.key, w.value);
+                        }
+                        CfId::AdjIn => {
+                            adj_in.insert(w.key, w.value);
+                        }
+                        CfId::NodeIdx => {
+                            node_idx.insert(w.key, w.value);
+                        }
                     }
                 }
             }
             Backend::Rocks { db } => {
                 let mut batch = WriteBatch::default();
                 for w in &buffer {
-                    let cf_handle = db.cf_handle(w.cf.as_str())
-                        .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", w.cf.as_str())))?;
+                    let cf_handle = db.cf_handle(w.cf.as_str()).ok_or_else(|| {
+                        DynoError::Storage(format!("CF not found: {}", w.cf.as_str()))
+                    })?;
                     batch.put_cf(&cf_handle, &w.key, &w.value);
                 }
                 db.write(batch)
@@ -902,7 +1001,6 @@ impl StorageEngine {
 mod tests {
     use super::*;
     use dynograph_core::{Schema, props};
-    use std::fs;
 
     fn test_schema() -> Schema {
         Schema::from_yaml(
@@ -965,13 +1063,20 @@ schema:
     #[test]
     fn get_nonexistent_node_returns_none() {
         let engine = StorageEngine::new_in_memory(test_schema());
-        assert!(engine.get_node("g1", "Character", "missing").unwrap().is_none());
+        assert!(
+            engine
+                .get_node("g1", "Character", "missing")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn delete_node() {
         let mut engine = StorageEngine::new_in_memory(test_schema());
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
         assert!(engine.delete_node("g1", "Character", "c1").unwrap());
         assert!(engine.get_node("g1", "Character", "c1").unwrap().is_none());
         assert!(!engine.delete_node("g1", "Character", "c1").unwrap());
@@ -980,9 +1085,23 @@ schema:
     #[test]
     fn create_and_get_edge() {
         let mut engine = StorageEngine::new_in_memory(test_schema());
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-        engine.create_node("g1", "Character", "c2", props! { "name" => "Bob" }).unwrap();
-        let edge = engine.create_edge("g1", "KNOWS", "Character", "c1", "Character", "c2", HashMap::new()).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "c2", props! { "name" => "Bob" })
+            .unwrap();
+        let edge = engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "c1",
+                "Character",
+                "c2",
+                HashMap::new(),
+            )
+            .unwrap();
         assert_eq!(edge.edge_type, "KNOWS");
         let fetched = engine.get_edge("g1", "KNOWS", "c1", "c2").unwrap().unwrap();
         assert_eq!(fetched.from_id, "c1");
@@ -991,24 +1110,56 @@ schema:
     #[test]
     fn edge_validates_types() {
         let mut engine = StorageEngine::new_in_memory(test_schema());
-        assert!(engine.create_edge("g1", "KNOWS", "Location", "l1", "Character", "c1", HashMap::new()).is_err());
+        assert!(
+            engine
+                .create_edge(
+                    "g1",
+                    "KNOWS",
+                    "Location",
+                    "l1",
+                    "Character",
+                    "c1",
+                    HashMap::new()
+                )
+                .is_err()
+        );
     }
 
     #[test]
     fn cross_type_edge() {
         let mut engine = StorageEngine::new_in_memory(test_schema());
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-        engine.create_node("g1", "Location", "loc1", props! { "name" => "Tavern" }).unwrap();
-        let edge = engine.create_edge("g1", "VISITS", "Character", "c1", "Location", "loc1", HashMap::new()).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
+            .unwrap();
+        let edge = engine
+            .create_edge(
+                "g1",
+                "VISITS",
+                "Character",
+                "c1",
+                "Location",
+                "loc1",
+                HashMap::new(),
+            )
+            .unwrap();
         assert_eq!(edge.edge_type, "VISITS");
     }
 
     #[test]
     fn count_nodes_by_type() {
         let mut engine = StorageEngine::new_in_memory(test_schema());
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-        engine.create_node("g1", "Character", "c2", props! { "name" => "Bob" }).unwrap();
-        engine.create_node("g1", "Location", "loc1", props! { "name" => "Tavern" }).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "c2", props! { "name" => "Bob" })
+            .unwrap();
+        engine
+            .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
+            .unwrap();
         assert_eq!(engine.count_nodes("g1", "Character"), 2);
         assert_eq!(engine.count_nodes("g1", "Location"), 1);
     }
@@ -1016,10 +1167,32 @@ schema:
     #[test]
     fn graph_isolation() {
         let mut engine = StorageEngine::new_in_memory(test_schema());
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-        engine.create_node("g2", "Character", "c1", props! { "name" => "Bob" }).unwrap();
-        assert_eq!(engine.get_node("g1", "Character", "c1").unwrap().unwrap().properties["name"].as_str().unwrap(), "Alice");
-        assert_eq!(engine.get_node("g2", "Character", "c1").unwrap().unwrap().properties["name"].as_str().unwrap(), "Bob");
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g2", "Character", "c1", props! { "name" => "Bob" })
+            .unwrap();
+        assert_eq!(
+            engine
+                .get_node("g1", "Character", "c1")
+                .unwrap()
+                .unwrap()
+                .properties["name"]
+                .as_str()
+                .unwrap(),
+            "Alice"
+        );
+        assert_eq!(
+            engine
+                .get_node("g2", "Character", "c1")
+                .unwrap()
+                .unwrap()
+                .properties["name"]
+                .as_str()
+                .unwrap(),
+            "Bob"
+        );
     }
 
     // Reverse-index tests (CF_NODE_IDX)
@@ -1049,13 +1222,28 @@ schema:
     fn create_populates_index_and_scan_filters_by_value() {
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
-            .create_node("g1", "Fragment", "f1", props! { "name" => "A", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sA" },
+            )
             .unwrap();
         engine
-            .create_node("g1", "Fragment", "f2", props! { "name" => "B", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f2",
+                props! { "name" => "B", "story_id" => "sA" },
+            )
             .unwrap();
         engine
-            .create_node("g1", "Fragment", "f3", props! { "name" => "C", "story_id" => "sB" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f3",
+                props! { "name" => "C", "story_id" => "sB" },
+            )
             .unwrap();
 
         let sid_a = Value::from("sA");
@@ -1079,10 +1267,20 @@ schema:
         // Same story_id across Fragment and Character — scan must not bleed types.
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
-            .create_node("g1", "Fragment", "f1", props! { "name" => "F", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "F", "story_id" => "sA" },
+            )
             .unwrap();
         engine
-            .create_node("g1", "Character", "c1", props! { "name" => "C", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Character",
+                "c1",
+                props! { "name" => "C", "story_id" => "sA" },
+            )
             .unwrap();
 
         let sid = Value::from("sA");
@@ -1105,7 +1303,12 @@ schema:
     fn update_moves_index_entry() {
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
-            .create_node("g1", "Fragment", "f1", props! { "name" => "A", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sA" },
+            )
             .unwrap();
 
         // Reparent f1 from sA to sB.
@@ -1139,7 +1342,12 @@ schema:
     fn delete_cleans_up_index_entries() {
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
-            .create_node("g1", "Fragment", "f1", props! { "name" => "A", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sA" },
+            )
             .unwrap();
 
         assert!(engine.delete_node("g1", "Fragment", "f1").unwrap());
@@ -1157,7 +1365,12 @@ schema:
         // and scans against it see nothing.
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
-            .create_node("g1", "Fragment", "f1", props! { "name" => "Alice", "story_id" => "sA" })
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "Alice", "story_id" => "sA" },
+            )
             .unwrap();
 
         let name = Value::from("Alice");
@@ -1201,10 +1414,20 @@ schema:
         {
             let mut engine = StorageEngine::new_rocksdb(indexed_schema(), &path).unwrap();
             engine
-                .create_node("g1", "Fragment", "f1", props! { "name" => "A", "story_id" => "sA" })
+                .create_node(
+                    "g1",
+                    "Fragment",
+                    "f1",
+                    props! { "name" => "A", "story_id" => "sA" },
+                )
                 .unwrap();
             engine
-                .create_node("g1", "Fragment", "f2", props! { "name" => "B", "story_id" => "sB" })
+                .create_node(
+                    "g1",
+                    "Fragment",
+                    "f2",
+                    props! { "name" => "B", "story_id" => "sB" },
+                )
                 .unwrap();
             engine
                 .update_node_properties(
@@ -1215,7 +1438,12 @@ schema:
                 )
                 .unwrap();
             engine
-                .create_node("g1", "Fragment", "f3", props! { "name" => "C", "story_id" => "sA" })
+                .create_node(
+                    "g1",
+                    "Fragment",
+                    "f3",
+                    props! { "name" => "C", "story_id" => "sA" },
+                )
                 .unwrap();
             engine.delete_node("g1", "Fragment", "f3").unwrap();
         }
@@ -1242,9 +1470,17 @@ schema:
     #[test]
     fn rocksdb_create_and_get_node() {
         let dir = tempfile::tempdir().unwrap();
-        let mut engine = StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
 
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice", "role" => "protagonist" }).unwrap();
+        engine
+            .create_node(
+                "g1",
+                "Character",
+                "c1",
+                props! { "name" => "Alice", "role" => "protagonist" },
+            )
+            .unwrap();
         let node = engine.get_node("g1", "Character", "c1").unwrap().unwrap();
         assert_eq!(node.properties["name"].as_str().unwrap(), "Alice");
     }
@@ -1257,9 +1493,23 @@ schema:
         // Write
         {
             let mut engine = StorageEngine::new_rocksdb(test_schema(), &path).unwrap();
-            engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-            engine.create_node("g1", "Character", "c2", props! { "name" => "Bob" }).unwrap();
-            engine.create_edge("g1", "KNOWS", "Character", "c1", "Character", "c2", HashMap::new()).unwrap();
+            engine
+                .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+                .unwrap();
+            engine
+                .create_node("g1", "Character", "c2", props! { "name" => "Bob" })
+                .unwrap();
+            engine
+                .create_edge(
+                    "g1",
+                    "KNOWS",
+                    "Character",
+                    "c1",
+                    "Character",
+                    "c2",
+                    HashMap::new(),
+                )
+                .unwrap();
             // engine drops here, RocksDB flushes
         }
 
@@ -1279,11 +1529,18 @@ schema:
     #[test]
     fn rocksdb_scan_and_count() {
         let dir = tempfile::tempdir().unwrap();
-        let mut engine = StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
 
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-        engine.create_node("g1", "Character", "c2", props! { "name" => "Bob" }).unwrap();
-        engine.create_node("g1", "Location", "loc1", props! { "name" => "Tavern" }).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "c2", props! { "name" => "Bob" })
+            .unwrap();
+        engine
+            .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
+            .unwrap();
 
         assert_eq!(engine.count_nodes("g1", "Character"), 2);
         assert_eq!(engine.count_nodes("g1", "Location"), 1);
@@ -1295,9 +1552,12 @@ schema:
     #[test]
     fn rocksdb_delete_node() {
         let dir = tempfile::tempdir().unwrap();
-        let mut engine = StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
 
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
         assert!(engine.delete_node("g1", "Character", "c1").unwrap());
         assert!(engine.get_node("g1", "Character", "c1").unwrap().is_none());
     }
@@ -1305,18 +1565,47 @@ schema:
     #[test]
     fn rocksdb_outgoing_edges() {
         let dir = tempfile::tempdir().unwrap();
-        let mut engine = StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
 
-        engine.create_node("g1", "Character", "c1", props! { "name" => "Alice" }).unwrap();
-        engine.create_node("g1", "Character", "c2", props! { "name" => "Bob" }).unwrap();
-        engine.create_node("g1", "Location", "loc1", props! { "name" => "Tavern" }).unwrap();
-        engine.create_edge("g1", "KNOWS", "Character", "c1", "Character", "c2", HashMap::new()).unwrap();
-        engine.create_edge("g1", "VISITS", "Character", "c1", "Location", "loc1", HashMap::new()).unwrap();
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "c2", props! { "name" => "Bob" })
+            .unwrap();
+        engine
+            .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "c1",
+                "Character",
+                "c2",
+                HashMap::new(),
+            )
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "VISITS",
+                "Character",
+                "c1",
+                "Location",
+                "loc1",
+                HashMap::new(),
+            )
+            .unwrap();
 
         let all = engine.scan_outgoing_edges("g1", "c1", None).unwrap();
         assert_eq!(all.len(), 2);
 
-        let knows = engine.scan_outgoing_edges("g1", "c1", Some("KNOWS")).unwrap();
+        let knows = engine
+            .scan_outgoing_edges("g1", "c1", Some("KNOWS"))
+            .unwrap();
         assert_eq!(knows.len(), 1);
         assert_eq!(knows[0].to_id, "c2");
     }

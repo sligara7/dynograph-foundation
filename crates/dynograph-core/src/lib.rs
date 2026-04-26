@@ -4,10 +4,13 @@
 //! A schema is a runtime description of what nodes and edges can exist,
 //! what properties they carry, and how entity resolution works.
 
+mod error;
 mod schema;
 mod value;
-mod error;
 
-pub use schema::{Schema, NodeTypeDef, EdgeTypeDef, EdgeEndpoint, PropertyDef, PropertyType, ResolutionConfig, ExtractionInclude};
-pub use value::Value;
 pub use error::DynoError;
+pub use schema::{
+    EdgeEndpoint, EdgeTypeDef, ExtractionInclude, NodeTypeDef, PropertyDef, PropertyType,
+    ResolutionConfig, Schema,
+};
+pub use value::Value;

@@ -173,8 +173,7 @@ impl HnswIndex {
     /// Generate a random level for a new node.
     fn random_level(&self) -> usize {
         let r: f64 = rand::random();
-        let level = (-r.ln() * self.config.ml).floor() as usize;
-        level
+        (-r.ln() * self.config.ml).floor() as usize
     }
 
     /// Insert a vector with an associated ID. If `id` already exists,
@@ -236,7 +235,11 @@ impl HnswIndex {
             let neighbors = self.search_layer(current, &node.vector, ef, level);
 
             // Select M best neighbors
-            let max_conn = if level == 0 { self.config.m0 } else { self.config.m };
+            let max_conn = if level == 0 {
+                self.config.m0
+            } else {
+                self.config.m
+            };
             let selected: Vec<usize> = neighbors
                 .iter()
                 .take(max_conn)
@@ -255,7 +258,11 @@ impl HnswIndex {
         // Now fix bidirectional connections
         let insert_from = new_level.min(self.max_level);
         for level in 0..=insert_from {
-            let max_conn = if level == 0 { self.config.m0 } else { self.config.m };
+            let max_conn = if level == 0 {
+                self.config.m0
+            } else {
+                self.config.m
+            };
             let connections = self.nodes[new_idx].connections[level].clone();
             for &neighbor_idx in &connections {
                 if neighbor_idx >= self.nodes.len() {
@@ -275,8 +282,11 @@ impl HnswIndex {
                         .map(|&idx| (idx, cosine_similarity(&nv, &self.nodes[idx].vector)))
                         .collect();
                     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                    self.nodes[neighbor_idx].connections[level] =
-                        scored.into_iter().take(max_conn).map(|(idx, _)| idx).collect();
+                    self.nodes[neighbor_idx].connections[level] = scored
+                        .into_iter()
+                        .take(max_conn)
+                        .map(|(idx, _)| idx)
+                        .collect();
                 }
             }
         }
@@ -300,7 +310,9 @@ impl HnswIndex {
     /// node is tombstoned, `entry_point` becomes `None` and the index
     /// effectively empties.
     pub fn remove(&mut self, id: &str) -> bool {
-        let Some(&idx) = self.id_to_index.get(id) else { return false; };
+        let Some(&idx) = self.id_to_index.get(id) else {
+            return false;
+        };
         self.nodes[idx].tombstoned = true;
         self.id_to_index.remove(id);
         self.tombstoned_count.fetch_add(1, Ordering::Relaxed);
@@ -310,14 +322,14 @@ impl HnswIndex {
             // Pick any surviving live node as the new entry. Walks the
             // nodes vec; O(n) in the size of the index. Remove is a
             // cold path compared to search so this is acceptable.
-            self.entry_point = self.nodes.iter()
+            self.entry_point = self
+                .nodes
+                .iter()
                 .enumerate()
                 .find(|(i, n)| *i != idx && !n.tombstoned)
                 .map(|(i, _)| i);
             // Recompute max_level based on the new entry's level.
-            self.max_level = self.entry_point
-                .map(|i| self.nodes[i].level)
-                .unwrap_or(0);
+            self.max_level = self.entry_point.map(|i| self.nodes[i].level).unwrap_or(0);
         }
 
         true
@@ -367,7 +379,8 @@ impl HnswIndex {
 
         let elapsed_micros = start.elapsed().as_micros() as u64;
         self.searches_total.fetch_add(1, Ordering::Relaxed);
-        self.search_duration_micros_sum.fetch_add(elapsed_micros, Ordering::Relaxed);
+        self.search_duration_micros_sum
+            .fetch_add(elapsed_micros, Ordering::Relaxed);
 
         results
     }
@@ -495,7 +508,9 @@ mod tests {
     use super::*;
 
     fn make_config(dim: usize) -> HnswConfig {
-        HnswConfig::new(dim).with_ef_construction(100).with_ef_search(50)
+        HnswConfig::new(dim)
+            .with_ef_construction(100)
+            .with_ef_search(50)
     }
 
     #[test]
@@ -614,7 +629,9 @@ mod tests {
         }
 
         // Query with a known vector
-        let query: Vec<f32> = (0..dim).map(|j| ((j * 13) % 100) as f32 / 100.0 - 0.5).collect();
+        let query: Vec<f32> = (0..dim)
+            .map(|j| ((j * 13) % 100) as f32 / 100.0 - 0.5)
+            .collect();
         let results = index.search(&query, 10);
 
         assert_eq!(results.len(), 10);
@@ -642,8 +659,11 @@ mod tests {
         index.insert("far", &[0.0, 0.0, 1.0]);
 
         let before = index.search(&[1.0, 0.0, 0.0], 3);
-        assert!(before.iter().any(|r| r.id == "drop"),
-            "'drop' should appear in search results before remove: {:?}", before);
+        assert!(
+            before.iter().any(|r| r.id == "drop"),
+            "'drop' should appear in search results before remove: {:?}",
+            before
+        );
 
         assert!(index.remove("drop"));
         assert!(!index.contains("drop"));
@@ -651,8 +671,11 @@ mod tests {
         assert_eq!(index.len(), 3, "slot retained as tombstone");
 
         let after = index.search(&[1.0, 0.0, 0.0], 3);
-        assert!(!after.iter().any(|r| r.id == "drop"),
-            "'drop' must not appear in search results after tombstone: {:?}", after);
+        assert!(
+            !after.iter().any(|r| r.id == "drop"),
+            "'drop' must not appear in search results after tombstone: {:?}",
+            after
+        );
         assert_eq!(after.len(), 2, "two live results remain");
     }
 
@@ -679,8 +702,10 @@ mod tests {
         assert!(index.remove("b"));
         assert!(!index.search(&[0.0, 0.0, 1.0], 1).is_empty());
         assert!(index.remove("c"));
-        assert!(index.search(&[1.0, 0.0, 0.0], 1).is_empty(),
-            "all-tombstoned index searches empty");
+        assert!(
+            index.search(&[1.0, 0.0, 0.0], 1).is_empty(),
+            "all-tombstoned index searches empty"
+        );
         assert!(index.is_empty());
     }
 

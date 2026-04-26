@@ -206,10 +206,14 @@ mod tests {
     fn cosine_768_dim_normalized() {
         // Two random-ish normalized 768-dim vectors
         let dim = 768;
-        let a: Vec<f32> = (0..dim).map(|i| ((i * 7 + 3) % 100) as f32 / 100.0).collect();
-        let b: Vec<f32> = (0..dim).map(|i| ((i * 13 + 7) % 100) as f32 / 100.0).collect();
+        let a: Vec<f32> = (0..dim)
+            .map(|i| ((i * 7 + 3) % 100) as f32 / 100.0)
+            .collect();
+        let b: Vec<f32> = (0..dim)
+            .map(|i| ((i * 13 + 7) % 100) as f32 / 100.0)
+            .collect();
         let sim = cosine_similarity(&a, &b);
-        assert!(sim >= -1.0 && sim <= 1.0);
+        assert!((-1.0..=1.0).contains(&sim));
     }
 
     #[test]

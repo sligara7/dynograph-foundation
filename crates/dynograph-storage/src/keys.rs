@@ -154,24 +154,6 @@ pub fn node_idx_value_prefix(
     key
 }
 
-/// Prefix for checking whether any index entries exist for a
-/// (node_type, property) pair. Used by lazy backfill to decide whether the
-/// index has been populated yet.
-pub fn node_idx_property_prefix(
-    graph_id: &str,
-    node_type: &str,
-    prop_name: &str,
-) -> Vec<u8> {
-    let mut key = Vec::with_capacity(graph_id.len() + node_type.len() + prop_name.len() + 3);
-    key.extend_from_slice(graph_id.as_bytes());
-    key.push(SEP);
-    key.extend_from_slice(node_type.as_bytes());
-    key.push(SEP);
-    key.extend_from_slice(prop_name.as_bytes());
-    key.push(SEP);
-    key
-}
-
 /// Extract the node_id suffix from an index key. The caller must pass the
 /// exact value prefix used to scan.
 pub fn node_idx_key_node_id<'a>(key: &'a [u8], value_prefix: &[u8]) -> Option<&'a [u8]> {
@@ -241,25 +223,20 @@ mod tests {
     }
 
     #[test]
-    fn node_idx_property_prefix_spans_all_values() {
-        let prefix = node_idx_property_prefix("g1", "Fragment", "story_id");
-        let k1 = node_idx_key("g1", "Fragment", "story_id", b"sA", "f1");
-        let k2 = node_idx_key("g1", "Fragment", "story_id", b"sB", "f2");
-        let k_other_prop = node_idx_key("g1", "Fragment", "arc_id", b"sA", "f3");
-        assert!(k1.starts_with(&prefix));
-        assert!(k2.starts_with(&prefix));
-        assert!(!k_other_prop.starts_with(&prefix));
-    }
-
-    #[test]
     fn value_to_index_bytes_covers_supported_types() {
         assert_eq!(
             value_to_index_bytes(&Value::String("abc".into())),
             Some(b"abc".to_vec())
         );
         assert_eq!(value_to_index_bytes(&Value::Int(42)), Some(b"42".to_vec()));
-        assert_eq!(value_to_index_bytes(&Value::Bool(true)), Some(b"1".to_vec()));
-        assert_eq!(value_to_index_bytes(&Value::Bool(false)), Some(b"0".to_vec()));
+        assert_eq!(
+            value_to_index_bytes(&Value::Bool(true)),
+            Some(b"1".to_vec())
+        );
+        assert_eq!(
+            value_to_index_bytes(&Value::Bool(false)),
+            Some(b"0".to_vec())
+        );
         assert_eq!(value_to_index_bytes(&Value::Null), None);
         assert_eq!(value_to_index_bytes(&Value::Float(1.0)), None);
         assert_eq!(value_to_index_bytes(&Value::List(vec![])), None);

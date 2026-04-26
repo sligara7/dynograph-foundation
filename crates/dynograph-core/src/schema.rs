@@ -149,9 +149,15 @@ impl ResolutionConfig {
     pub const DEFAULT_FUZZY_THRESHOLD: u32 = 70;
 }
 
-fn default_fuzzy_threshold() -> u32 { ResolutionConfig::DEFAULT_FUZZY_THRESHOLD }
-fn default_vector_threshold() -> f64 { 0.85 }
-fn default_auto_merge() -> u32 { 90 }
+fn default_fuzzy_threshold() -> u32 {
+    ResolutionConfig::DEFAULT_FUZZY_THRESHOLD
+}
+fn default_vector_threshold() -> f64 {
+    0.85
+}
+fn default_auto_merge() -> u32 {
+    90
+}
 
 /// Extraction mode — which node types to include + token budget.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +175,9 @@ pub enum ExtractionInclude {
     Specific(Vec<String>), // ["Witness", "Exhibit"]
 }
 
-fn default_max_tokens() -> u32 { 4096 }
+fn default_max_tokens() -> u32 {
+    4096
+}
 
 // =============================================================================
 // Schema Methods
@@ -219,7 +227,8 @@ impl Schema {
                 .and_modify(|existing| {
                     // Merge properties additively
                     for (prop_name, prop_def) in &node_def.properties {
-                        existing.properties
+                        existing
+                            .properties
                             .entry(prop_name.clone())
                             .or_insert_with(|| prop_def.clone());
                     }
@@ -274,17 +283,14 @@ impl Schema {
             (PropertyType::Float, Value::Float(_) | Value::Int(_)) => {}
             (PropertyType::Bool, Value::Bool(_)) => {}
             (PropertyType::Enum, Value::String(s)) => {
-                if let Some(ref valid) = prop_def.values {
-                    if !valid.contains(s) {
-                        return Err(DynoError::Validation {
-                            node_type: node_type.to_string(),
-                            property: property.to_string(),
-                            message: format!(
-                                "invalid enum value '{}', expected one of {:?}",
-                                s, valid
-                            ),
-                        });
-                    }
+                if let Some(ref valid) = prop_def.values
+                    && !valid.contains(s)
+                {
+                    return Err(DynoError::Validation {
+                        node_type: node_type.to_string(),
+                        property: property.to_string(),
+                        message: format!("invalid enum value '{}', expected one of {:?}", s, valid),
+                    });
                 }
             }
             (PropertyType::ListString, Value::List(_)) => {}
@@ -302,16 +308,15 @@ impl Schema {
         }
 
         // Range check for numerics
-        if let Some((min, max)) = prop_def.range {
-            if let Some(v) = value.as_f64() {
-                if v < min || v > max {
-                    return Err(DynoError::Validation {
-                        node_type: node_type.to_string(),
-                        property: property.to_string(),
-                        message: format!("value {} out of range [{}, {}]", v, min, max),
-                    });
-                }
-            }
+        if let Some((min, max)) = prop_def.range
+            && let Some(v) = value.as_f64()
+            && (v < min || v > max)
+        {
+            return Err(DynoError::Validation {
+                node_type: node_type.to_string(),
+                property: property.to_string(),
+                message: format!("value {} out of range [{}, {}]", v, min, max),
+            });
         }
 
         Ok(())
@@ -390,7 +395,14 @@ impl Schema {
             let props: Vec<String> = def
                 .properties
                 .iter()
-                .map(|(k, v)| format!("{}: {:?}{}", k, v.prop_type, if v.required { " (required)" } else { "" }))
+                .map(|(k, v)| {
+                    format!(
+                        "{}: {:?}{}",
+                        k,
+                        v.prop_type,
+                        if v.required { " (required)" } else { "" }
+                    )
+                })
                 .collect();
             lines.push(format!("  {} — {}", name, props.join(", ")));
         }
@@ -408,23 +420,21 @@ impl Schema {
 
     /// Ensure an edge type exists. If already present, does nothing.
     /// Returns true if the edge type was added.
-    pub fn ensure_edge_type(
-        &mut self,
-        name: &str,
-        from: EdgeEndpoint,
-        to: EdgeEndpoint,
-    ) -> bool {
+    pub fn ensure_edge_type(&mut self, name: &str, from: EdgeEndpoint, to: EdgeEndpoint) -> bool {
         if self.edge_types.contains_key(name) {
             return false;
         }
-        self.edge_types.insert(name.to_string(), EdgeTypeDef {
-            from,
-            to,
-            properties: HashMap::new(),
-            extraction_hint: None,
-            inference_category: None,
-            pass_1_extractable: false,
-        });
+        self.edge_types.insert(
+            name.to_string(),
+            EdgeTypeDef {
+                from,
+                to,
+                properties: HashMap::new(),
+                extraction_hint: None,
+                inference_category: None,
+                pass_1_extractable: false,
+            },
+        );
         true
     }
 
@@ -438,12 +448,15 @@ impl Schema {
         if self.node_types.contains_key(name) {
             return false;
         }
-        self.node_types.insert(name.to_string(), NodeTypeDef {
-            properties,
-            embedding_field: None,
-            resolution: None,
-            extraction_hint: None,
-        });
+        self.node_types.insert(
+            name.to_string(),
+            NodeTypeDef {
+                properties,
+                embedding_field: None,
+                resolution: None,
+                extraction_hint: None,
+            },
+        );
         true
     }
 
@@ -524,7 +537,9 @@ impl Schema {
     where
         F: Fn(&EdgeTypeDef) -> bool,
     {
-        let mut out: Vec<&str> = self.edge_types.iter()
+        let mut out: Vec<&str> = self
+            .edge_types
+            .iter()
             .filter(|(_, d)| predicate(d))
             .map(|(k, _)| k.as_str())
             .collect();
@@ -616,13 +631,11 @@ schema:
     fn validate_enum_property() {
         let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
         // Valid enum
-        let result =
-            schema.validate_property("Character", "role", &Value::from("protagonist"));
+        let result = schema.validate_property("Character", "role", &Value::from("protagonist"));
         assert!(result.is_ok());
 
         // Invalid enum
-        let result =
-            schema.validate_property("Character", "role", &Value::from("villain"));
+        let result = schema.validate_property("Character", "role", &Value::from("villain"));
         assert!(result.is_err());
     }
 
@@ -630,13 +643,11 @@ schema:
     fn validate_range_property() {
         let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
         // In range
-        let result =
-            schema.validate_property("Character", "score", &Value::Float(0.5));
+        let result = schema.validate_property("Character", "score", &Value::Float(0.5));
         assert!(result.is_ok());
 
         // Out of range
-        let result =
-            schema.validate_property("Character", "score", &Value::Float(1.5));
+        let result = schema.validate_property("Character", "score", &Value::Float(1.5));
         assert!(result.is_err());
     }
 
@@ -644,24 +655,39 @@ schema:
     fn validate_edge_types() {
         let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
         // Valid: Character KNOWS Character
-        assert!(schema.validate_edge("KNOWS", "Character", "Character").is_ok());
+        assert!(
+            schema
+                .validate_edge("KNOWS", "Character", "Character")
+                .is_ok()
+        );
 
         // Valid: Character VISITS Location
-        assert!(schema.validate_edge("VISITS", "Character", "Location").is_ok());
+        assert!(
+            schema
+                .validate_edge("VISITS", "Character", "Location")
+                .is_ok()
+        );
 
         // Invalid: Location KNOWS Character
-        assert!(schema.validate_edge("KNOWS", "Location", "Character").is_err());
+        assert!(
+            schema
+                .validate_edge("KNOWS", "Location", "Character")
+                .is_err()
+        );
 
         // Invalid: Character VISITS Character
-        assert!(schema.validate_edge("VISITS", "Character", "Character").is_err());
+        assert!(
+            schema
+                .validate_edge("VISITS", "Character", "Character")
+                .is_err()
+        );
     }
 
     #[test]
     fn type_mismatch_rejected() {
         let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
         // String property with int value
-        let result =
-            schema.validate_property("Character", "name", &Value::Int(42));
+        let result = schema.validate_property("Character", "name", &Value::Int(42));
         assert!(result.is_err());
     }
 
@@ -737,7 +763,9 @@ schema:
         let serialized = serde_yaml::to_string(&schema).unwrap();
         let reparsed: Schema = serde_yaml::from_str(&serialized).unwrap();
         assert_eq!(
-            reparsed.node_types["Item"].properties["name"].description.as_deref(),
+            reparsed.node_types["Item"].properties["name"]
+                .description
+                .as_deref(),
             Some("Human-readable label"),
         );
 
@@ -786,7 +814,9 @@ schema:
         let serialized = serde_json::to_string(&schema).unwrap();
         let reparsed: Schema = serde_json::from_str(&serialized).unwrap();
         assert_eq!(
-            reparsed.node_types["Item"].properties["name"].description.as_deref(),
+            reparsed.node_types["Item"].properties["name"]
+                .description
+                .as_deref(),
             Some("Human-readable label"),
         );
     }
@@ -820,11 +850,30 @@ schema:
       to: "*"
 "#;
         let schema = Schema::from_yaml(yaml).unwrap();
-        assert_eq!(schema.inference_edge_types(), vec!["CAUSES", "RESOLVES", "TRIGGERS"]);
-        assert_eq!(schema.inference_edge_types_by_category("causal"), vec!["CAUSES"]);
-        assert_eq!(schema.inference_edge_types_by_category("narrative"), vec!["RESOLVES"]);
-        assert_eq!(schema.inference_edge_types_by_category("therapeutic"), vec!["TRIGGERS"]);
-        assert!(schema.inference_edge_types_by_category("strategic").is_empty());
-        assert_eq!(schema.extractable_inference_edge_types(), vec!["CAUSES", "RESOLVES"]);
+        assert_eq!(
+            schema.inference_edge_types(),
+            vec!["CAUSES", "RESOLVES", "TRIGGERS"]
+        );
+        assert_eq!(
+            schema.inference_edge_types_by_category("causal"),
+            vec!["CAUSES"]
+        );
+        assert_eq!(
+            schema.inference_edge_types_by_category("narrative"),
+            vec!["RESOLVES"]
+        );
+        assert_eq!(
+            schema.inference_edge_types_by_category("therapeutic"),
+            vec!["TRIGGERS"]
+        );
+        assert!(
+            schema
+                .inference_edge_types_by_category("strategic")
+                .is_empty()
+        );
+        assert_eq!(
+            schema.extractable_inference_edge_types(),
+            vec!["CAUSES", "RESOLVES"]
+        );
     }
 }

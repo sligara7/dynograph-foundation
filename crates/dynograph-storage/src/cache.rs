@@ -74,11 +74,14 @@ impl ReadCache {
             self.evict_lru();
         }
         let now = Instant::now();
-        self.entries.insert(key, CacheEntry {
-            data,
-            accessed: now,
-            created: now,
-        });
+        self.entries.insert(
+            key,
+            CacheEntry {
+                data,
+                accessed: now,
+                created: now,
+            },
+        );
     }
 
     /// Invalidate a single cache entry.

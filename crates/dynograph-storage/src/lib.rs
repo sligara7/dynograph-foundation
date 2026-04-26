@@ -12,4 +12,4 @@ mod engine;
 mod keys;
 
 pub use cache::{CacheConfig, ReadCache};
-pub use engine::{StorageEngine, StoredNode, StoredEdge};
+pub use engine::{StorageEngine, StoredEdge, StoredNode};
