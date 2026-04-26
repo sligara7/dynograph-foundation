@@ -7,9 +7,9 @@
 //! - Batch writes for extraction integration
 //! - Iterator-based scans
 
-pub mod cache;
-pub mod engine;
-pub mod keys;
+mod cache;
+mod engine;
+mod keys;
 
 pub use cache::{CacheConfig, ReadCache};
-pub use engine::StorageEngine;
+pub use engine::{StorageEngine, StoredNode, StoredEdge};

@@ -7,8 +7,8 @@
 //! - Batch insert and search
 //! - Snapshot persistence
 
-pub mod distance;
-pub mod hnsw;
+mod distance;
+mod hnsw;
 
 pub use distance::{cosine_similarity, dot_product, euclidean_distance};
 pub use hnsw::{HnswConfig, HnswIndex, HnswStats, SearchResult};
