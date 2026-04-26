@@ -115,11 +115,38 @@ impl CfId {
     }
 }
 
-/// Buffered write operation for batch commits.
-struct BufferedWrite {
-    cf: CfId,
-    key: Vec<u8>,
-    value: Vec<u8>,
+/// One operation queued in a batch. Applied in insertion order at
+/// `commit_batch` time.
+///
+/// Caveat for `PrefixDelete` inside a batch: at commit time the
+/// matching-key set is computed against the *pre-batch on-disk* state,
+/// not against any puts queued earlier in the same batch. So
+/// `Put { key: "g1\x00X" }` followed by `PrefixDelete { prefix: "g1\x00X" }`
+/// will leave the put in place rather than removing it. Callers that
+/// need stricter semantics should avoid interleaving prefix-deletes
+/// with same-prefix puts in one batch.
+enum BufferedOp {
+    Put {
+        cf: CfId,
+        key: Vec<u8>,
+        value: Vec<u8>,
+    },
+    Delete {
+        cf: CfId,
+        key: Vec<u8>,
+    },
+    PrefixDelete {
+        cf: CfId,
+        prefix: Vec<u8>,
+    },
+}
+
+impl BufferedOp {
+    fn cf(&self) -> CfId {
+        match self {
+            Self::Put { cf, .. } | Self::Delete { cf, .. } | Self::PrefixDelete { cf, .. } => *cf,
+        }
+    }
 }
 
 /// The storage engine — schema-validated graph storage.
@@ -129,8 +156,12 @@ pub struct StorageEngine {
     /// LRU read cache for node lookups and adjacency scans.
     /// Mutex allows cache updates through &self (get path is immutable at API level).
     read_cache: Mutex<ReadCache>,
-    /// Write batch buffer — when active, puts are buffered and committed atomically.
-    write_buffer: Option<Vec<BufferedWrite>>,
+    /// Write batch buffer — when active, puts/deletes/prefix-deletes are
+    /// buffered and committed atomically. Mixed put + delete ops in the
+    /// same batch are now actually atomic (was tech-debt C4: only puts
+    /// were buffered, deletes ran immediately and broke the atomicity
+    /// guarantee callers assumed).
+    write_buffer: Option<Vec<BufferedOp>>,
 }
 
 impl StorageEngine {
@@ -188,7 +219,7 @@ impl StorageEngine {
         if let Some(ref mut buffer) = self.write_buffer {
             let cf_id = CfId::from_str(cf)
                 .ok_or_else(|| DynoError::Storage(format!("Unknown CF: {}", cf)))?;
-            buffer.push(BufferedWrite {
+            buffer.push(BufferedOp::Put {
                 cf: cf_id,
                 key,
                 value,
@@ -280,6 +311,23 @@ impl StorageEngine {
     }
 
     fn delete(&mut self, cf: &str, key: &[u8]) -> Result<bool, DynoError> {
+        // If batching, the existence answer must reflect pre-batch disk
+        // state to match unbatched semantics — peek the backend before
+        // buffering the delete. The cache stays untouched until commit.
+        if self.write_buffer.is_some() {
+            let cf_id = CfId::from_str(cf)
+                .ok_or_else(|| DynoError::Storage(format!("Unknown CF: {}", cf)))?;
+            let existed = self.backend_get(cf, key)?.is_some();
+            self.write_buffer
+                .as_mut()
+                .unwrap()
+                .push(BufferedOp::Delete {
+                    cf: cf_id,
+                    key: key.to_vec(),
+                });
+            return Ok(existed);
+        }
+
         self.read_cache.lock().unwrap().invalidate(key);
         match &mut self.backend {
             Backend::Memory {
@@ -368,6 +416,15 @@ impl StorageEngine {
 
     /// Delete all keys with a given prefix in a column family.
     fn prefix_delete(&mut self, cf: &str, prefix: &[u8]) -> Result<(), DynoError> {
+        if let Some(ref mut buffer) = self.write_buffer {
+            let cf_id = CfId::from_str(cf)
+                .ok_or_else(|| DynoError::Storage(format!("Unknown CF: {}", cf)))?;
+            buffer.push(BufferedOp::PrefixDelete {
+                cf: cf_id,
+                prefix: prefix.to_vec(),
+            });
+            return Ok(());
+        }
         match &mut self.backend {
             Backend::Memory {
                 nodes,
@@ -967,11 +1024,21 @@ impl StorageEngine {
             return Ok(0);
         }
 
-        // Invalidate cache for all written keys now that data is being committed
+        // Invalidate cache for every key (or prefix) the batch touched.
+        // Done before applying the batch so any concurrent reader either
+        // sees pre-batch on-disk + a missed cache entry (re-fetches)
+        // or post-batch on-disk + a missed cache entry — never stale data.
         {
             let mut cache = self.read_cache.lock().unwrap();
-            for w in &buffer {
-                cache.invalidate(&w.key);
+            for op in &buffer {
+                match op {
+                    BufferedOp::Put { key, .. } | BufferedOp::Delete { key, .. } => {
+                        cache.invalidate(key);
+                    }
+                    BufferedOp::PrefixDelete { prefix, .. } => {
+                        cache.invalidate_prefix(prefix);
+                    }
+                }
             }
         }
 
@@ -983,33 +1050,56 @@ impl StorageEngine {
                 adj_in,
                 node_idx,
             } => {
-                for w in buffer {
-                    match w.cf {
-                        CfId::Nodes => {
-                            nodes.insert(w.key, w.value);
+                for op in buffer {
+                    let store: &mut HashMap<Vec<u8>, Vec<u8>> = match op.cf() {
+                        CfId::Nodes => nodes,
+                        CfId::Edges => edges,
+                        CfId::AdjOut => adj_out,
+                        CfId::AdjIn => adj_in,
+                        CfId::NodeIdx => node_idx,
+                    };
+                    match op {
+                        BufferedOp::Put { key, value, .. } => {
+                            store.insert(key, value);
                         }
-                        CfId::Edges => {
-                            edges.insert(w.key, w.value);
+                        BufferedOp::Delete { key, .. } => {
+                            store.remove(&key);
                         }
-                        CfId::AdjOut => {
-                            adj_out.insert(w.key, w.value);
-                        }
-                        CfId::AdjIn => {
-                            adj_in.insert(w.key, w.value);
-                        }
-                        CfId::NodeIdx => {
-                            node_idx.insert(w.key, w.value);
+                        BufferedOp::PrefixDelete { prefix, .. } => {
+                            store.retain(|k, _| !k.starts_with(&prefix));
                         }
                     }
                 }
             }
             Backend::Rocks { db } => {
                 let mut batch = WriteBatch::default();
-                for w in &buffer {
-                    let cf_handle = db.cf_handle(w.cf.as_str()).ok_or_else(|| {
-                        DynoError::Storage(format!("CF not found: {}", w.cf.as_str()))
+                for op in &buffer {
+                    let cf_handle = db.cf_handle(op.cf().as_str()).ok_or_else(|| {
+                        DynoError::Storage(format!("CF not found: {}", op.cf().as_str()))
                     })?;
-                    batch.put_cf(&cf_handle, &w.key, &w.value);
+                    match op {
+                        BufferedOp::Put { key, value, .. } => {
+                            batch.put_cf(&cf_handle, key, value);
+                        }
+                        BufferedOp::Delete { key, .. } => {
+                            batch.delete_cf(&cf_handle, key);
+                        }
+                        BufferedOp::PrefixDelete { prefix, .. } => {
+                            // See BufferedOp doc: matching-key set is
+                            // computed against pre-batch disk state.
+                            for item in db.iterator_cf(
+                                &cf_handle,
+                                IteratorMode::From(prefix, rocksdb::Direction::Forward),
+                            ) {
+                                let (key, _) =
+                                    item.map_err(|e| DynoError::Storage(e.to_string()))?;
+                                if !key.starts_with(prefix) {
+                                    break;
+                                }
+                                batch.delete_cf(&cf_handle, &key);
+                            }
+                        }
+                    }
                 }
                 db.write(batch)
                     .map_err(|e| DynoError::Storage(format!("Batch write failed: {}", e)))?;
@@ -1816,5 +1906,214 @@ schema:
             .unwrap();
         assert_eq!(knows.len(), 1);
         assert_eq!(knows[0].to_id, "c2");
+    }
+
+    // -- Tech-debt C4 regression tests: batch atomicity for mixed put + delete
+
+    #[test]
+    fn batch_buffers_mixed_put_and_delete_until_commit() {
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        // Pre-existing node we'll delete inside the batch.
+        engine
+            .create_node("g1", "Character", "to_delete", props! { "name" => "Goner" })
+            .unwrap();
+
+        engine.begin_batch();
+        engine
+            .create_node("g1", "Character", "to_create", props! { "name" => "New" })
+            .unwrap();
+        engine.delete_node("g1", "Character", "to_delete").unwrap();
+
+        // Pre-commit: neither op is visible.
+        assert!(
+            engine
+                .get_node("g1", "Character", "to_create")
+                .unwrap()
+                .is_none(),
+            "buffered create should not be visible until commit"
+        );
+        assert!(
+            engine
+                .get_node("g1", "Character", "to_delete")
+                .unwrap()
+                .is_some(),
+            "buffered delete should not be visible until commit"
+        );
+
+        engine.commit_batch().unwrap();
+
+        // Post-commit: both ops applied atomically.
+        assert!(
+            engine
+                .get_node("g1", "Character", "to_create")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            engine
+                .get_node("g1", "Character", "to_delete")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn batch_discard_with_mixed_ops_leaves_pre_batch_state() {
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "keep_me", props! { "name" => "Stay" })
+            .unwrap();
+
+        engine.begin_batch();
+        engine
+            .create_node("g1", "Character", "ghost", props! { "name" => "Phantom" })
+            .unwrap();
+        engine.delete_node("g1", "Character", "keep_me").unwrap();
+        engine.discard_batch();
+
+        // Discarded ops must not affect disk.
+        assert!(
+            engine
+                .get_node("g1", "Character", "ghost")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            engine
+                .get_node("g1", "Character", "keep_me")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn batched_replace_on_indexed_node_is_atomic_against_index_scans() {
+        // The C4 bug: replace_node_properties on an indexed node deletes
+        // the old index entry and writes the new one. Before C4 the
+        // delete bypassed the buffer and ran immediately, so any reader
+        // between the delete and commit_batch saw the index in a
+        // partially-applied state — scans by the OLD value missed the
+        // node mid-batch, and scans by the NEW value also missed it
+        // (the put was still buffered). Now both ops buffer.
+        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        engine
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sA" },
+            )
+            .unwrap();
+
+        engine.begin_batch();
+        engine
+            .replace_node_properties(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sB" },
+            )
+            .unwrap();
+
+        // Pre-commit: index is unchanged. f1 still indexed under sA;
+        // no entry under sB. (Was broken before C4: sA scan returned
+        // empty mid-batch because delete_index_entries fired immediately.)
+        let sa = Value::from("sA");
+        let sb = Value::from("sB");
+        assert_eq!(
+            engine
+                .scan_nodes_by_property("g1", "Fragment", "story_id", &sa)
+                .unwrap()
+                .len(),
+            1,
+            "old story_id should still be indexed pre-commit"
+        );
+        assert_eq!(
+            engine
+                .scan_nodes_by_property("g1", "Fragment", "story_id", &sb)
+                .unwrap()
+                .len(),
+            0,
+            "new story_id should not be visible pre-commit"
+        );
+
+        engine.commit_batch().unwrap();
+
+        // Post-commit: index swapped atomically.
+        assert_eq!(
+            engine
+                .scan_nodes_by_property("g1", "Fragment", "story_id", &sa)
+                .unwrap()
+                .len(),
+            0
+        );
+        let hits_b = engine
+            .scan_nodes_by_property("g1", "Fragment", "story_id", &sb)
+            .unwrap();
+        assert_eq!(hits_b.len(), 1);
+        assert_eq!(hits_b[0].node_id, "f1");
+    }
+
+    #[test]
+    fn batch_buffers_prefix_delete_until_commit() {
+        // delete_node uses prefix_delete on adj_out/adj_in; verify that
+        // running it inside a batch doesn't leak adjacency removal mid-batch.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "alice", props! { "name" => "A" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "bob", props! { "name" => "B" })
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "alice",
+                "Character",
+                "bob",
+                HashMap::new(),
+            )
+            .unwrap();
+
+        engine.begin_batch();
+        engine.delete_node("g1", "Character", "alice").unwrap();
+
+        // Pre-commit: alice still resolves; her outgoing edge still scans.
+        assert!(
+            engine
+                .get_node("g1", "Character", "alice")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            engine
+                .scan_outgoing_edges("g1", "alice", None)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        engine.commit_batch().unwrap();
+
+        // Post-commit: alice and her adjacency + the edge + bob's
+        // inverse adjacency are all gone.
+        assert!(
+            engine
+                .get_node("g1", "Character", "alice")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            engine
+                .get_edge("g1", "KNOWS", "alice", "bob")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            engine.scan_incoming_edges("g1", "bob", None).unwrap().len(),
+            0
+        );
     }
 }
