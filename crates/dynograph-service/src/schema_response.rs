@@ -49,7 +49,17 @@ pub fn content_hash(schema: &Schema) -> String {
     let canonical = serde_json::to_string(&value).expect("value → string");
     let mut hasher = Sha256::new();
     hasher.update(canonical.as_bytes());
-    format!("{:x}", hasher.finalize())
+    // sha2 0.11 returns `hybrid_array::Array` from `finalize()`, which
+    // dropped the `LowerHex` impl that 0.10's `GenericArray` had —
+    // hex-encode by hand instead.
+    hasher
+        .finalize()
+        .iter()
+        .fold(String::with_capacity(64), |mut s, b| {
+            use std::fmt::Write;
+            write!(&mut s, "{:02x}", b).unwrap();
+            s
+        })
 }
 
 #[cfg(test)]
