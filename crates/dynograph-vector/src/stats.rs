@@ -136,12 +136,15 @@ mod tests {
     }
 
     #[test]
-    fn pearson_uncorrelated() {
-        // Carefully chosen so means are integers and cross-terms cancel
+    fn pearson_weakly_correlated() {
+        // Hand-computed: a=[1..5], b=[3,1,4,5,2]
+        //   mean_a=3, mean_b=3
+        //   cov=2, var_a=10, var_b=10
+        //   r = 2 / sqrt(100) = 0.2
         let a = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let b = vec![3.0, 1.0, 4.0, 5.0, 2.0];
         let r = pearson_correlation(&a, &b).unwrap();
-        assert!(r.abs() < 0.5); // Loose — just checking it's not at ±1
+        assert!((r - 0.2).abs() < 1e-12);
     }
 
     #[test]
