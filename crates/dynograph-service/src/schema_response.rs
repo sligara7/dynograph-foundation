@@ -1,21 +1,16 @@
 //! Wire shape for schema endpoints + content-hash drift detection.
 //!
-//! Mirrors the contract C-partial established on the storyflow side:
-//! every schema response carries a `wire_version` (foundation crate
-//! version) and a `content_hash` (SHA256 of the schema's canonical JSON).
-//! Consumers (e.g. generation_plus's Pydantic codegen) fail-fast on
-//! mismatch — see `services/generation_plus/src/schemas/startup_guard.py`
-//! in the storyflow repo.
+//! Every schema response carries a `wire_version` (foundation crate
+//! version) and a `content_hash` (SHA256 of the schema's canonical
+//! JSON). Consumers compare these against compiled-in constants and
+//! fail-fast on mismatch.
 
 use dynograph_core::Schema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-/// Foundation crate version this service was compiled against.
 pub const WIRE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// JSON shape returned by graph lifecycle endpoints. Owned (not borrowed)
-/// because axum's Json extractor requires the payload to be `'static`.
 #[derive(Debug, Serialize)]
 pub struct SchemaResponse {
     pub id: String,
@@ -25,8 +20,14 @@ pub struct SchemaResponse {
 }
 
 impl SchemaResponse {
+    /// Compute the hash from the schema. Use `with_cached_hash` instead
+    /// when the registry already holds a cached hash for this schema.
     pub fn new(id: String, schema: Schema) -> Self {
         let content_hash = content_hash(&schema);
+        Self::with_cached_hash(id, schema, content_hash)
+    }
+
+    pub fn with_cached_hash(id: String, schema: Schema, content_hash: String) -> Self {
         Self {
             id,
             wire_version: WIRE_VERSION,
@@ -38,28 +39,37 @@ impl SchemaResponse {
 
 /// SHA256 of the schema's canonical JSON serialization, hex-encoded.
 ///
-/// Determinism trick: serde_json's `to_value` constructs maps using the
-/// `serde_json::Map` type, which without the `preserve_order` feature is
-/// backed by `BTreeMap` — sorted keys. So `to_value` first turns every
-/// `HashMap` in the schema into a sorted Map, and the subsequent
-/// `to_string` emits keys alphabetically. The hash is stable across
-/// runs even though `Schema` itself uses `HashMap` for node/edge types.
+/// Determinism: serde_json's default `Map` is backed by `BTreeMap`, so
+/// `to_value` first turns every `HashMap` in the schema into a sorted
+/// Map, and `to_writer` emits keys alphabetically. Hash is stable
+/// across runs even though `Schema` itself uses `HashMap` internally.
 pub fn content_hash(schema: &Schema) -> String {
     let value = serde_json::to_value(schema).expect("schema → json value");
-    let canonical = serde_json::to_string(&value).expect("value → string");
     let mut hasher = Sha256::new();
-    hasher.update(canonical.as_bytes());
-    // sha2 0.11 returns `hybrid_array::Array` from `finalize()`, which
-    // dropped the `LowerHex` impl that 0.10's `GenericArray` had —
-    // hex-encode by hand instead.
-    hasher
-        .finalize()
-        .iter()
-        .fold(String::with_capacity(64), |mut s, b| {
-            use std::fmt::Write;
-            write!(&mut s, "{:02x}", b).unwrap();
-            s
-        })
+    serde_json::to_writer(HashWriter(&mut hasher), &value).expect("value → hasher");
+    let bytes = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in bytes {
+        use std::fmt::Write;
+        write!(&mut hex, "{:02x}", b).unwrap();
+    }
+    hex
+}
+
+/// `std::io::Write` adapter that streams bytes directly into a SHA256
+/// hasher. Lets `serde_json::to_writer` skip the intermediate `String`
+/// the previous `to_string` + `update` shape allocated.
+struct HashWriter<'a>(&'a mut Sha256);
+
+impl std::io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -88,7 +98,6 @@ schema:
         let h1 = content_hash(&s);
         let h2 = content_hash(&s);
         assert_eq!(h1, h2);
-        // SHA256 hex is 64 chars
         assert_eq!(h1.len(), 64);
     }
 

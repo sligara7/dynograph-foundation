@@ -16,4 +16,4 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }
-http-body-util = "0.1"
+http-body-util = { workspace = true }

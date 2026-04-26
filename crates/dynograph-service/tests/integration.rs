@@ -1,6 +1,3 @@
-//! End-to-end test for the slice-1 routes: create a graph, fetch it
-//! back, assert the wire shape and `content_hash` determinism.
-
 use std::sync::Arc;
 
 use axum::{
@@ -38,7 +35,6 @@ async fn create_then_get_round_trips_schema_and_content_hash() {
         }
     });
 
-    // POST /v1/graphs → 201 + SchemaResponse
     let res = app
         .clone()
         .oneshot(
@@ -58,9 +54,8 @@ async fn create_then_get_round_trips_schema_and_content_hash() {
     assert_eq!(created["id"], "g1");
     assert_eq!(created["wire_version"], env!("CARGO_PKG_VERSION"));
     let first_hash = created["content_hash"].as_str().unwrap().to_string();
-    assert_eq!(first_hash.len(), 64, "sha256 hex is 64 chars");
+    assert_eq!(first_hash.len(), 64);
 
-    // GET /v1/graphs/g1 → 200 + same SchemaResponse shape, identical content_hash
     let res = app
         .clone()
         .oneshot(
