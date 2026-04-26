@@ -27,6 +27,12 @@ pub enum RegistryError {
     NotFound(String),
     #[error("node not found: {node_type}/{node_id}")]
     NodeNotFound { node_type: String, node_id: String },
+    #[error("edge not found: {edge_type} {from_id}->{to_id}")]
+    EdgeNotFound {
+        edge_type: String,
+        from_id: String,
+        to_id: String,
+    },
     #[error(transparent)]
     Storage(#[from] DynoError),
 }
@@ -35,7 +41,9 @@ impl IntoResponse for RegistryError {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::AlreadyExists(_) => StatusCode::CONFLICT,
-            Self::NotFound(_) | Self::NodeNotFound { .. } => StatusCode::NOT_FOUND,
+            Self::NotFound(_) | Self::NodeNotFound { .. } | Self::EdgeNotFound { .. } => {
+                StatusCode::NOT_FOUND
+            }
             Self::Storage(inner) => status_for_dyno_error(inner),
         };
         (status, self.to_string()).into_response()

@@ -16,6 +16,7 @@ use dynograph_core::{Schema, Value};
 
 use crate::{
     auth::{AuthProvider, NoAuth},
+    edge_response::EdgeResponse,
     node_response::NodeResponse,
     registry::{GraphEntry, GraphRegistry, RegistryError},
     schema_response::SchemaResponse,
@@ -50,6 +51,11 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
             get(get_node).put(replace_node).delete(delete_node),
+        )
+        .route("/v1/graphs/{id}/edges", post(create_edge))
+        .route(
+            "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
+            get(get_edge).patch(merge_edge).delete(delete_edge),
         )
         .with_state(state)
 }
@@ -183,5 +189,100 @@ async fn delete_node(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RegistryError::NodeNotFound { node_type, node_id })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateEdgeBody {
+    edge_type: String,
+    from_type: String,
+    from_id: String,
+    to_type: String,
+    to_id: String,
+    #[serde(default)]
+    properties: HashMap<String, Value>,
+}
+
+async fn create_edge(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CreateEdgeBody>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let CreateEdgeBody {
+        edge_type,
+        from_type,
+        from_id,
+        to_type,
+        to_id,
+        properties,
+    } = body;
+    let stored = entry.with_engine_write(|engine| {
+        engine.create_edge(
+            &id, &edge_type, &from_type, &from_id, &to_type, &to_id, properties,
+        )
+    })?;
+    Ok((StatusCode::CREATED, Json(EdgeResponse::from(stored))).into_response())
+}
+
+async fn get_edge(
+    State(state): State<AppState>,
+    Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let stored = entry
+        .with_engine_read(|engine| engine.get_edge(&id, &edge_type, &from_id, &to_id))?
+        .ok_or(RegistryError::EdgeNotFound {
+            edge_type,
+            from_id,
+            to_id,
+        })?;
+    Ok(Json(EdgeResponse::from(stored)).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct MergeEdgeBody {
+    #[serde(default)]
+    properties: HashMap<String, Value>,
+}
+
+/// PATCH semantics — partial-update of the edge's property map. The
+/// underlying storage call is `merge_edge_properties`. This mirrors
+/// node CRUD's PUT (REPLACE) shape but with the verb flipped to match
+/// the storage primitive's asymmetry — see `replace_node_properties`
+/// docs for why nodes don't have a merge primitive.
+async fn merge_edge(
+    State(state): State<AppState>,
+    Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
+    Json(body): Json<MergeEdgeBody>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let stored = entry
+        .with_engine_write(|engine| {
+            engine.merge_edge_properties(&id, &edge_type, &from_id, &to_id, body.properties)
+        })?
+        .ok_or(RegistryError::EdgeNotFound {
+            edge_type,
+            from_id,
+            to_id,
+        })?;
+    Ok(Json(EdgeResponse::from(stored)).into_response())
+}
+
+async fn delete_edge(
+    State(state): State<AppState>,
+    Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
+) -> Result<StatusCode, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let existed =
+        entry.with_engine_write(|engine| engine.delete_edge(&id, &edge_type, &from_id, &to_id))?;
+    if existed {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(RegistryError::EdgeNotFound {
+            edge_type,
+            from_id,
+            to_id,
+        })
     }
 }
