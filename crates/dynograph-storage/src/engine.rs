@@ -58,6 +58,56 @@ enum Backend {
     },
 }
 
+impl Backend {
+    /// Pick the in-memory store for `cf`. Errors when called against a
+    /// `Rocks` backend or an unknown CF. Used by every Memory-path
+    /// op (get / put / delete / prefix_scan / prefix_delete) so the
+    /// five-way `match cf` shape isn't repeated.
+    fn memory_store_mut(&mut self, cf: &str) -> Result<&mut HashMap<Vec<u8>, Vec<u8>>, DynoError> {
+        match self {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => match cf {
+                CF_NODES => Ok(nodes),
+                CF_EDGES => Ok(edges),
+                CF_ADJ_OUT => Ok(adj_out),
+                CF_ADJ_IN => Ok(adj_in),
+                CF_NODE_IDX => Ok(node_idx),
+                _ => Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
+            },
+            Backend::Rocks { .. } => Err(DynoError::Storage(
+                "memory_store_mut called on Rocks backend".to_string(),
+            )),
+        }
+    }
+
+    fn memory_store(&self, cf: &str) -> Result<&HashMap<Vec<u8>, Vec<u8>>, DynoError> {
+        match self {
+            Backend::Memory {
+                nodes,
+                edges,
+                adj_out,
+                adj_in,
+                node_idx,
+            } => match cf {
+                CF_NODES => Ok(nodes),
+                CF_EDGES => Ok(edges),
+                CF_ADJ_OUT => Ok(adj_out),
+                CF_ADJ_IN => Ok(adj_in),
+                CF_NODE_IDX => Ok(node_idx),
+                _ => Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
+            },
+            Backend::Rocks { .. } => Err(DynoError::Storage(
+                "memory_store called on Rocks backend".to_string(),
+            )),
+        }
+    }
+}
+
 /// Per-column-family RocksDB options tuned for access patterns.
 fn cf_options(cf_name: &str) -> Options {
     let mut opts = Options::default();
@@ -116,15 +166,10 @@ impl CfId {
 }
 
 /// One operation queued in a batch. Applied in insertion order at
-/// `commit_batch` time.
-///
-/// Caveat for `PrefixDelete` inside a batch: at commit time the
-/// matching-key set is computed against the *pre-batch on-disk* state,
-/// not against any puts queued earlier in the same batch. So
-/// `Put { key: "g1\x00X" }` followed by `PrefixDelete { prefix: "g1\x00X" }`
-/// will leave the put in place rather than removing it. Callers that
-/// need stricter semantics should avoid interleaving prefix-deletes
-/// with same-prefix puts in one batch.
+/// `commit_batch` time, with `PrefixDelete` shadowing any earlier
+/// `Put` whose key matches the prefix. (Memory: in-order loop. Rocks:
+/// `delete_range_cf` adds a range tombstone that supersedes earlier
+/// puts in the same `WriteBatch` by sequence number.)
 enum BufferedOp {
     Put {
         cf: CfId,
@@ -156,11 +201,9 @@ pub struct StorageEngine {
     /// LRU read cache for node lookups and adjacency scans.
     /// Mutex allows cache updates through &self (get path is immutable at API level).
     read_cache: Mutex<ReadCache>,
-    /// Write batch buffer — when active, puts/deletes/prefix-deletes are
-    /// buffered and committed atomically. Mixed put + delete ops in the
-    /// same batch are now actually atomic (was tech-debt C4: only puts
-    /// were buffered, deletes ran immediately and broke the atomicity
-    /// guarantee callers assumed).
+    /// When `Some`, all writes (put / delete / prefix-delete) buffer
+    /// here instead of hitting the backend. `commit_batch` flushes
+    /// atomically; `discard_batch` drops them.
     write_buffer: Option<Vec<BufferedOp>>,
 }
 
@@ -227,26 +270,14 @@ impl StorageEngine {
             return Ok(());
         }
 
-        // Invalidate cache now — the write is going directly to the backend
-        self.read_cache.lock().unwrap().invalidate(&key);
+        self.read_cache
+            .lock()
+            .expect("read_cache lock poisoned")
+            .invalidate(&key);
 
         match &mut self.backend {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-            } => {
-                let store = match cf {
-                    CF_NODES => nodes,
-                    CF_EDGES => edges,
-                    CF_ADJ_OUT => adj_out,
-                    CF_ADJ_IN => adj_in,
-                    CF_NODE_IDX => node_idx,
-                    _ => return Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-                };
-                store.insert(key, value);
+            Backend::Memory { .. } => {
+                self.backend.memory_store_mut(cf)?.insert(key, value);
                 Ok(())
             }
             Backend::Rocks { db } => {
@@ -262,7 +293,7 @@ impl StorageEngine {
     fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, DynoError> {
         // For node lookups, use the read cache (single lock acquisition)
         if cf == CF_NODES {
-            let mut cache = self.read_cache.lock().unwrap();
+            let mut cache = self.read_cache.lock().expect("read_cache lock poisoned");
             if let Some(data) = cache.get(key) {
                 return Ok(Some(data));
             }
@@ -283,23 +314,7 @@ impl StorageEngine {
 
     fn backend_get(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, DynoError> {
         match &self.backend {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-            } => {
-                let store = match cf {
-                    CF_NODES => nodes,
-                    CF_EDGES => edges,
-                    CF_ADJ_OUT => adj_out,
-                    CF_ADJ_IN => adj_in,
-                    CF_NODE_IDX => node_idx,
-                    _ => return Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-                };
-                Ok(store.get(key).cloned())
-            }
+            Backend::Memory { .. } => Ok(self.backend.memory_store(cf)?.get(key).cloned()),
             Backend::Rocks { db } => {
                 let cf_handle = db
                     .cf_handle(cf)
@@ -310,57 +325,36 @@ impl StorageEngine {
         }
     }
 
-    fn delete(&mut self, cf: &str, key: &[u8]) -> Result<bool, DynoError> {
-        // If batching, the existence answer must reflect pre-batch disk
-        // state to match unbatched semantics — peek the backend before
-        // buffering the delete. The cache stays untouched until commit.
-        if self.write_buffer.is_some() {
+    /// Delete a key. Idempotent — deleting a missing key is a no-op,
+    /// not an error. Public callers that need an existence-bool should
+    /// `get` first; embedding the bool here cost a disk read per delete
+    /// and only two of nine internal callers used it.
+    fn delete(&mut self, cf: &str, key: &[u8]) -> Result<(), DynoError> {
+        if let Some(ref mut buffer) = self.write_buffer {
             let cf_id = CfId::from_str(cf)
                 .ok_or_else(|| DynoError::Storage(format!("Unknown CF: {}", cf)))?;
-            let existed = self.backend_get(cf, key)?.is_some();
-            self.write_buffer
-                .as_mut()
-                .unwrap()
-                .push(BufferedOp::Delete {
-                    cf: cf_id,
-                    key: key.to_vec(),
-                });
-            return Ok(existed);
+            buffer.push(BufferedOp::Delete {
+                cf: cf_id,
+                key: key.to_vec(),
+            });
+            return Ok(());
         }
 
-        self.read_cache.lock().unwrap().invalidate(key);
+        self.read_cache
+            .lock()
+            .expect("read_cache lock poisoned")
+            .invalidate(key);
         match &mut self.backend {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-            } => {
-                let store = match cf {
-                    CF_NODES => nodes,
-                    CF_EDGES => edges,
-                    CF_ADJ_OUT => adj_out,
-                    CF_ADJ_IN => adj_in,
-                    CF_NODE_IDX => node_idx,
-                    _ => return Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-                };
-                Ok(store.remove(key).is_some())
+            Backend::Memory { .. } => {
+                self.backend.memory_store_mut(cf)?.remove(key);
+                Ok(())
             }
             Backend::Rocks { db } => {
                 let cf_handle = db
                     .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                // Check existence first
-                let existed = db
-                    .get_cf(&cf_handle, key)
-                    .map_err(|e| DynoError::Storage(e.to_string()))?
-                    .is_some();
-                if existed {
-                    db.delete_cf(&cf_handle, key)
-                        .map_err(|e| DynoError::Storage(e.to_string()))?;
-                }
-                Ok(existed)
+                db.delete_cf(&cf_handle, key)
+                    .map_err(|e| DynoError::Storage(e.to_string()))
             }
         }
     }
@@ -372,27 +366,13 @@ impl StorageEngine {
     )]
     fn prefix_scan(&self, cf: &str, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DynoError> {
         match &self.backend {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-            } => {
-                let store = match cf {
-                    CF_NODES => nodes,
-                    CF_EDGES => edges,
-                    CF_ADJ_OUT => adj_out,
-                    CF_ADJ_IN => adj_in,
-                    CF_NODE_IDX => node_idx,
-                    _ => return Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-                };
-                Ok(store
-                    .iter()
-                    .filter(|(k, _)| k.starts_with(prefix))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect())
-            }
+            Backend::Memory { .. } => Ok(self
+                .backend
+                .memory_store(cf)?
+                .iter()
+                .filter(|(k, _)| k.starts_with(prefix))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()),
             Backend::Rocks { db } => {
                 let cf_handle = db
                     .cf_handle(cf)
@@ -426,40 +406,38 @@ impl StorageEngine {
             return Ok(());
         }
         match &mut self.backend {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-            } => {
-                let store = match cf {
-                    CF_NODES => nodes,
-                    CF_EDGES => edges,
-                    CF_ADJ_OUT => adj_out,
-                    CF_ADJ_IN => adj_in,
-                    CF_NODE_IDX => node_idx,
-                    _ => return Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-                };
-                store.retain(|k, _| !k.starts_with(prefix));
+            Backend::Memory { .. } => {
+                self.backend
+                    .memory_store_mut(cf)?
+                    .retain(|k, _| !k.starts_with(prefix));
                 Ok(())
             }
             Backend::Rocks { db } => {
                 let cf_handle = db
                     .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                // Collect keys to delete first (can't delete while iterating)
-                let keys: Vec<Vec<u8>> = db
-                    .iterator_cf(
-                        &cf_handle,
-                        IteratorMode::From(prefix, rocksdb::Direction::Forward),
-                    )
-                    .take_while(|item| item.as_ref().is_ok_and(|(k, _)| k.starts_with(prefix)))
-                    .filter_map(|item| item.ok().map(|(k, _)| k.to_vec()))
-                    .collect();
-                for key in keys {
-                    db.delete_cf(&cf_handle, &key)
+                // Single range tombstone via `delete_range_cf` when an
+                // exclusive upper bound exists (almost always — the only
+                // miss is an all-`0xFF` prefix). Fall back to per-key
+                // deletes otherwise. NOTE: do not call while a snapshot
+                // taken before this point is held — RocksDB's range
+                // tombstones interact badly with older snapshots.
+                if let Some(end) = crate::keys::next_prefix(prefix) {
+                    db.delete_range_cf(&cf_handle, prefix, &end)
                         .map_err(|e| DynoError::Storage(e.to_string()))?;
+                } else {
+                    let keys: Vec<Vec<u8>> = db
+                        .iterator_cf(
+                            &cf_handle,
+                            IteratorMode::From(prefix, rocksdb::Direction::Forward),
+                        )
+                        .take_while(|item| item.as_ref().is_ok_and(|(k, _)| k.starts_with(prefix)))
+                        .filter_map(|item| item.ok().map(|(k, _)| k.to_vec()))
+                        .collect();
+                    for key in keys {
+                        db.delete_cf(&cf_handle, &key)
+                            .map_err(|e| DynoError::Storage(e.to_string()))?;
+                    }
                 }
                 Ok(())
             }
@@ -605,20 +583,23 @@ impl StorageEngine {
         let outgoing = self.scan_outgoing_edges(graph_id, node_id, None)?;
         let incoming = self.scan_incoming_edges(graph_id, node_id, None)?;
 
-        // Step 2: own-node cleanup.
+        // Step 2: own-node cleanup. We need the existence answer for the
+        // public-API bool, and (when this type has indexed properties) the
+        // stored properties to reconcile reverse-index entries — fold both
+        // into a single `get` and decode the value lazily.
         let key = crate::keys::node_key(graph_id, node_type, node_id);
+        let raw = self.get(CF_NODES, &key)?;
+        let existed = raw.is_some();
         let old_properties = if self.schema.has_indexed_properties(node_type) {
-            match self.get(CF_NODES, &key)? {
-                Some(bytes) => Some(
-                    rmp_serde::from_slice::<HashMap<String, Value>>(&bytes)
-                        .map_err(|e| DynoError::Serialization(e.to_string()))?,
-                ),
-                None => None,
-            }
+            raw.map(|bytes| {
+                rmp_serde::from_slice::<HashMap<String, Value>>(&bytes)
+                    .map_err(|e| DynoError::Serialization(e.to_string()))
+            })
+            .transpose()?
         } else {
             None
         };
-        let existed = self.delete(CF_NODES, &key)?;
+        self.delete(CF_NODES, &key)?;
         if let Some(props) = old_properties {
             self.delete_index_entries(graph_id, node_type, node_id, &props)?;
         }
@@ -753,7 +734,8 @@ impl StorageEngine {
         to_id: &str,
     ) -> Result<bool, DynoError> {
         let edge_key = crate::keys::edge_key(graph_id, edge_type, from_id, to_id);
-        let existed = self.delete(CF_EDGES, &edge_key)?;
+        let existed = self.get(CF_EDGES, &edge_key)?.is_some();
+        self.delete(CF_EDGES, &edge_key)?;
 
         let adj_out = crate::keys::adj_out_key(graph_id, from_id, edge_type, to_id);
         let adj_in = crate::keys::adj_in_key(graph_id, to_id, edge_type, from_id);
@@ -1024,12 +1006,11 @@ impl StorageEngine {
             return Ok(0);
         }
 
-        // Invalidate cache for every key (or prefix) the batch touched.
-        // Done before applying the batch so any concurrent reader either
-        // sees pre-batch on-disk + a missed cache entry (re-fetches)
-        // or post-batch on-disk + a missed cache entry — never stale data.
+        // Invalidate cache before applying the batch so a concurrent
+        // reader either sees pre-batch + cache-miss (re-fetches) or
+        // post-batch + cache-miss — never stale data.
         {
-            let mut cache = self.read_cache.lock().unwrap();
+            let mut cache = self.read_cache.lock().expect("read_cache lock poisoned");
             for op in &buffer {
                 match op {
                     BufferedOp::Put { key, .. } | BufferedOp::Delete { key, .. } => {
@@ -1043,21 +1024,15 @@ impl StorageEngine {
         }
 
         match &mut self.backend {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-            } => {
+            Backend::Memory { .. } => {
                 for op in buffer {
-                    let store: &mut HashMap<Vec<u8>, Vec<u8>> = match op.cf() {
-                        CfId::Nodes => nodes,
-                        CfId::Edges => edges,
-                        CfId::AdjOut => adj_out,
-                        CfId::AdjIn => adj_in,
-                        CfId::NodeIdx => node_idx,
-                    };
+                    // memory_store_mut errors only on Rocks/unknown-cf;
+                    // CfId::as_str produces only known CFs, so unwrap is
+                    // unreachable in practice.
+                    let store = self
+                        .backend
+                        .memory_store_mut(op.cf().as_str())
+                        .expect("CfId is always a known CF");
                     match op {
                         BufferedOp::Put { key, value, .. } => {
                             store.insert(key, value);
@@ -1072,11 +1047,26 @@ impl StorageEngine {
                 }
             }
             Backend::Rocks { db } => {
+                // Resolve all 5 cf_handles up front so the per-op loop
+                // doesn't re-do the string-keyed lookup against the same
+                // five names — that's N HashMap lookups under an
+                // internal lock for an N-op batch, all redundant.
+                let handles = [
+                    db.cf_handle(CfId::Nodes.as_str()),
+                    db.cf_handle(CfId::Edges.as_str()),
+                    db.cf_handle(CfId::AdjOut.as_str()),
+                    db.cf_handle(CfId::AdjIn.as_str()),
+                    db.cf_handle(CfId::NodeIdx.as_str()),
+                ];
+                let handle_for = |cf: CfId| -> Result<_, DynoError> {
+                    handles[cf as usize]
+                        .clone()
+                        .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf.as_str())))
+                };
+
                 let mut batch = WriteBatch::default();
                 for op in &buffer {
-                    let cf_handle = db.cf_handle(op.cf().as_str()).ok_or_else(|| {
-                        DynoError::Storage(format!("CF not found: {}", op.cf().as_str()))
-                    })?;
+                    let cf_handle = handle_for(op.cf())?;
                     match op {
                         BufferedOp::Put { key, value, .. } => {
                             batch.put_cf(&cf_handle, key, value);
@@ -1085,18 +1075,25 @@ impl StorageEngine {
                             batch.delete_cf(&cf_handle, key);
                         }
                         BufferedOp::PrefixDelete { prefix, .. } => {
-                            // See BufferedOp doc: matching-key set is
-                            // computed against pre-batch disk state.
-                            for item in db.iterator_cf(
-                                &cf_handle,
-                                IteratorMode::From(prefix, rocksdb::Direction::Forward),
-                            ) {
-                                let (key, _) =
-                                    item.map_err(|e| DynoError::Storage(e.to_string()))?;
-                                if !key.starts_with(prefix) {
-                                    break;
+                            // One range tombstone instead of N
+                            // per-key deletes; falls back to iterate-
+                            // and-delete only for the all-`0xFF` prefix
+                            // corner case where no exclusive upper
+                            // bound exists.
+                            if let Some(end) = crate::keys::next_prefix(prefix) {
+                                batch.delete_range_cf(&cf_handle, prefix, &end);
+                            } else {
+                                for item in db.iterator_cf(
+                                    &cf_handle,
+                                    IteratorMode::From(prefix, rocksdb::Direction::Forward),
+                                ) {
+                                    let (key, _) =
+                                        item.map_err(|e| DynoError::Storage(e.to_string()))?;
+                                    if !key.starts_with(prefix) {
+                                        break;
+                                    }
+                                    batch.delete_cf(&cf_handle, &key);
                                 }
-                                batch.delete_cf(&cf_handle, &key);
                             }
                         }
                     }
@@ -1120,12 +1117,18 @@ impl StorageEngine {
 
     /// Get cache statistics: (hits, misses, current_size).
     pub fn cache_stats(&self) -> (u64, u64, usize) {
-        self.read_cache.lock().unwrap().stats()
+        self.read_cache
+            .lock()
+            .expect("read_cache lock poisoned")
+            .stats()
     }
 
     /// Clear the entire read cache.
     pub fn clear_cache(&self) {
-        self.read_cache.lock().unwrap().clear();
+        self.read_cache
+            .lock()
+            .expect("read_cache lock poisoned")
+            .clear();
     }
 }
 
@@ -1988,13 +1991,9 @@ schema:
 
     #[test]
     fn batched_replace_on_indexed_node_is_atomic_against_index_scans() {
-        // The C4 bug: replace_node_properties on an indexed node deletes
-        // the old index entry and writes the new one. Before C4 the
-        // delete bypassed the buffer and ran immediately, so any reader
-        // between the delete and commit_batch saw the index in a
-        // partially-applied state — scans by the OLD value missed the
-        // node mid-batch, and scans by the NEW value also missed it
-        // (the put was still buffered). Now both ops buffer.
+        // Replace on an indexed node must apply the index delete + put
+        // atomically — index scans may not see a "deleted-but-not-yet-
+        // re-written" state mid-batch.
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
             .create_node(
@@ -2015,9 +2014,7 @@ schema:
             )
             .unwrap();
 
-        // Pre-commit: index is unchanged. f1 still indexed under sA;
-        // no entry under sB. (Was broken before C4: sA scan returned
-        // empty mid-batch because delete_index_entries fired immediately.)
+        // Pre-commit: index unchanged — f1 still under sA, no sB entry.
         let sa = Value::from("sA");
         let sb = Value::from("sB");
         assert_eq!(

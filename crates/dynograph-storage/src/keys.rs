@@ -160,6 +160,23 @@ pub fn node_idx_key_node_id<'a>(key: &'a [u8], value_prefix: &[u8]) -> Option<&'
     key.strip_prefix(value_prefix)
 }
 
+/// Exclusive upper bound for a prefix-range scan or `delete_range_cf`.
+/// Increments the last non-`0xFF` byte and truncates trailing `0xFF`s,
+/// e.g. `[g, 1, 0x00]` → `[g, 1, 0x01]`. Returns `None` if every byte
+/// in the prefix is `0xFF` (no bounded successor exists — caller must
+/// fall back to per-key iteration).
+pub fn next_prefix(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut end = prefix.to_vec();
+    while let Some(last) = end.last_mut() {
+        if *last < 0xFF {
+            *last += 1;
+            return Some(end);
+        }
+        end.pop();
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +257,36 @@ mod tests {
         assert_eq!(value_to_index_bytes(&Value::Null), None);
         assert_eq!(value_to_index_bytes(&Value::Float(1.0)), None);
         assert_eq!(value_to_index_bytes(&Value::List(vec![])), None);
+    }
+
+    #[test]
+    fn next_prefix_increments_last_byte() {
+        assert_eq!(next_prefix(b"g1\x00"), Some(b"g1\x01".to_vec()));
+        assert_eq!(next_prefix(b"abc"), Some(b"abd".to_vec()));
+    }
+
+    #[test]
+    fn next_prefix_carries_through_trailing_ff() {
+        assert_eq!(next_prefix(&[b'a', 0xFF]), Some(vec![b'b']));
+        assert_eq!(next_prefix(&[b'a', 0xFF, 0xFF]), Some(vec![b'b']));
+    }
+
+    #[test]
+    fn next_prefix_all_ff_returns_none() {
+        assert_eq!(next_prefix(&[0xFF, 0xFF]), None);
+        assert_eq!(next_prefix(&[]), None);
+    }
+
+    #[test]
+    fn next_prefix_bounds_a_real_scan() {
+        // For prefix `g1\x00alice\x00`, every key starting with that
+        // prefix must compare strictly less than next_prefix(prefix).
+        let prefix = adj_out_prefix("g1", "alice");
+        let end = next_prefix(&prefix).unwrap();
+        let in_range = adj_out_key("g1", "alice", "KNOWS", "bob");
+        let out_of_range = adj_out_key("g1", "alice2", "KNOWS", "bob");
+        assert!(in_range.as_slice() < end.as_slice());
+        assert!(!(out_of_range.as_slice() < end.as_slice()));
     }
 
     #[test]
