@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-resolution"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dynograph-core",
  "dynograph-vector",
@@ -145,7 +145,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-storage"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dynograph-core",
  "rmp-serde",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-vector"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rand",
  "serde",

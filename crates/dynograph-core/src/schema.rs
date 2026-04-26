@@ -107,6 +107,11 @@ pub struct PropertyDef {
     /// For numeric types: [min, max].
     #[serde(default)]
     pub range: Option<(f64, f64)>,
+    /// Free-text human description of the property. Carried through
+    /// schema round-trips for documentation / UI consumers; not used
+    /// by validation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 /// Supported property types.
@@ -705,6 +710,85 @@ schema:
         assert_eq!(char_indexed, vec!["name"]);
         assert!(schema.indexed_properties("Location").is_empty());
         assert!(schema.indexed_properties("UnknownType").is_empty());
+    }
+
+    #[test]
+    fn property_description_round_trips_yaml() {
+        // Property carries a description through parse → re-serialize → re-parse.
+        // Byte-equal isn't a useful assertion across serde_yaml because HashMap
+        // ordering and quoting normalization differ; structural round-trip is
+        // what consumers actually rely on.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Item:
+      properties:
+        name:
+          type: string
+          description: "Human-readable label"
+  edge_types: {}
+"#;
+        let schema = Schema::from_yaml(yaml).unwrap();
+        let prop = &schema.node_types["Item"].properties["name"];
+        assert_eq!(prop.description.as_deref(), Some("Human-readable label"));
+
+        let serialized = serde_yaml::to_string(&schema).unwrap();
+        let reparsed: Schema = serde_yaml::from_str(&serialized).unwrap();
+        assert_eq!(
+            reparsed.node_types["Item"].properties["name"].description.as_deref(),
+            Some("Human-readable label"),
+        );
+
+        // Properties without a description omit the field on serialization
+        // (skip_serializing_if). Verifies we don't bloat YAML for the common case.
+        let bare_yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Item:
+      properties:
+        name: { type: string }
+  edge_types: {}
+"#;
+        let bare = Schema::from_yaml(bare_yaml).unwrap();
+        let bare_serialized = serde_yaml::to_string(&bare).unwrap();
+        assert!(
+            !bare_serialized.contains("description"),
+            "missing description should not be serialized: {}",
+            bare_serialized
+        );
+    }
+
+    #[test]
+    fn property_description_round_trips_json() {
+        let json = r#"{
+            "name": "t",
+            "version": 1,
+            "node_types": {
+                "Item": {
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Human-readable label"
+                        }
+                    }
+                }
+            },
+            "edge_types": {}
+        }"#;
+        let schema = Schema::from_json(json).unwrap();
+        let prop = &schema.node_types["Item"].properties["name"];
+        assert_eq!(prop.description.as_deref(), Some("Human-readable label"));
+
+        let serialized = serde_json::to_string(&schema).unwrap();
+        let reparsed: Schema = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            reparsed.node_types["Item"].properties["name"].description.as_deref(),
+            Some("Human-readable label"),
+        );
     }
 
     #[test]
