@@ -558,12 +558,15 @@ impl StorageEngine {
         Ok(existed)
     }
 
-    /// Replace a node's properties in place. Leaves edges + adjacency entries
-    /// untouched — the opposite of `delete_node` + `create_node`, which silently
-    /// wipes the node's incoming adjacency prefix and rebuilds outgoing edges
-    /// with no cross-type awareness. Returns Ok(None) when the node doesn't
-    /// exist; callers upgrade that to a 404 or create-if-missing at their layer.
-    pub fn update_node_properties(
+    /// REPLACE a node's properties — the new map is the complete new state;
+    /// any property not in `properties` is dropped from the stored node
+    /// (subject to schema defaults being re-applied by `validate_node`).
+    /// Use `merge_edge_properties` as the analogous shape for partial-update
+    /// semantics on edges; if you need merge semantics for nodes, do a
+    /// `get_node` + caller-side merge + `replace_node_properties` round-trip.
+    /// Edges + adjacency entries are left untouched. Returns `Ok(None)`
+    /// when the node doesn't exist.
+    pub fn replace_node_properties(
         &mut self,
         graph_id: &str,
         node_type: &str,
@@ -671,8 +674,13 @@ impl StorageEngine {
         Ok(existed)
     }
 
-    /// Update properties on an existing edge (read-merge-write across all 3 CFs).
-    pub fn update_edge_properties(
+    /// MERGE properties into an existing edge — `updates` overlays the
+    /// existing properties, missing keys are preserved. Read-merge-write
+    /// across all 3 CFs (CF_EDGES + adj_out + adj_in). Counterpart of
+    /// `replace_node_properties` (which is REPLACE, not merge — see that
+    /// method's doc for why the asymmetry exists at the storage layer).
+    /// Returns `Ok(None)` when the edge doesn't exist.
+    pub fn merge_edge_properties(
         &mut self,
         graph_id: &str,
         edge_type: &str,
@@ -1315,7 +1323,7 @@ schema:
 
         // Reparent f1 from sA to sB.
         engine
-            .update_node_properties(
+            .replace_node_properties(
                 "g1",
                 "Fragment",
                 "f1",
@@ -1432,7 +1440,7 @@ schema:
                 )
                 .unwrap();
             engine
-                .update_node_properties(
+                .replace_node_properties(
                     "g1",
                     "Fragment",
                     "f2",
