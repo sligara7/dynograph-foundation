@@ -1,0 +1,11 @@
+[package]
+name = "dynograph-resolution"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dynograph-core = { path = "../dynograph-core" }
+dynograph-vector = { path = "../dynograph-vector" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

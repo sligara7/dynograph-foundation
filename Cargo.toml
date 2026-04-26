@@ -1,0 +1,38 @@
+# dynograph-foundation — shared, domain-agnostic foundation crates for
+# graph-based projects (ir2, market_graph, cure, storyflow, ...).
+#
+# Crates here are intentionally domain-neutral. Domain-specific
+# extractors, schemas, and servers live in their consumer projects and
+# depend on these crates as path / git / version dependencies.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/dynograph-core",
+    "crates/dynograph-storage",
+    "crates/dynograph-resolution",
+    "crates/dynograph-vector",
+    "crates/dynograph-introspection",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Anthony Sligar <sligara7@gmail.com>"]
+repository = "https://github.com/sligara7/dynograph-foundation"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+rmp-serde = "1"
+
+# Storage
+rocksdb = "0.22"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+thiserror = "2"
+tracing = "0.1"

@@ -1,0 +1,9 @@
+[package]
+name = "dynograph-introspection"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Schema for an LLM's persistent self-knowledge graph — Concept, Assumption, Correction, Blindspot. The empirical self-knowledge layer; not a soul."
+
+[dependencies]
+dynograph-core = { path = "../dynograph-core" }
