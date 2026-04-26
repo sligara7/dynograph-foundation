@@ -46,7 +46,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/v1/graphs", post(create_graph))
-        .route("/v1/graphs/:id", get(get_graph))
+        .route("/v1/graphs/{id}", get(get_graph))
         .with_state(state)
 }
 
