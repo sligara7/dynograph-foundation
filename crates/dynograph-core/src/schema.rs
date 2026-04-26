@@ -294,6 +294,13 @@ impl Schema {
                 }
             }
             (PropertyType::ListString, Value::List(_)) => {}
+            // Datetime is stored as an ISO-8601 string. We accept any
+            // string here rather than parsing — consumers that need
+            // strict format validation can layer their own check on top.
+            // Without this arm a `type: datetime` property would reject
+            // every value via the catch-all below (silent failure mode
+            // until 2026-04-26).
+            (PropertyType::Datetime, Value::String(_)) => {}
             _ => {
                 return Err(DynoError::Validation {
                     node_type: node_type.to_string(),
@@ -637,6 +644,30 @@ schema:
         // Invalid enum
         let result = schema.validate_property("Character", "role", &Value::from("villain"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_datetime_property_accepts_iso_string() {
+        // Regression: tech-debt C2. Before fix, every value was rejected
+        // for `type: datetime` because the validator's match had no
+        // Datetime arm and fell through to the catch-all error case.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Event:
+      properties:
+        when: { type: datetime }
+  edge_types: {}
+"#;
+        let schema = Schema::from_yaml(yaml).unwrap();
+        let r = schema.validate_property("Event", "when", &Value::from("2026-04-26T00:00:00Z"));
+        assert!(r.is_ok(), "datetime string should validate, got: {:?}", r);
+
+        // Non-string still rejected.
+        let r = schema.validate_property("Event", "when", &Value::Int(42));
+        assert!(r.is_err(), "int should not validate against datetime");
     }
 
     #[test]
