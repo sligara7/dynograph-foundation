@@ -1,5 +1,6 @@
 //! axum app + route handlers.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::{
@@ -9,12 +10,13 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-use dynograph_core::Schema;
+use dynograph_core::{Schema, Value};
 
 use crate::{
     auth::{AuthProvider, NoAuth},
+    node_response::NodeResponse,
     registry::{GraphRegistry, RegistryError},
     schema_response::SchemaResponse,
 };
@@ -42,8 +44,13 @@ impl AppState {
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/v1/graphs", post(create_graph))
-        .route("/v1/graphs/{id}", get(get_graph))
+        .route("/v1/graphs", get(list_graphs).post(create_graph))
+        .route("/v1/graphs/{id}", get(get_graph).delete(delete_graph))
+        .route("/v1/graphs/{id}/nodes", post(create_node))
+        .route(
+            "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
+            get(get_node).put(replace_node).delete(delete_node),
+        )
         .with_state(state)
 }
 
@@ -55,6 +62,17 @@ async fn health() -> &'static str {
 struct CreateGraphBody {
     id: String,
     schema: Schema,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphListResponse {
+    graphs: Vec<String>,
+}
+
+async fn list_graphs(State(state): State<AppState>) -> Json<GraphListResponse> {
+    Json(GraphListResponse {
+        graphs: state.registry.list_ids(),
+    })
 }
 
 async fn create_graph(
@@ -78,4 +96,97 @@ async fn get_graph(
     let schema = entry.with_engine_read(|engine| engine.schema().clone());
     let response = SchemaResponse::with_cached_hash(id, schema, entry.content_hash().to_string());
     Ok(Json(response).into_response())
+}
+
+async fn delete_graph(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, RegistryError> {
+    state.registry.delete_graph(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateNodeBody {
+    node_type: String,
+    node_id: String,
+    #[serde(default)]
+    properties: HashMap<String, Value>,
+}
+
+async fn create_node(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CreateNodeBody>,
+) -> Result<Response, RegistryError> {
+    let entry = state
+        .registry
+        .get(&id)
+        .ok_or(RegistryError::NotFound(id.clone()))?;
+    let CreateNodeBody {
+        node_type,
+        node_id,
+        properties,
+    } = body;
+    let stored = entry
+        .with_engine_write(|engine| engine.create_node(&id, &node_type, &node_id, properties))?;
+    Ok((StatusCode::CREATED, Json(NodeResponse::from(stored))).into_response())
+}
+
+async fn get_node(
+    State(state): State<AppState>,
+    Path((id, node_type, node_id)): Path<(String, String, String)>,
+) -> Result<Response, RegistryError> {
+    let entry = state
+        .registry
+        .get(&id)
+        .ok_or_else(|| RegistryError::NotFound(id.clone()))?;
+    let stored = entry
+        .with_engine_read(|engine| engine.get_node(&id, &node_type, &node_id))?
+        .ok_or_else(|| RegistryError::NotFound(format!("{node_type}/{node_id}")))?;
+    Ok(Json(NodeResponse::from(stored)).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct ReplaceNodeBody {
+    #[serde(default)]
+    properties: HashMap<String, Value>,
+}
+
+/// PUT semantics — full replacement of the node's property map (the
+/// underlying storage call is `replace_node_properties`). PATCH is
+/// not exposed because there is no merge primitive on nodes; if a
+/// caller needs partial-update semantics they GET, mutate, PUT.
+async fn replace_node(
+    State(state): State<AppState>,
+    Path((id, node_type, node_id)): Path<(String, String, String)>,
+    Json(body): Json<ReplaceNodeBody>,
+) -> Result<Response, RegistryError> {
+    let entry = state
+        .registry
+        .get(&id)
+        .ok_or_else(|| RegistryError::NotFound(id.clone()))?;
+    let stored = entry
+        .with_engine_write(|engine| {
+            engine.replace_node_properties(&id, &node_type, &node_id, body.properties)
+        })?
+        .ok_or_else(|| RegistryError::NotFound(format!("{node_type}/{node_id}")))?;
+    Ok(Json(NodeResponse::from(stored)).into_response())
+}
+
+async fn delete_node(
+    State(state): State<AppState>,
+    Path((id, node_type, node_id)): Path<(String, String, String)>,
+) -> Result<StatusCode, RegistryError> {
+    let entry = state
+        .registry
+        .get(&id)
+        .ok_or_else(|| RegistryError::NotFound(id.clone()))?;
+    let existed =
+        entry.with_engine_write(|engine| engine.delete_node(&id, &node_type, &node_id))?;
+    if existed {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(RegistryError::NotFound(format!("{node_type}/{node_id}")))
+    }
 }

@@ -31,12 +31,36 @@ pub enum RegistryError {
 
 impl IntoResponse for RegistryError {
     fn into_response(self) -> Response {
-        let status = match self {
+        let status = match &self {
             Self::AlreadyExists(_) => StatusCode::CONFLICT,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
-            Self::Storage(_) => StatusCode::BAD_REQUEST,
+            Self::Storage(inner) => status_for_dyno_error(inner),
         };
         (status, self.to_string()).into_response()
+    }
+}
+
+/// Map `DynoError` variants to HTTP status. Validation / unknown-type /
+/// schema / invalid-edge are caller errors (400). NodeNotFound /
+/// EdgeNotFound surface as 404 — though node CRUD handlers prefer to
+/// detect missing resources via `Option` returns from the engine and
+/// emit their own 404s, this catch-all keeps any deeper layer that
+/// raises `*NotFound` mapped honestly. The remaining variants
+/// (storage, serialization, query, resolution, extraction) are
+/// internal failures (500).
+fn status_for_dyno_error(e: &DynoError) -> StatusCode {
+    match e {
+        DynoError::Validation { .. }
+        | DynoError::InvalidEdge { .. }
+        | DynoError::UnknownNodeType(_)
+        | DynoError::UnknownEdgeType(_)
+        | DynoError::Schema(_) => StatusCode::BAD_REQUEST,
+        DynoError::NodeNotFound { .. } | DynoError::EdgeNotFound { .. } => StatusCode::NOT_FOUND,
+        DynoError::Storage(_)
+        | DynoError::Serialization(_)
+        | DynoError::Query(_)
+        | DynoError::Resolution(_)
+        | DynoError::Extraction(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
@@ -67,6 +91,12 @@ impl GraphEntry {
     pub fn with_engine_read<R>(&self, f: impl FnOnce(&StorageEngine) -> R) -> R {
         let guard = self.engine.read().expect("engine read lock poisoned");
         f(&guard)
+    }
+
+    /// Run a closure with a write-lock on the engine.
+    pub fn with_engine_write<R>(&self, f: impl FnOnce(&mut StorageEngine) -> R) -> R {
+        let mut guard = self.engine.write().expect("engine write lock poisoned");
+        f(&mut guard)
     }
 }
 
@@ -101,6 +131,27 @@ impl GraphRegistry {
             .expect("registry read lock poisoned")
             .get(id)
             .cloned()
+    }
+
+    /// Drop a graph from the registry. Returns `Err(NotFound)` if the
+    /// id isn't registered. The dropped `Arc<GraphEntry>` may outlive
+    /// the registry entry while concurrent handlers finish their work
+    /// on already-cloned `Arc`s; once those drop, `StorageEngine` is
+    /// reclaimed.
+    pub fn delete_graph(&self, id: &str) -> Result<(), RegistryError> {
+        let mut graphs = self.graphs.write().expect("registry write lock poisoned");
+        if graphs.remove(id).is_none() {
+            return Err(RegistryError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Snapshot of registered graph ids. Sorted for stable output.
+    pub fn list_ids(&self) -> Vec<String> {
+        let graphs = self.graphs.read().expect("registry read lock poisoned");
+        let mut ids: Vec<String> = graphs.keys().cloned().collect();
+        ids.sort();
+        ids
     }
 }
 
@@ -169,6 +220,32 @@ schema:
             Arc::ptr_eq(&h1, &h2),
             "Arc<str> should be shared, not re-allocated"
         );
+    }
+
+    #[test]
+    fn delete_graph_removes_entry() {
+        let r = GraphRegistry::new();
+        r.create_graph("g1", tiny_schema()).unwrap();
+        assert!(r.get("g1").is_some());
+        r.delete_graph("g1").unwrap();
+        assert!(r.get("g1").is_none());
+        assert_eq!(r.len(), 0);
+    }
+
+    #[test]
+    fn delete_unknown_graph_errors_not_found() {
+        let r = GraphRegistry::new();
+        let err = r.delete_graph("missing").unwrap_err();
+        assert!(matches!(err, RegistryError::NotFound(ref id) if id == "missing"));
+    }
+
+    #[test]
+    fn list_ids_is_sorted() {
+        let r = GraphRegistry::new();
+        r.create_graph("zeta", tiny_schema()).unwrap();
+        r.create_graph("alpha", tiny_schema()).unwrap();
+        r.create_graph("mike", tiny_schema()).unwrap();
+        assert_eq!(r.list_ids(), vec!["alpha", "mike", "zeta"]);
     }
 
     #[test]

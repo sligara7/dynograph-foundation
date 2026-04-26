@@ -120,6 +120,325 @@ async fn create_duplicate_graph_returns_409() {
 }
 
 #[tokio::test]
+async fn list_graphs_returns_sorted_ids() {
+    let app = build_app();
+    for id in ["zeta", "alpha", "mike"] {
+        let body = json!({
+            "id": id,
+            "schema": { "name": "demo", "version": 1, "node_types": {}, "edge_types": {} }
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["graphs"], json!(["alpha", "mike", "zeta"]));
+}
+
+#[tokio::test]
+async fn delete_graph_then_get_returns_404() {
+    let app = build_app();
+    let create_body = json!({
+        "id": "g1",
+        "schema": { "name": "demo", "version": 1, "node_types": {}, "edge_types": {} }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(create_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/graphs/g1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // Second delete is also 404.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/graphs/g1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+/// Schema with one node type that has a default value, so we can
+/// verify defaults are applied through the HTTP path. This covers
+/// tech-debt C3 from the v0.2.0 review at the service level.
+fn item_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "demo",
+            "version": 1,
+            "node_types": {
+                "Item": {
+                    "properties": {
+                        "name": { "type": "string", "required": true },
+                        "tier": { "type": "string", "default": "standard" }
+                    }
+                }
+            },
+            "edge_types": {}
+        }
+    })
+}
+
+async fn build_app_with_item_graph() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(item_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+#[tokio::test]
+async fn node_create_get_replace_delete_round_trip() {
+    let app = build_app_with_item_graph().await;
+
+    let create = json!({
+        "node_type": "Item",
+        "node_id": "n1",
+        "properties": { "name": "widget" }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(create.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let created: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(created["node_type"], "Item");
+    assert_eq!(created["node_id"], "n1");
+    assert_eq!(created["properties"]["name"], "widget");
+    // Schema default for `tier` was applied on write (C3).
+    assert_eq!(created["properties"]["tier"], "standard");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/nodes/Item/n1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let fetched: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(fetched["properties"]["name"], "widget");
+    assert_eq!(fetched["properties"]["tier"], "standard");
+
+    // PUT REPLACES the property map. `tier` is omitted in the body but
+    // the schema default re-applies it on validate, so it survives;
+    // any property without a default would be dropped.
+    let put = json!({ "properties": { "name": "gadget" } });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/graphs/g1/nodes/Item/n1")
+                .header("content-type", "application/json")
+                .body(Body::from(put.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let replaced: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(replaced["properties"]["name"], "gadget");
+    assert_eq!(replaced["properties"]["tier"], "standard");
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/graphs/g1/nodes/Item/n1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/nodes/Item/n1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn create_node_with_unknown_type_returns_400() {
+    let app = build_app_with_item_graph().await;
+    let create = json!({
+        "node_type": "Bogus",
+        "node_id": "n1",
+        "properties": { "name": "widget" }
+    });
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(create.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn create_node_missing_required_property_returns_400() {
+    let app = build_app_with_item_graph().await;
+    let create = json!({
+        "node_type": "Item",
+        "node_id": "n1",
+        "properties": {}
+    });
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(create.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn replace_node_on_missing_node_returns_404() {
+    let app = build_app_with_item_graph().await;
+    let put = json!({ "properties": { "name": "gadget" } });
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/graphs/g1/nodes/Item/missing")
+                .header("content-type", "application/json")
+                .body(Body::from(put.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn create_node_on_missing_graph_returns_404() {
+    let app = build_app();
+    let create = json!({
+        "node_type": "Item",
+        "node_id": "n1",
+        "properties": { "name": "widget" }
+    });
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/nope/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(create.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn health_returns_ok() {
     let app = build_app();
     let res = app

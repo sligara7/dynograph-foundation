@@ -4,10 +4,12 @@
 
 mod app;
 mod auth;
+mod node_response;
 mod registry;
 mod schema_response;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, Identity, NoAuth};
+pub use node_response::NodeResponse;
 pub use registry::{GraphEntry, GraphRegistry, RegistryError};
 pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
