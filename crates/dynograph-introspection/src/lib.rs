@@ -1,6 +1,6 @@
 //! Schema for an LLM's persistent self-knowledge graph.
 //!
-//! Four node types representing what an LLM has learned about its own
+//! Five node types representing what an LLM has learned about its own
 //! reasoning across sessions:
 //!
 //! - **Concept** — an understood relationship between ideas, with a
@@ -12,10 +12,14 @@
 //!   was true, *why* the error happened (the valuable part).
 //! - **Blindspot** — a pattern of error, not a single mistake. A
 //!   tendency derived from repeated Corrections.
+//! - **Attempt** — a tried approach to a problem with its outcome.
+//!   Lets the LLM look up "what did I try last time on this kind of
+//!   problem and what happened" before repeating a failed strategy.
 //!
 //! Edges connect them so the graph can answer questions like
-//! "what assumption does this correction invalidate" or
-//! "what blindspot is this correction an instance of."
+//! "what assumption does this correction invalidate", "what blindspot
+//! is this correction an instance of", or "for this kind of problem,
+//! what attempt eventually worked".
 //!
 //! ## Scope decision
 //!
@@ -88,6 +92,24 @@ schema:
         Detect recurring patterns in my errors — not individual
         mistakes, but tendencies. What do I keep getting wrong?
 
+    Attempt:
+      properties:
+        problem: { type: string, required: true }
+        approach: { type: string, required: true }
+        outcome: { type: enum, values: [worked, partial, failed, abandoned] }
+        why: { type: string }
+        context: { type: string }
+      embedding_field: problem
+      resolution:
+        strategy: fuzzy_then_vector
+        fuzzy_threshold: 70
+        auto_merge_threshold: 90
+      extraction_hint: >
+        A tried approach to a problem with its outcome. When the same
+        kind of problem comes up again, look these up before repeating
+        a failed strategy. Record the structural WHY of the outcome,
+        not just "tried X, didn't work" — the why is what generalizes.
+
   edge_types:
     CONTRADICTS:
       from: [Concept, Assumption]
@@ -101,6 +123,9 @@ schema:
     INVALIDATES:
       from: Correction
       to: Assumption
+    SUPERSEDED_BY:
+      from: Attempt
+      to: Attempt
 
   extraction_modes:
     reflection:
@@ -109,6 +134,7 @@ schema:
         - Assumption
         - Correction
         - Blindspot
+        - Attempt
       max_tokens: 2048
 "#;
 
@@ -130,27 +156,40 @@ mod tests {
     }
 
     #[test]
-    fn schema_has_four_memory_node_types() {
+    fn schema_has_five_memory_node_types() {
         let schema = introspection_schema();
         assert!(schema.node_types.contains_key("Concept"));
         assert!(schema.node_types.contains_key("Assumption"));
         assert!(schema.node_types.contains_key("Correction"));
         assert!(schema.node_types.contains_key("Blindspot"));
+        assert!(schema.node_types.contains_key("Attempt"));
         assert_eq!(
             schema.node_types.len(),
-            4,
-            "expected exactly 4 node types; soul/creative layers should be absent"
+            5,
+            "expected exactly 5 node types; soul/creative layers should be absent"
         );
     }
 
     #[test]
-    fn schema_has_four_memory_edge_types() {
+    fn schema_has_five_memory_edge_types() {
         let schema = introspection_schema();
         assert!(schema.edge_types.contains_key("CONTRADICTS"));
         assert!(schema.edge_types.contains_key("DEPENDS_ON"));
         assert!(schema.edge_types.contains_key("REVEALED_BY"));
         assert!(schema.edge_types.contains_key("INVALIDATES"));
-        assert_eq!(schema.edge_types.len(), 4);
+        assert!(schema.edge_types.contains_key("SUPERSEDED_BY"));
+        assert_eq!(schema.edge_types.len(), 5);
+    }
+
+    #[test]
+    fn attempt_has_outcome_enum() {
+        let schema = introspection_schema();
+        let attempt = &schema.node_types["Attempt"];
+        let outcome = &attempt.properties["outcome"];
+        let values = outcome.values.as_ref().expect("outcome must enumerate values");
+        for v in ["worked", "partial", "failed", "abandoned"] {
+            assert!(values.contains(&v.to_string()), "missing outcome value {v}");
+        }
     }
 
     #[test]
