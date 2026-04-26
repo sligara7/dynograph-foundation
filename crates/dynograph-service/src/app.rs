@@ -17,7 +17,7 @@ use dynograph_core::{Schema, Value};
 use crate::{
     auth::{AuthProvider, NoAuth},
     node_response::NodeResponse,
-    registry::{GraphRegistry, RegistryError},
+    registry::{GraphEntry, GraphRegistry, RegistryError},
     schema_response::SchemaResponse,
 };
 
@@ -58,6 +58,16 @@ async fn health() -> &'static str {
     "ok"
 }
 
+/// Look up a graph by id or surface a 404. Folds the
+/// `state.registry.get(...).ok_or_else(...)` boilerplate that every
+/// graph-id-bearing handler shares.
+fn graph_entry(state: &AppState, id: &str) -> Result<Arc<GraphEntry>, RegistryError> {
+    state
+        .registry
+        .get(id)
+        .ok_or_else(|| RegistryError::NotFound(id.to_string()))
+}
+
 #[derive(Debug, Deserialize)]
 struct CreateGraphBody {
     id: String,
@@ -89,10 +99,7 @@ async fn get_graph(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Response, RegistryError> {
-    let entry = state
-        .registry
-        .get(&id)
-        .ok_or(RegistryError::NotFound(id.clone()))?;
+    let entry = graph_entry(&state, &id)?;
     let schema = entry.with_engine_read(|engine| engine.schema().clone());
     let response = SchemaResponse::with_cached_hash(id, schema, entry.content_hash().to_string());
     Ok(Json(response).into_response())
@@ -119,10 +126,7 @@ async fn create_node(
     Path(id): Path<String>,
     Json(body): Json<CreateNodeBody>,
 ) -> Result<Response, RegistryError> {
-    let entry = state
-        .registry
-        .get(&id)
-        .ok_or(RegistryError::NotFound(id.clone()))?;
+    let entry = graph_entry(&state, &id)?;
     let CreateNodeBody {
         node_type,
         node_id,
@@ -137,13 +141,10 @@ async fn get_node(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
 ) -> Result<Response, RegistryError> {
-    let entry = state
-        .registry
-        .get(&id)
-        .ok_or_else(|| RegistryError::NotFound(id.clone()))?;
+    let entry = graph_entry(&state, &id)?;
     let stored = entry
         .with_engine_read(|engine| engine.get_node(&id, &node_type, &node_id))?
-        .ok_or_else(|| RegistryError::NotFound(format!("{node_type}/{node_id}")))?;
+        .ok_or(RegistryError::NodeNotFound { node_type, node_id })?;
     Ok(Json(NodeResponse::from(stored)).into_response())
 }
 
@@ -162,15 +163,12 @@ async fn replace_node(
     Path((id, node_type, node_id)): Path<(String, String, String)>,
     Json(body): Json<ReplaceNodeBody>,
 ) -> Result<Response, RegistryError> {
-    let entry = state
-        .registry
-        .get(&id)
-        .ok_or_else(|| RegistryError::NotFound(id.clone()))?;
+    let entry = graph_entry(&state, &id)?;
     let stored = entry
         .with_engine_write(|engine| {
             engine.replace_node_properties(&id, &node_type, &node_id, body.properties)
         })?
-        .ok_or_else(|| RegistryError::NotFound(format!("{node_type}/{node_id}")))?;
+        .ok_or(RegistryError::NodeNotFound { node_type, node_id })?;
     Ok(Json(NodeResponse::from(stored)).into_response())
 }
 
@@ -178,15 +176,12 @@ async fn delete_node(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
 ) -> Result<StatusCode, RegistryError> {
-    let entry = state
-        .registry
-        .get(&id)
-        .ok_or_else(|| RegistryError::NotFound(id.clone()))?;
+    let entry = graph_entry(&state, &id)?;
     let existed =
         entry.with_engine_write(|engine| engine.delete_node(&id, &node_type, &node_id))?;
     if existed {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(RegistryError::NotFound(format!("{node_type}/{node_id}")))
+        Err(RegistryError::NodeNotFound { node_type, node_id })
     }
 }

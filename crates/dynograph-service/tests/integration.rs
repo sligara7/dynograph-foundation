@@ -399,7 +399,7 @@ async fn create_node_missing_required_property_returns_400() {
 }
 
 #[tokio::test]
-async fn replace_node_on_missing_node_returns_404() {
+async fn replace_node_on_missing_node_returns_404_with_node_attribution() {
     let app = build_app_with_item_graph().await;
     let put = json!({ "properties": { "name": "gadget" } });
     let res = app
@@ -414,6 +414,13 @@ async fn replace_node_on_missing_node_returns_404() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&bytes).unwrap();
+    // The graph exists; the node is missing. The body must say so —
+    // mis-attributing this as "graph not found" would mask the real
+    // cause and send debuggers chasing the wrong thing.
+    assert!(body.contains("node not found"), "body was: {body}");
+    assert!(body.contains("Item/missing"), "body was: {body}");
 }
 
 #[tokio::test]
