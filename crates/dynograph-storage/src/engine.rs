@@ -521,17 +521,35 @@ impl StorageEngine {
         }
     }
 
-    /// Delete a node and its adjacency entries.
+    /// Delete a node and every edge attached to it, including the
+    /// peer-side adjacency entries on neighbor nodes.
+    ///
+    /// Cleanup steps (in order, with rationale):
+    /// 1. Scan `node_id`'s outgoing and incoming adjacency *before*
+    ///    touching anything — once we delete this node's own adjacency
+    ///    prefix in step 4, we lose the information needed to find the
+    ///    peer-side keys that need cleaning up.
+    /// 2. Delete the node from CF_NODES + reconcile any reverse-index
+    ///    entries.
+    /// 3. Prefix-delete this node's own outgoing + incoming adjacency.
+    /// 4. NEW: for every edge involving this node, also delete (a) the
+    ///    edge from CF_EDGES and (b) the symmetric adjacency entry on
+    ///    the peer node. Without this step the storage was leaving
+    ///    dangling edges behind delete (tech-debt C1 — `get_edge` would
+    ///    still resolve, `scan_incoming_edges` on a peer would still
+    ///    return the deleted endpoint).
     pub fn delete_node(
         &mut self,
         graph_id: &str,
         node_type: &str,
         node_id: &str,
     ) -> Result<bool, DynoError> {
-        let key = crate::keys::node_key(graph_id, node_type, node_id);
+        // Step 1: capture peer-side cleanup info before any deletes.
+        let outgoing = self.scan_outgoing_edges(graph_id, node_id, None)?;
+        let incoming = self.scan_incoming_edges(graph_id, node_id, None)?;
 
-        // Only deserialize old properties when this type could have index
-        // entries to reconcile — otherwise this is the original delete path.
+        // Step 2: own-node cleanup.
+        let key = crate::keys::node_key(graph_id, node_type, node_id);
         let old_properties = if self.schema.has_indexed_properties(node_type) {
             match self.get(CF_NODES, &key)? {
                 Some(bytes) => Some(
@@ -543,17 +561,31 @@ impl StorageEngine {
         } else {
             None
         };
-
         let existed = self.delete(CF_NODES, &key)?;
-
         if let Some(props) = old_properties {
             self.delete_index_entries(graph_id, node_type, node_id, &props)?;
         }
 
+        // Step 3: own adjacency.
         let out_prefix = crate::keys::adj_out_prefix(graph_id, node_id);
         let in_prefix = crate::keys::adj_in_prefix(graph_id, node_id);
         self.prefix_delete(CF_ADJ_OUT, &out_prefix)?;
         self.prefix_delete(CF_ADJ_IN, &in_prefix)?;
+
+        // Step 4: edge + peer-adjacency cleanup.
+        for edge in outgoing {
+            let edge_key = crate::keys::edge_key(graph_id, &edge.edge_type, node_id, &edge.to_id);
+            self.delete(CF_EDGES, &edge_key)?;
+            let peer_in = crate::keys::adj_in_key(graph_id, &edge.to_id, &edge.edge_type, node_id);
+            self.delete(CF_ADJ_IN, &peer_in)?;
+        }
+        for edge in incoming {
+            let edge_key = crate::keys::edge_key(graph_id, &edge.edge_type, &edge.from_id, node_id);
+            self.delete(CF_EDGES, &edge_key)?;
+            let peer_out =
+                crate::keys::adj_out_key(graph_id, &edge.from_id, &edge.edge_type, node_id);
+            self.delete(CF_ADJ_OUT, &peer_out)?;
+        }
 
         Ok(existed)
     }
@@ -1090,6 +1122,172 @@ schema:
         assert!(engine.delete_node("g1", "Character", "c1").unwrap());
         assert!(engine.get_node("g1", "Character", "c1").unwrap().is_none());
         assert!(!engine.delete_node("g1", "Character", "c1").unwrap());
+    }
+
+    #[test]
+    fn delete_node_removes_outgoing_edges_and_peer_inverse_adjacency() {
+        // Tech-debt C1 regression: delete_node used to leave dangling
+        // CF_EDGES entries and inverse adjacency on neighbor nodes.
+        // After deleting alice, bob's incoming-edge scan should be empty
+        // and the alice→bob edge should be unresolvable.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "alice", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "bob", props! { "name" => "Bob" })
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "alice",
+                "Character",
+                "bob",
+                HashMap::new(),
+            )
+            .unwrap();
+
+        // Sanity: edge exists pre-delete.
+        assert!(
+            engine
+                .get_edge("g1", "KNOWS", "alice", "bob")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            engine.scan_incoming_edges("g1", "bob", None).unwrap().len(),
+            1
+        );
+
+        engine.delete_node("g1", "Character", "alice").unwrap();
+
+        // Edge no longer resolves from CF_EDGES.
+        assert!(
+            engine
+                .get_edge("g1", "KNOWS", "alice", "bob")
+                .unwrap()
+                .is_none(),
+            "edge should be gone after endpoint delete"
+        );
+        // bob's incoming-edge scan should not return the alice→bob entry.
+        assert_eq!(
+            engine.scan_incoming_edges("g1", "bob", None).unwrap().len(),
+            0,
+            "peer inverse adjacency should be cleaned up"
+        );
+    }
+
+    #[test]
+    fn delete_node_removes_incoming_edges_and_peer_outgoing_adjacency() {
+        // Symmetric case: delete the destination of an edge; the source's
+        // outgoing-edge scan should no longer include the deleted endpoint.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "alice", props! { "name" => "Alice" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "bob", props! { "name" => "Bob" })
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "alice",
+                "Character",
+                "bob",
+                HashMap::new(),
+            )
+            .unwrap();
+
+        engine.delete_node("g1", "Character", "bob").unwrap();
+
+        assert!(
+            engine
+                .get_edge("g1", "KNOWS", "alice", "bob")
+                .unwrap()
+                .is_none(),
+        );
+        assert_eq!(
+            engine
+                .scan_outgoing_edges("g1", "alice", None)
+                .unwrap()
+                .len(),
+            0,
+            "alice's outgoing-edge scan must not reference the deleted bob"
+        );
+    }
+
+    #[test]
+    fn delete_node_with_mixed_incoming_and_outgoing_edges() {
+        // alice has both an outgoing edge (alice → bob) and an incoming
+        // edge (carol → alice via VISITS — Character VISITS Location;
+        // we'll use a Location-typed `loc1` with a back-link via KNOWS
+        // — but the test_schema only allows VISITS Character→Location.
+        // So: alice → loc1 (VISITS), bob → alice (KNOWS).
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "alice", props! { "name" => "A" })
+            .unwrap();
+        engine
+            .create_node("g1", "Character", "bob", props! { "name" => "B" })
+            .unwrap();
+        engine
+            .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "VISITS",
+                "Character",
+                "alice",
+                "Location",
+                "loc1",
+                HashMap::new(),
+            )
+            .unwrap();
+        engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "bob",
+                "Character",
+                "alice",
+                HashMap::new(),
+            )
+            .unwrap();
+
+        engine.delete_node("g1", "Character", "alice").unwrap();
+
+        // Both edges gone from CF_EDGES.
+        assert!(
+            engine
+                .get_edge("g1", "VISITS", "alice", "loc1")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            engine
+                .get_edge("g1", "KNOWS", "bob", "alice")
+                .unwrap()
+                .is_none()
+        );
+        // Loc1 has no incoming visits anymore.
+        assert_eq!(
+            engine
+                .scan_incoming_edges("g1", "loc1", None)
+                .unwrap()
+                .len(),
+            0
+        );
+        // Bob has no outgoing knows anymore.
+        assert_eq!(
+            engine.scan_outgoing_edges("g1", "bob", None).unwrap().len(),
+            0
+        );
     }
 
     #[test]
