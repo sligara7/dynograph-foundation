@@ -1,8 +1,8 @@
 # dynograph-foundation — shared, domain-agnostic foundation crates for
-# graph-based projects (ir2, market_graph, cure, storyflow, ...).
+# graph-based projects.
 #
 # Crates here are intentionally domain-neutral. Domain-specific
-# extractors, schemas, and servers live in their consumer projects and
+# extractors, schemas, and servers live in consumer projects and
 # depend on these crates as path / git / version dependencies.
 
 [workspace]
