@@ -476,9 +476,10 @@ impl StorageEngine {
         graph_id: &str,
         node_type: &str,
         node_id: &str,
-        properties: HashMap<String, Value>,
+        mut properties: HashMap<String, Value>,
     ) -> Result<StoredNode, DynoError> {
-        self.schema.validate_node(node_type, &properties)?;
+        // validate_node mutates `properties` to apply schema defaults.
+        self.schema.validate_node(node_type, &mut properties)?;
 
         let key = crate::keys::node_key(graph_id, node_type, node_id);
         let value =
@@ -567,7 +568,7 @@ impl StorageEngine {
         graph_id: &str,
         node_type: &str,
         node_id: &str,
-        properties: HashMap<String, Value>,
+        mut properties: HashMap<String, Value>,
     ) -> Result<Option<StoredNode>, DynoError> {
         let key = crate::keys::node_key(graph_id, node_type, node_id);
         let has_indexed = self.schema.has_indexed_properties(node_type);
@@ -590,7 +591,8 @@ impl StorageEngine {
             None
         };
 
-        self.schema.validate_node(node_type, &properties)?;
+        // validate_node mutates `properties` to apply schema defaults.
+        self.schema.validate_node(node_type, &mut properties)?;
 
         let value =
             rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;

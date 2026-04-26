@@ -361,32 +361,42 @@ impl Schema {
     }
 
     /// Validate all properties for a node against its type definition.
+    /// Mutates `properties` to apply schema-declared defaults for any
+    /// missing properties before validating — previously the function
+    /// silently passed required-with-default properties as valid but
+    /// never inserted the default, so the stored node was missing the
+    /// field. The default is applied for every missing property that
+    /// declares one (not just required ones), matching the principle
+    /// that "the schema's default IS the value" when no value is given.
     pub fn validate_node(
         &self,
         node_type: &str,
-        properties: &HashMap<String, Value>,
+        properties: &mut HashMap<String, Value>,
     ) -> Result<(), DynoError> {
         let node_def = self
             .node_types
             .get(node_type)
             .ok_or_else(|| DynoError::UnknownNodeType(node_type.to_string()))?;
 
-        // Check required properties
+        // Apply defaults for any missing properties that declare one,
+        // then check that every required property is now present.
         for (prop_name, prop_def) in &node_def.properties {
+            if !properties.contains_key(prop_name)
+                && let Some(default) = &prop_def.default
+            {
+                properties.insert(prop_name.clone(), default.clone());
+            }
             if prop_def.required && !properties.contains_key(prop_name) {
-                // Check for default
-                if prop_def.default.is_none() {
-                    return Err(DynoError::Validation {
-                        node_type: node_type.to_string(),
-                        property: prop_name.to_string(),
-                        message: "required property is missing".to_string(),
-                    });
-                }
+                return Err(DynoError::Validation {
+                    node_type: node_type.to_string(),
+                    property: prop_name.to_string(),
+                    message: "required property is missing".to_string(),
+                });
             }
         }
 
-        // Validate each provided property
-        for (prop_name, value) in properties {
+        // Validate each property (now including any applied defaults).
+        for (prop_name, value) in properties.iter() {
             self.validate_property(node_type, prop_name, value)?;
         }
 
@@ -626,12 +636,48 @@ schema:
         let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
         let mut props = HashMap::new();
         // Missing required 'name'
-        let result = schema.validate_node("Character", &props);
+        let result = schema.validate_node("Character", &mut props);
         assert!(result.is_err());
 
         props.insert("name".to_string(), Value::from("Alice"));
-        let result = schema.validate_node("Character", &props);
+        let result = schema.validate_node("Character", &mut props);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_node_applies_defaults() {
+        // Regression: tech-debt C3. Before fix, validate_node returned
+        // Ok for required-with-default-missing properties but never
+        // inserted the default — the stored node was missing the field.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Item:
+      properties:
+        name: { type: string, required: true }
+        count: { type: int, default: 0 }
+        tier: { type: string, required: true, default: "bronze" }
+  edge_types: {}
+"#;
+        let schema = Schema::from_yaml(yaml).unwrap();
+
+        // Provide only `name`. `count` and `tier` should be filled in
+        // from their defaults.
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), Value::from("widget"));
+        let result = schema.validate_node("Item", &mut props);
+        assert!(result.is_ok(), "validation failed: {:?}", result);
+
+        assert_eq!(props.get("name"), Some(&Value::from("widget")));
+        assert_eq!(props.get("count"), Some(&Value::Int(0)));
+        assert_eq!(props.get("tier"), Some(&Value::from("bronze")));
+
+        // Required with no default is still an error when missing.
+        let mut empty = HashMap::new();
+        let result = schema.validate_node("Item", &mut empty);
+        assert!(result.is_err(), "missing required `name` should error");
     }
 
     #[test]
@@ -729,14 +775,14 @@ schema:
         props.insert("name".to_string(), Value::from("Alice"));
         props.insert("unknown_field".to_string(), Value::from("some value"));
         // Extra properties should be allowed (schema is additive)
-        assert!(schema.validate_node("Character", &props).is_ok());
+        assert!(schema.validate_node("Character", &mut props).is_ok());
     }
 
     #[test]
     fn unknown_node_type_rejected() {
         let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
-        let props = HashMap::new();
-        assert!(schema.validate_node("UnknownType", &props).is_err());
+        let mut props = HashMap::new();
+        assert!(schema.validate_node("UnknownType", &mut props).is_err());
     }
 
     #[test]
