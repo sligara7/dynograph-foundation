@@ -1469,6 +1469,203 @@ async fn put_schema_failure_leaves_state_intact() {
     assert!(schema["schema"]["node_types"]["Item"].is_object());
 }
 
+// =============================================================================
+// Slice 8a — sidecar embeddings
+// =============================================================================
+
+async fn put_embedding(
+    app: &axum::Router,
+    node_type: &str,
+    node_id: &str,
+    embedding: &[f32],
+) -> StatusCode {
+    let body = json!({ "embedding": embedding });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!(
+                    "/v1/graphs/g1/nodes/{node_type}/{node_id}/embedding"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    res.status()
+}
+
+async fn get_embedding(app: &axum::Router, node_type: &str, node_id: &str) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/v1/graphs/g1/nodes/{node_type}/{node_id}/embedding"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, body)
+}
+
+async fn delete_embedding(app: &axum::Router, node_type: &str, node_id: &str) -> StatusCode {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!(
+                    "/v1/graphs/g1/nodes/{node_type}/{node_id}/embedding"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    res.status()
+}
+
+#[tokio::test]
+async fn embedding_round_trip_set_get_delete() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+
+    assert_eq!(
+        put_embedding(&app, "Item", "n1", &[0.1, 0.2, 0.3]).await,
+        StatusCode::OK
+    );
+
+    let (status, body) = get_embedding(&app, "Item", "n1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["node_type"], "Item");
+    assert_eq!(body["node_id"], "n1");
+    let arr = body["embedding"].as_array().unwrap();
+    assert_eq!(arr.len(), 3);
+    assert!((arr[0].as_f64().unwrap() - 0.1).abs() < 1e-6);
+    assert!((arr[1].as_f64().unwrap() - 0.2).abs() < 1e-6);
+    assert!((arr[2].as_f64().unwrap() - 0.3).abs() < 1e-6);
+
+    assert_eq!(
+        delete_embedding(&app, "Item", "n1").await,
+        StatusCode::NO_CONTENT
+    );
+    let (status, _) = get_embedding(&app, "Item", "n1").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_embedding_overwrites() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    assert_eq!(
+        put_embedding(&app, "Item", "n1", &[1.0, 0.0]).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        put_embedding(&app, "Item", "n1", &[0.0, 1.0, 0.5]).await,
+        StatusCode::OK
+    );
+    let (_, body) = get_embedding(&app, "Item", "n1").await;
+    let arr = body["embedding"].as_array().unwrap();
+    assert_eq!(arr.len(), 3);
+    assert!((arr[2].as_f64().unwrap() - 0.5).abs() < 1e-6);
+}
+
+#[tokio::test]
+async fn put_embedding_on_missing_node_returns_404() {
+    let app = build_app_with_item_graph().await;
+    // Node `ghost` was never created.
+    assert_eq!(
+        put_embedding(&app, "Item", "ghost", &[0.1, 0.2]).await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn put_embedding_rejects_empty_vector() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    assert_eq!(
+        put_embedding(&app, "Item", "n1", &[]).await,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn get_embedding_on_node_without_one_returns_404() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    let (status, _) = get_embedding(&app, "Item", "n1").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_embedding_idempotency_at_wire_level() {
+    // Storage's delete_embedding is idempotent (Ok(false) on missing),
+    // but the HTTP surface emits 404 to match node/edge DELETE shape so
+    // callers can detect "I thought this existed but didn't" bugs.
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    put_embedding(&app, "Item", "n1", &[0.1, 0.2]).await;
+    assert_eq!(
+        delete_embedding(&app, "Item", "n1").await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        delete_embedding(&app, "Item", "n1").await,
+        StatusCode::NOT_FOUND
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_node_cascades_to_its_embedding() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    put_embedding(&app, "Item", "n1", &[0.1, 0.2, 0.3]).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/graphs/g1/nodes/Item/n1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // GET embedding now 404s — the cascade dropped it.
+    let (status, _) = get_embedding(&app, "Item", "n1").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn embedding_endpoints_on_missing_graph_return_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/nope/nodes/Item/n1/embedding")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
 #[tokio::test]
 async fn ready_returns_503_before_mark_ready_then_flips() {
     let registry = Arc::new(GraphRegistry::new());

@@ -42,6 +42,8 @@ pub enum RegistryError {
         from_id: String,
         to_id: String,
     },
+    #[error("embedding not found: {node_type}/{node_id}")]
+    EmbeddingNotFound { node_type: String, node_id: String },
     #[error("invalid graph id: {0}")]
     InvalidId(String),
     #[error("bad request: {0}")]
@@ -58,9 +60,10 @@ impl IntoResponse for RegistryError {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::AlreadyExists(_) => StatusCode::CONFLICT,
-            Self::NotFound(_) | Self::NodeNotFound { .. } | Self::EdgeNotFound { .. } => {
-                StatusCode::NOT_FOUND
-            }
+            Self::NotFound(_)
+            | Self::NodeNotFound { .. }
+            | Self::EdgeNotFound { .. }
+            | Self::EmbeddingNotFound { .. } => StatusCode::NOT_FOUND,
             Self::InvalidId(_) | Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Filesystem(_) | Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Storage(inner) => status_for_dyno_error(inner),

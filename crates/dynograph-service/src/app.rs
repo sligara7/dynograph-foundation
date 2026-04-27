@@ -17,6 +17,7 @@ use dynograph_core::{PropertyType, Schema, Value};
 use crate::{
     auth::{AuthProvider, NoAuth},
     edge_response::EdgeResponse,
+    embedding_response::EmbeddingResponse,
     metadata_response::GraphMetadataResponse,
     node_response::{NodeListResponse, NodeResponse},
     readiness::Readiness,
@@ -86,6 +87,12 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
             get(get_edge).patch(merge_edge).delete(delete_edge),
+        )
+        .route(
+            "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
+            get(get_embedding)
+                .put(set_embedding)
+                .delete(delete_embedding),
         )
         .with_state(state)
 }
@@ -432,5 +439,64 @@ async fn delete_edge(
             from_id,
             to_id,
         })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SetEmbeddingBody {
+    embedding: Vec<f32>,
+}
+
+/// Set the sidecar embedding for an existing node. The node must
+/// exist (storage-side `set_embedding` returns `NodeNotFound`
+/// otherwise — mapped to 404). Empty embeddings are rejected at the
+/// storage layer with `Validation` → 400.
+async fn set_embedding(
+    State(state): State<AppState>,
+    Path((id, node_type, node_id)): Path<(String, String, String)>,
+    Json(body): Json<SetEmbeddingBody>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let SetEmbeddingBody { embedding } = body;
+    entry
+        .with_engine_write(|engine| engine.set_embedding(&id, &node_type, &node_id, &embedding))?;
+    let response = EmbeddingResponse {
+        node_type,
+        node_id,
+        embedding,
+    };
+    Ok(Json(response).into_response())
+}
+
+async fn get_embedding(
+    State(state): State<AppState>,
+    Path((id, node_type, node_id)): Path<(String, String, String)>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let embedding = entry
+        .with_engine_read(|engine| engine.get_embedding(&id, &node_type, &node_id))?
+        .ok_or_else(|| RegistryError::EmbeddingNotFound {
+            node_type: node_type.clone(),
+            node_id: node_id.clone(),
+        })?;
+    let response = EmbeddingResponse {
+        node_type,
+        node_id,
+        embedding,
+    };
+    Ok(Json(response).into_response())
+}
+
+async fn delete_embedding(
+    State(state): State<AppState>,
+    Path((id, node_type, node_id)): Path<(String, String, String)>,
+) -> Result<StatusCode, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let existed =
+        entry.with_engine_write(|engine| engine.delete_embedding(&id, &node_type, &node_id))?;
+    if existed {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(RegistryError::EmbeddingNotFound { node_type, node_id })
     }
 }

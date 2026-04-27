@@ -289,6 +289,87 @@ async fn put_schema_persists_through_rehydrate() {
 }
 
 #[tokio::test]
+async fn embedding_persists_through_rehydrate() {
+    let tmp = TempDir::new().unwrap();
+
+    // Round 1: create graph + node, set an embedding.
+    {
+        let (app, _registry) = build_persistent_app(tmp.path());
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(schema_body("g1").to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let create_node = json!({
+            "node_type": "Item",
+            "node_id": "n1",
+            "properties": { "name": "widget" }
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs/g1/nodes")
+                    .header("content-type", "application/json")
+                    .body(Body::from(create_node.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let put = json!({ "embedding": [0.25, 0.5, 0.75, 1.0] });
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/v1/graphs/g1/nodes/Item/n1/embedding")
+                    .header("content-type", "application/json")
+                    .body(Body::from(put.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+    // RocksDB lock released on the first service drop.
+
+    // Round 2: rehydrate, verify embedding bytes round-trip exactly.
+    let (app, registry) = build_persistent_app(tmp.path());
+    registry.rehydrate().expect("rehydrate");
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/nodes/Item/n1/embedding")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    let arr = body["embedding"].as_array().unwrap();
+    assert_eq!(arr.len(), 4);
+    let got: Vec<f64> = arr.iter().map(|v| v.as_f64().unwrap()).collect();
+    for (got, want) in got.iter().zip([0.25, 0.5, 0.75, 1.0].iter()) {
+        assert!((got - want).abs() < 1e-6, "got {got} want {want}");
+    }
+}
+
+#[tokio::test]
 async fn create_graph_with_invalid_id_returns_400() {
     let tmp = TempDir::new().unwrap();
     let (app, _registry) = build_persistent_app(tmp.path());

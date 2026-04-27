@@ -22,8 +22,24 @@ pub const CF_ADJ_IN: &str = "adj_in";
 /// with empty values; the payload is the node_id suffix. Populated on
 /// create/update and cleaned up on delete, driven by `Schema::indexed_properties`.
 pub const CF_NODE_IDX: &str = "node_idx";
+/// Sidecar embedding store. Keys are the same `{graph_id}\x00{node_type}\x00{node_id}`
+/// shape as `CF_NODES` (1-to-1 with nodes); values are raw f32
+/// little-endian bytes (no length prefix — the value's byte length /
+/// 4 *is* the dimension). Embeddings are managed through dedicated
+/// API methods (`set_embedding` / `get_embedding` / `delete_embedding`)
+/// rather than riding on `properties`, since `PropertyType` has no
+/// vector-of-floats variant. `delete_node` cascades to drop the
+/// associated embedding so we don't accumulate orphans.
+pub const CF_EMBEDDINGS: &str = "embeddings";
 
-const ALL_CFS: &[&str] = &[CF_NODES, CF_EDGES, CF_ADJ_OUT, CF_ADJ_IN, CF_NODE_IDX];
+const ALL_CFS: &[&str] = &[
+    CF_NODES,
+    CF_EDGES,
+    CF_ADJ_OUT,
+    CF_ADJ_IN,
+    CF_NODE_IDX,
+    CF_EMBEDDINGS,
+];
 
 /// A node stored in the graph.
 #[derive(Debug, Clone)]
@@ -45,6 +61,13 @@ pub struct StoredEdge {
 }
 
 /// Backend storage — either in-memory HashMap or RocksDB on disk.
+// `Memory` carries six HashMaps; `Rocks` is a single `DB`. Each
+// `StorageEngine` (and thus each `Backend`) is held once per graph
+// behind a registry `Arc<RwLock<_>>`, never cloned, never moved on a
+// hot path — the size variance is irrelevant. Boxing `Memory` would
+// add a deref to every read/write path of the in-memory test backend
+// for no real gain.
+#[allow(clippy::large_enum_variant)]
 enum Backend {
     Memory {
         nodes: HashMap<Vec<u8>, Vec<u8>>,
@@ -52,6 +75,7 @@ enum Backend {
         adj_out: HashMap<Vec<u8>, Vec<u8>>,
         adj_in: HashMap<Vec<u8>, Vec<u8>>,
         node_idx: HashMap<Vec<u8>, Vec<u8>>,
+        embeddings: HashMap<Vec<u8>, Vec<u8>>,
     },
     Rocks {
         db: DB,
@@ -71,12 +95,14 @@ impl Backend {
                 adj_out,
                 adj_in,
                 node_idx,
+                embeddings,
             } => match cf {
                 CF_NODES => Ok(nodes),
                 CF_EDGES => Ok(edges),
                 CF_ADJ_OUT => Ok(adj_out),
                 CF_ADJ_IN => Ok(adj_in),
                 CF_NODE_IDX => Ok(node_idx),
+                CF_EMBEDDINGS => Ok(embeddings),
                 _ => Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
             },
             Backend::Rocks { .. } => Err(DynoError::Storage(
@@ -93,12 +119,14 @@ impl Backend {
                 adj_out,
                 adj_in,
                 node_idx,
+                embeddings,
             } => match cf {
                 CF_NODES => Ok(nodes),
                 CF_EDGES => Ok(edges),
                 CF_ADJ_OUT => Ok(adj_out),
                 CF_ADJ_IN => Ok(adj_in),
                 CF_NODE_IDX => Ok(node_idx),
+                CF_EMBEDDINGS => Ok(embeddings),
                 _ => Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
             },
             Backend::Rocks { .. } => Err(DynoError::Storage(
@@ -128,6 +156,15 @@ fn cf_options(cf_name: &str) -> Options {
             // Variable-length — no fixed prefix extractor. Seek-to-prefix still benefits
             // from SST block ordering.
         }
+        CF_EMBEDDINGS => {
+            // Mixed: point lookups by (graph_id, node_type, node_id) for
+            // GET/DELETE; prefix scans by (graph_id, node_type) for the
+            // future `scan_embeddings_by_type` path slice 8b will use to
+            // rebuild HNSW state on rehydrate.
+            let mut block_opts = BlockBasedOptions::default();
+            block_opts.set_bloom_filter(10.0, false);
+            opts.set_block_based_table_factory(&block_opts);
+        }
         _ => {}
     }
     opts
@@ -141,6 +178,7 @@ enum CfId {
     AdjOut,
     AdjIn,
     NodeIdx,
+    Embeddings,
 }
 
 impl CfId {
@@ -151,6 +189,7 @@ impl CfId {
             CF_ADJ_OUT => Some(Self::AdjOut),
             CF_ADJ_IN => Some(Self::AdjIn),
             CF_NODE_IDX => Some(Self::NodeIdx),
+            CF_EMBEDDINGS => Some(Self::Embeddings),
             _ => None,
         }
     }
@@ -161,6 +200,7 @@ impl CfId {
             Self::AdjOut => CF_ADJ_OUT,
             Self::AdjIn => CF_ADJ_IN,
             Self::NodeIdx => CF_NODE_IDX,
+            Self::Embeddings => CF_EMBEDDINGS,
         }
     }
 }
@@ -218,6 +258,7 @@ impl StorageEngine {
                 adj_out: HashMap::new(),
                 adj_in: HashMap::new(),
                 node_idx: HashMap::new(),
+                embeddings: HashMap::new(),
             },
             read_cache: Mutex::new(ReadCache::new(CacheConfig::default())),
             write_buffer: None,
@@ -264,6 +305,96 @@ impl StorageEngine {
     /// garbage; cleaning them up is a future-slice concern.
     pub fn replace_schema(&mut self, new_schema: Schema) {
         self.schema = new_schema;
+    }
+
+    // =========================================================================
+    // Embedding sidecar (CF_EMBEDDINGS)
+    // =========================================================================
+
+    /// Set the embedding for an existing node. Fails loud (`NodeNotFound`)
+    /// if the node doesn't exist — silently creating an embedding for a
+    /// non-existent node would orphan it forever (no `delete_node`
+    /// cascade target). Empty embeddings are rejected: zero-dim vectors
+    /// are meaningless and would foot-gun slice 8b's HNSW config. Re-set
+    /// overwrites in place.
+    pub fn set_embedding(
+        &mut self,
+        graph_id: &str,
+        node_type: &str,
+        node_id: &str,
+        embedding: &[f32],
+    ) -> Result<(), DynoError> {
+        if embedding.is_empty() {
+            return Err(DynoError::Validation {
+                node_type: node_type.to_string(),
+                property: "embedding".to_string(),
+                message: "embedding must be non-empty".to_string(),
+            });
+        }
+        let key = crate::keys::node_key(graph_id, node_type, node_id);
+        if self.get(CF_NODES, &key)?.is_none() {
+            return Err(DynoError::NodeNotFound {
+                node_type: node_type.to_string(),
+                node_id: node_id.to_string(),
+            });
+        }
+        let mut bytes = Vec::with_capacity(embedding.len() * 4);
+        for f in embedding {
+            bytes.extend_from_slice(&f.to_le_bytes());
+        }
+        self.put(CF_EMBEDDINGS, key, bytes)?;
+        Ok(())
+    }
+
+    /// Returns the embedding for a node, or `None` if no embedding has
+    /// been set. Doesn't distinguish "node doesn't exist" from "node
+    /// exists but has no embedding"; the caller is expected to have
+    /// asserted node existence separately when that distinction matters.
+    pub fn get_embedding(
+        &self,
+        graph_id: &str,
+        node_type: &str,
+        node_id: &str,
+    ) -> Result<Option<Vec<f32>>, DynoError> {
+        let key = crate::keys::node_key(graph_id, node_type, node_id);
+        match self.get(CF_EMBEDDINGS, &key)? {
+            Some(bytes) => Ok(Some(decode_embedding(&bytes)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Drop an embedding. Returns `true` if one existed. Idempotent
+    /// (a missing embedding is `Ok(false)`, not an error) — `delete_node`
+    /// calls this unconditionally for cascade cleanup.
+    pub fn delete_embedding(
+        &mut self,
+        graph_id: &str,
+        node_type: &str,
+        node_id: &str,
+    ) -> Result<bool, DynoError> {
+        let key = crate::keys::node_key(graph_id, node_type, node_id);
+        let existed = self.get(CF_EMBEDDINGS, &key)?.is_some();
+        self.delete(CF_EMBEDDINGS, &key)?;
+        Ok(existed)
+    }
+
+    /// Walk every embedding of a given node type. Slice 8b will use
+    /// this on rehydrate to populate the in-memory HNSW per-type
+    /// indexes; not on the hot search path.
+    pub fn scan_embeddings_by_type(
+        &self,
+        graph_id: &str,
+        node_type: &str,
+    ) -> Result<Vec<(String, Vec<f32>)>, DynoError> {
+        let prefix = crate::keys::node_type_prefix(graph_id, node_type);
+        let entries = self.prefix_scan(CF_EMBEDDINGS, &prefix)?;
+        let mut results = Vec::with_capacity(entries.len());
+        for (key, bytes) in entries {
+            let after_prefix = &key[prefix.len()..];
+            let node_id = String::from_utf8_lossy(after_prefix).to_string();
+            results.push((node_id, decode_embedding(&bytes)?));
+        }
+        Ok(results)
     }
 
     // =========================================================================
@@ -638,6 +769,11 @@ impl StorageEngine {
                 crate::keys::adj_out_key(graph_id, &edge.from_id, &edge.edge_type, node_id);
             self.delete(CF_ADJ_OUT, &peer_out)?;
         }
+
+        // Step 5: drop the sidecar embedding if any. Idempotent — most
+        // nodes won't have one.
+        let emb_key = crate::keys::node_key(graph_id, node_type, node_id);
+        self.delete(CF_EMBEDDINGS, &emb_key)?;
 
         Ok(existed)
     }
@@ -1143,6 +1279,24 @@ impl StorageEngine {
             .expect("read_cache lock poisoned")
             .clear();
     }
+}
+
+/// Decode raw f32-LE bytes to a `Vec<f32>`. Length must be a multiple
+/// of 4; anything else means the on-disk value is corrupt and we fail
+/// loud rather than truncating.
+fn decode_embedding(bytes: &[u8]) -> Result<Vec<f32>, DynoError> {
+    if !bytes.len().is_multiple_of(4) {
+        return Err(DynoError::Storage(format!(
+            "embedding byte length {} is not a multiple of 4 (corrupt sidecar?)",
+            bytes.len()
+        )));
+    }
+    let mut floats = Vec::with_capacity(bytes.len() / 4);
+    for chunk in bytes.chunks_exact(4) {
+        let arr: [u8; 4] = chunk.try_into().expect("chunks_exact yields 4-byte slices");
+        floats.push(f32::from_le_bytes(arr));
+    }
+    Ok(floats)
 }
 
 #[cfg(test)]
@@ -2177,5 +2331,144 @@ schema:
         engine.create_node("g1", "Person", "alice", props).unwrap();
         let stored = engine.get_node("g1", "Person", "alice").unwrap().unwrap();
         assert_eq!(stored.properties.get("age"), Some(&Value::Int(0)));
+    }
+
+    fn embedding_schema() -> Schema {
+        Schema::from_yaml(
+            r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Item:
+      properties:
+        name: { type: string, required: true }
+  edge_types: {}
+"#,
+        )
+        .unwrap()
+    }
+
+    fn make_item(engine: &mut StorageEngine, id: &str) {
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), Value::String(id.into()));
+        engine.create_node("g1", "Item", id, props).unwrap();
+    }
+
+    #[test]
+    fn embedding_round_trip() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        make_item(&mut engine, "n1");
+        let v = vec![1.0_f32, 2.0, 3.0, 4.0];
+        engine.set_embedding("g1", "Item", "n1", &v).unwrap();
+        let got = engine
+            .get_embedding("g1", "Item", "n1")
+            .unwrap()
+            .expect("embedding present");
+        assert_eq!(got, v);
+    }
+
+    #[test]
+    fn embedding_overwrites_in_place() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        make_item(&mut engine, "n1");
+        engine
+            .set_embedding("g1", "Item", "n1", &[1.0, 2.0])
+            .unwrap();
+        engine
+            .set_embedding("g1", "Item", "n1", &[9.0, 8.0, 7.0])
+            .unwrap();
+        let got = engine.get_embedding("g1", "Item", "n1").unwrap().unwrap();
+        assert_eq!(got, vec![9.0, 8.0, 7.0]);
+    }
+
+    #[test]
+    fn set_embedding_on_missing_node_errors_loudly() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let err = engine
+            .set_embedding("g1", "Item", "ghost", &[1.0, 2.0])
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DynoError::NodeNotFound { ref node_type, ref node_id }
+                if node_type == "Item" && node_id == "ghost"
+        ));
+    }
+
+    #[test]
+    fn set_embedding_rejects_empty_vector() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        make_item(&mut engine, "n1");
+        let err = engine.set_embedding("g1", "Item", "n1", &[]).unwrap_err();
+        assert!(matches!(err, DynoError::Validation { .. }));
+    }
+
+    #[test]
+    fn delete_embedding_returns_existed_bool() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        make_item(&mut engine, "n1");
+        engine.set_embedding("g1", "Item", "n1", &[1.0]).unwrap();
+        assert!(engine.delete_embedding("g1", "Item", "n1").unwrap());
+        // Idempotent — second delete returns false but is not an error.
+        assert!(!engine.delete_embedding("g1", "Item", "n1").unwrap());
+        // And the embedding is gone for real.
+        assert!(engine.get_embedding("g1", "Item", "n1").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_node_cascades_to_embedding() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        make_item(&mut engine, "n1");
+        engine
+            .set_embedding("g1", "Item", "n1", &[0.5, 0.5])
+            .unwrap();
+        engine.delete_node("g1", "Item", "n1").unwrap();
+        assert!(engine.get_embedding("g1", "Item", "n1").unwrap().is_none());
+    }
+
+    #[test]
+    fn scan_embeddings_by_type_returns_all_and_only_that_type() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        for id in ["a", "b", "c"] {
+            make_item(&mut engine, id);
+        }
+        engine
+            .set_embedding("g1", "Item", "a", &[1.0, 0.0])
+            .unwrap();
+        engine
+            .set_embedding("g1", "Item", "b", &[0.0, 1.0])
+            .unwrap();
+        // c has no embedding.
+        let mut scanned = engine.scan_embeddings_by_type("g1", "Item").unwrap();
+        scanned.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(scanned.len(), 2);
+        assert_eq!(scanned[0].0, "a");
+        assert_eq!(scanned[0].1, vec![1.0, 0.0]);
+        assert_eq!(scanned[1].0, "b");
+        assert_eq!(scanned[1].1, vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn rocksdb_embedding_persistence() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().to_str().unwrap();
+        let v = vec![0.25_f32, 0.5, 0.75, 1.0];
+        {
+            let mut engine = StorageEngine::new_rocksdb(embedding_schema(), path).unwrap();
+            make_item(&mut engine, "n1");
+            engine.set_embedding("g1", "Item", "n1", &v).unwrap();
+        }
+        let engine = StorageEngine::new_rocksdb(embedding_schema(), path).unwrap();
+        let got = engine.get_embedding("g1", "Item", "n1").unwrap().unwrap();
+        assert_eq!(got, v);
+    }
+
+    #[test]
+    fn decode_embedding_rejects_non_multiple_of_4() {
+        let err = decode_embedding(&[1, 2, 3, 4, 5]).unwrap_err();
+        assert!(
+            matches!(err, DynoError::Storage(ref m) if m.contains("not a multiple of 4")),
+            "{err:?}"
+        );
     }
 }
