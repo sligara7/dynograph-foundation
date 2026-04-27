@@ -369,6 +369,109 @@ async fn embedding_persists_through_rehydrate() {
     }
 }
 
+/// Slice 8b: rehydrate must rebuild the HNSW indexes from CF_EMBEDDINGS
+/// so post-restart searches honor pre-restart inserts.
+#[tokio::test]
+async fn similar_works_after_rehydrate() {
+    let tmp = TempDir::new().unwrap();
+
+    // Round 1: create graph + nodes + embeddings.
+    {
+        let (app, _registry) = build_persistent_app(tmp.path());
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(schema_body("g1").to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        for id in ["a", "b", "c"] {
+            let create = json!({
+                "node_type": "Item",
+                "node_id": id,
+                "properties": { "name": id }
+            });
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/v1/graphs/g1/nodes")
+                        .header("content-type", "application/json")
+                        .body(Body::from(create.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::CREATED);
+        }
+        for (id, vec) in [
+            ("a", vec![1.0_f32, 0.0, 0.0]),
+            ("b", vec![0.95, 0.1, 0.0]),
+            ("c", vec![0.0, 0.0, 1.0]),
+        ] {
+            let put = json!({ "embedding": vec });
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(format!("/v1/graphs/g1/nodes/Item/{id}/embedding"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(put.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+        }
+    }
+    // First service drops; HNSW indexes go with it (in-memory).
+
+    // Round 2: rehydrate, search, expect the same ranking the
+    // first incarnation would have returned.
+    let (app, registry) = build_persistent_app(tmp.path());
+    registry.rehydrate().expect("rehydrate");
+
+    let body = json!({ "embedding": [1.0, 0.0, 0.0], "top_k": 3, "node_type": "Item" });
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/similar")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes).unwrap();
+    let results = parsed["results"].as_array().unwrap();
+    assert_eq!(
+        results.len(),
+        3,
+        "expected 3 hits after rehydrate; got {parsed}"
+    );
+    let ids: Vec<&str> = results
+        .iter()
+        .map(|r| r["node_id"].as_str().unwrap())
+        .collect();
+    // The HNSW index was rebuilt from disk — same ordering as
+    // pre-restart (a,b on axis 0; c orthogonal).
+    assert_eq!(ids[0], "a", "{parsed}");
+    assert_eq!(ids[1], "b", "{parsed}");
+    assert_eq!(ids[2], "c", "{parsed}");
+}
+
 #[tokio::test]
 async fn create_graph_with_invalid_id_returns_400() {
     let tmp = TempDir::new().unwrap();

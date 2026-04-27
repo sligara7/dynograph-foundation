@@ -1566,8 +1566,11 @@ async fn embedding_round_trip_set_get_delete() {
 async fn put_embedding_overwrites() {
     let app = build_app_with_item_graph().await;
     create_item(&app, "n1").await;
+    // Same dim across overwrites — slice 8b's HNSW index locks the
+    // dim per-type to the first inserted vector. A dim change now
+    // surfaces as `EmbeddingDimMismatch` (covered separately).
     assert_eq!(
-        put_embedding(&app, "Item", "n1", &[1.0, 0.0]).await,
+        put_embedding(&app, "Item", "n1", &[1.0, 0.0, 0.0]).await,
         StatusCode::OK
     );
     assert_eq!(
@@ -1664,6 +1667,237 @@ async fn embedding_endpoints_on_missing_graph_return_404() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+// =============================================================================
+// Slice 8b — POST /v1/graphs/{id}/similar + HNSW lifecycle
+// =============================================================================
+
+async fn post_similar(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/similar")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, parsed)
+}
+
+/// Two near-aligned vectors should rank higher than an orthogonal
+/// one. Exact cosine values aren't asserted (depends on HNSW's
+/// approximate-search beam width); we just assert ordering.
+#[tokio::test]
+async fn similar_returns_top_k_in_descending_score() {
+    let app = build_app_with_item_graph().await;
+    for id in ["a", "b", "c"] {
+        create_item(&app, id).await;
+    }
+    // 3-dim vectors. `a` and `b` are close along axis 0; `c` is on axis 2.
+    put_embedding(&app, "Item", "a", &[1.0, 0.0, 0.0]).await;
+    put_embedding(&app, "Item", "b", &[0.95, 0.1, 0.0]).await;
+    put_embedding(&app, "Item", "c", &[0.0, 0.0, 1.0]).await;
+
+    let (status, body) = post_similar(
+        &app,
+        json!({ "embedding": [1.0, 0.0, 0.0], "top_k": 3, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let results = body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3);
+    let ids: Vec<&str> = results
+        .iter()
+        .map(|r| r["node_id"].as_str().unwrap())
+        .collect();
+    // The two axis-0 neighbors come before the orthogonal one.
+    assert_eq!(ids[0], "a", "results: {results:?}");
+    assert_eq!(ids[1], "b", "results: {results:?}");
+    assert_eq!(ids[2], "c", "results: {results:?}");
+}
+
+#[tokio::test]
+async fn similar_returns_empty_when_no_index_exists_yet() {
+    // The Item type exists in the schema but no embedding has been
+    // set, so no HNSW index has been created. Search returns 200 +
+    // empty results — the type-name is honest, just no data.
+    let app = build_app_with_item_graph().await;
+    let (status, body) = post_similar(
+        &app,
+        json!({ "embedding": [0.1, 0.2], "top_k": 5, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["results"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn similar_dim_mismatch_returns_400() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    put_embedding(&app, "Item", "n1", &[1.0, 0.0, 0.0]).await;
+    let (status, _) = post_similar(
+        &app,
+        json!({ "embedding": [1.0, 0.0], "top_k": 1, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn similar_unknown_node_type_returns_400() {
+    let app = build_app_with_item_graph().await;
+    let (status, _) = post_similar(
+        &app,
+        json!({ "embedding": [0.1, 0.2], "top_k": 1, "node_type": "Bogus" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn similar_empty_embedding_returns_400() {
+    let app = build_app_with_item_graph().await;
+    let (status, _) = post_similar(
+        &app,
+        json!({ "embedding": [], "top_k": 1, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn similar_zero_top_k_returns_400() {
+    let app = build_app_with_item_graph().await;
+    let (status, _) = post_similar(
+        &app,
+        json!({ "embedding": [0.1, 0.2], "top_k": 0, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn similar_on_missing_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/nope/similar")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({ "embedding": [0.1], "top_k": 1, "node_type": "Item" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_embedding_dim_mismatch_for_existing_type_returns_400() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "a").await;
+    create_item(&app, "b").await;
+    // First PUT locks the index dim at 3.
+    assert_eq!(
+        put_embedding(&app, "Item", "a", &[0.1, 0.2, 0.3]).await,
+        StatusCode::OK
+    );
+    // Second PUT for a different node, wrong dim, must be rejected
+    // before any storage write happens (no on-disk rollback needed).
+    assert_eq!(
+        put_embedding(&app, "Item", "b", &[0.1, 0.2]).await,
+        StatusCode::BAD_REQUEST
+    );
+    // And the would-be-set node's storage embedding wasn't written.
+    let (status, _) = get_embedding(&app, "Item", "b").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_embedding_drops_node_from_search_results() {
+    let app = build_app_with_item_graph().await;
+    for id in ["a", "b"] {
+        create_item(&app, id).await;
+    }
+    put_embedding(&app, "Item", "a", &[1.0, 0.0]).await;
+    put_embedding(&app, "Item", "b", &[0.0, 1.0]).await;
+
+    assert_eq!(
+        delete_embedding(&app, "Item", "a").await,
+        StatusCode::NO_CONTENT
+    );
+
+    // After the delete, `a` should no longer appear among search hits.
+    let (status, body) = post_similar(
+        &app,
+        json!({ "embedding": [1.0, 0.0], "top_k": 5, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = body["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["node_id"].as_str().unwrap())
+        .collect();
+    assert!(
+        !ids.contains(&"a"),
+        "deleted node `a` resurfaced in search: {ids:?}"
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_node_drops_it_from_hnsw_too() {
+    // delete_node already cascades to drop the storage embedding
+    // (slice 8a). Slice 8b extends that to also remove the node
+    // from the per-type HNSW index.
+    let app = build_app_with_item_graph().await;
+    for id in ["a", "b"] {
+        create_item(&app, id).await;
+    }
+    put_embedding(&app, "Item", "a", &[1.0, 0.0]).await;
+    put_embedding(&app, "Item", "b", &[0.0, 1.0]).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/v1/graphs/g1/nodes/Item/a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    let (_, body) = post_similar(
+        &app,
+        json!({ "embedding": [1.0, 0.0], "top_k": 5, "node_type": "Item" }),
+    )
+    .await;
+    let ids: Vec<&str> = body["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["node_id"].as_str().unwrap())
+        .collect();
+    assert!(
+        !ids.contains(&"a"),
+        "deleted node `a` still in HNSW: {ids:?}"
+    );
 }
 
 #[tokio::test]

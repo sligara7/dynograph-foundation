@@ -140,6 +140,14 @@ impl HnswIndex {
         }
     }
 
+    /// Vector dimensionality the index was constructed with. Every
+    /// `insert` and `search` must use vectors of this length —
+    /// callers validate against this rather than relying on the
+    /// internal `assert!` in `insert` panicking.
+    pub fn dim(&self) -> usize {
+        self.config.dim
+    }
+
     /// Total slot count (includes tombstoned slots).
     pub fn len(&self) -> usize {
         self.nodes.len()

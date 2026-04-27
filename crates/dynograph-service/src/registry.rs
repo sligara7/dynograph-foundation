@@ -25,6 +25,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use dynograph_core::{DynoError, Schema};
 use dynograph_storage::StorageEngine;
+use dynograph_vector::{HnswConfig, HnswIndex};
 
 use crate::schema_response::content_hash;
 
@@ -44,6 +45,12 @@ pub enum RegistryError {
     },
     #[error("embedding not found: {node_type}/{node_id}")]
     EmbeddingNotFound { node_type: String, node_id: String },
+    #[error("embedding dimension mismatch for {node_type}: expected {expected}, got {actual}")]
+    EmbeddingDimMismatch {
+        node_type: String,
+        expected: usize,
+        actual: usize,
+    },
     #[error("invalid graph id: {0}")]
     InvalidId(String),
     #[error("bad request: {0}")]
@@ -64,7 +71,9 @@ impl IntoResponse for RegistryError {
             | Self::NodeNotFound { .. }
             | Self::EdgeNotFound { .. }
             | Self::EmbeddingNotFound { .. } => StatusCode::NOT_FOUND,
-            Self::InvalidId(_) | Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::InvalidId(_) | Self::BadRequest(_) | Self::EmbeddingDimMismatch { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             Self::Filesystem(_) | Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Storage(inner) => status_for_dyno_error(inner),
         };
@@ -123,17 +132,24 @@ fn status_for_dyno_error(e: &DynoError) -> StatusCode {
     }
 }
 
-/// A graph hosted by the registry. Engine + cached content_hash live
-/// together under one lock so a schema replacement (slice 7's PUT
-/// `/v1/graphs/{id}/schema`) can swap both atomically — concurrent
-/// readers never observe a torn (schema, hash) pair.
+/// A graph hosted by the registry. Engine + cached content_hash + per-
+/// node-type HNSW indexes live together under one lock so schema
+/// replacement (slice 7) and embedding-driven HNSW maintenance (slice
+/// 8b) stay atomic from any reader's view — concurrent readers never
+/// observe a torn (schema, hash) pair, and the (storage, indexes)
+/// dual-write for `set_embedding` / `delete_embedding` / `delete_node`
+/// can't be observed mid-update.
 pub struct GraphEntry {
     state: RwLock<GraphState>,
 }
 
-struct GraphState {
-    engine: StorageEngine,
-    content_hash: Arc<str>,
+pub(crate) struct GraphState {
+    pub(crate) engine: StorageEngine,
+    pub(crate) content_hash: Arc<str>,
+    /// Per-(node_type) HNSW index. Lazily created on first
+    /// `set_embedding` call for a type, with `dim` taken from the
+    /// first vector. Subsequent inserts must match that dim.
+    pub(crate) indexes: HashMap<String, HnswIndex>,
 }
 
 impl std::fmt::Debug for GraphEntry {
@@ -146,11 +162,16 @@ impl std::fmt::Debug for GraphEntry {
 }
 
 impl GraphEntry {
-    fn new(engine: StorageEngine, content_hash: Arc<str>) -> Self {
+    fn new(
+        engine: StorageEngine,
+        content_hash: Arc<str>,
+        indexes: HashMap<String, HnswIndex>,
+    ) -> Self {
         Self {
             state: RwLock::new(GraphState {
                 engine,
                 content_hash,
+                indexes,
             }),
         }
     }
@@ -177,6 +198,33 @@ impl GraphEntry {
     pub fn with_engine_write<R>(&self, f: impl FnOnce(&mut StorageEngine) -> R) -> R {
         let mut guard = self.state.write().expect("graph state write lock poisoned");
         f(&mut guard.engine)
+    }
+
+    /// Run a closure with a read-lock that exposes both the engine
+    /// and the per-type HNSW indexes. Used by `/similar` searches
+    /// (no index mutation; the engine is needed to validate the
+    /// requested `node_type` against the live schema).
+    pub(crate) fn with_state_read<R>(
+        &self,
+        f: impl FnOnce(&StorageEngine, &HashMap<String, HnswIndex>) -> R,
+    ) -> R {
+        let guard = self.state.read().expect("graph state read lock poisoned");
+        f(&guard.engine, &guard.indexes)
+    }
+
+    /// Run a closure with a write-lock that exposes both the engine
+    /// and the per-type HNSW indexes. Used by `set_embedding` /
+    /// `delete_embedding` / `delete_node` so the storage write and
+    /// the HNSW maintenance happen atomically.
+    pub(crate) fn with_state_write<R>(
+        &self,
+        f: impl FnOnce(&mut StorageEngine, &mut HashMap<String, HnswIndex>) -> R,
+    ) -> R {
+        let mut guard = self.state.write().expect("graph state write lock poisoned");
+        let GraphState {
+            engine, indexes, ..
+        } = &mut *guard;
+        f(engine, indexes)
     }
 
     /// Validate, persist, then swap. The whole sequence runs under
@@ -249,7 +297,8 @@ impl GraphRegistry {
         }
         let hash = Arc::from(content_hash(&schema));
         let engine = build_engine(&self.backend, id, schema)?;
-        let entry = Arc::new(GraphEntry::new(engine, hash));
+        // Fresh graph — no embeddings yet, so no HNSW indexes to build.
+        let entry = Arc::new(GraphEntry::new(engine, hash, HashMap::new()));
         graphs.insert(id.to_string(), entry.clone());
         Ok(entry)
     }
@@ -393,7 +442,8 @@ impl GraphRegistry {
             let engine = StorageEngine::new_rocksdb(schema, db_path_str).map_err(|e| {
                 RegistryError::Rehydration(format!("open rocksdb at {db_path_str}: {e}"))
             })?;
-            let entry_arc = Arc::new(GraphEntry::new(engine, hash));
+            let indexes = build_indexes_from_storage(&engine, &id)?;
+            let entry_arc = Arc::new(GraphEntry::new(engine, hash, indexes));
             graphs.insert(id.clone(), entry_arc);
             rehydrated.push(id);
         }
@@ -452,6 +502,44 @@ fn read_schema_file(graph_dir: &std::path::Path) -> Result<Schema, RegistryError
         .map_err(|e| RegistryError::Rehydration(format!("read {}: {e}", schema_path.display())))?;
     serde_json::from_str(&text)
         .map_err(|e| RegistryError::Rehydration(format!("parse {}: {e}", schema_path.display())))
+}
+
+/// Walk every node type in the schema, scan its `CF_EMBEDDINGS`
+/// entries, and build a fresh `HnswIndex` per type that has any.
+/// Each index's `dim` is the length of the first embedding read for
+/// that type; intra-type drift fails loud — that would mean the
+/// on-disk store has been corrupted (no honest write path produces
+/// it). Used at rehydrate time and (in a future deferred-rebuild
+/// slice) potentially after schema-replacement.
+fn build_indexes_from_storage(
+    engine: &StorageEngine,
+    graph_id: &str,
+) -> Result<HashMap<String, HnswIndex>, RegistryError> {
+    let mut indexes = HashMap::new();
+    for node_type in engine.schema().node_types.keys() {
+        let entries = engine
+            .scan_embeddings_by_type(graph_id, node_type)
+            .map_err(|e| {
+                RegistryError::Rehydration(format!("scan embeddings {graph_id}/{node_type}: {e}"))
+            })?;
+        if entries.is_empty() {
+            continue;
+        }
+        let dim = entries[0].1.len();
+        let mut index = HnswIndex::new(HnswConfig::new(dim));
+        for (node_id, vec) in &entries {
+            if vec.len() != dim {
+                return Err(RegistryError::Rehydration(format!(
+                    "embedding dim drift in {graph_id}/{node_type}/{node_id}: \
+                     first vector was {dim}, this one is {}",
+                    vec.len()
+                )));
+            }
+            index.insert(node_id, vec);
+        }
+        indexes.insert(node_type.clone(), index);
+    }
+    Ok(indexes)
 }
 
 impl Default for GraphRegistry {

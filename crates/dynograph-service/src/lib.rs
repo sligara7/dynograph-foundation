@@ -13,6 +13,7 @@ mod readiness;
 mod registry;
 mod schema_evolution;
 mod schema_response;
+mod similar_response;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, Identity, NoAuth};
@@ -25,3 +26,4 @@ pub use readiness::Readiness;
 pub use registry::{GraphEntry, GraphRegistry, RegistryError, StorageBackend, validate_graph_id};
 pub use schema_evolution::{EvolutionError, validate_compatible};
 pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
+pub use similar_response::{SimilarHit, SimilarResponse};

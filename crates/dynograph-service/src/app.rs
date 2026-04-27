@@ -13,6 +13,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use dynograph_core::{PropertyType, Schema, Value};
+use dynograph_vector::{HnswConfig, HnswIndex};
 
 use crate::{
     auth::{AuthProvider, NoAuth},
@@ -23,6 +24,7 @@ use crate::{
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
     schema_response::SchemaResponse,
+    similar_response::{SimilarHit, SimilarResponse},
 };
 
 #[derive(Clone)]
@@ -94,6 +96,7 @@ pub fn app(state: AppState) -> Router {
                 .put(set_embedding)
                 .delete(delete_embedding),
         )
+        .route("/v1/graphs/{id}/similar", post(similar))
         .with_state(state)
 }
 
@@ -338,8 +341,17 @@ async fn delete_node(
     Path((id, node_type, node_id)): Path<(String, String, String)>,
 ) -> Result<StatusCode, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let existed =
-        entry.with_engine_write(|engine| engine.delete_node(&id, &node_type, &node_id))?;
+    // Storage's delete_node already cascades to drop the sidecar
+    // embedding (slice 8a). The HNSW index is service-side state, so
+    // we mirror the cascade here: if an index exists for this type,
+    // remove the node from it. The whole cycle runs under one lock.
+    let existed = entry.with_state_write(|engine, indexes| -> Result<bool, RegistryError> {
+        let existed = engine.delete_node(&id, &node_type, &node_id)?;
+        if existed && let Some(index) = indexes.get_mut(&node_type) {
+            index.remove(&node_id);
+        }
+        Ok(existed)
+    })?;
     if existed {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -447,10 +459,13 @@ struct SetEmbeddingBody {
     embedding: Vec<f32>,
 }
 
-/// Set the sidecar embedding for an existing node. The node must
-/// exist (storage-side `set_embedding` returns `NodeNotFound`
-/// otherwise — mapped to 404). Empty embeddings are rejected at the
-/// storage layer with `Validation` → 400.
+/// Set the sidecar embedding for an existing node and update the
+/// per-type HNSW index in lockstep. The dim check happens against
+/// any existing index *before* the storage write, so a mismatch
+/// rejects without leaving on-disk state to roll back. The index is
+/// auto-created on first insert per type, with `dim` taken from the
+/// first vector. The node must exist (storage's `set_embedding`
+/// returns `NodeNotFound` → 404). Empty embeddings → 400.
 async fn set_embedding(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -458,8 +473,23 @@ async fn set_embedding(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let SetEmbeddingBody { embedding } = body;
-    entry
-        .with_engine_write(|engine| engine.set_embedding(&id, &node_type, &node_id, &embedding))?;
+    entry.with_state_write(|engine, indexes| -> Result<(), RegistryError> {
+        if let Some(index) = indexes.get(&node_type)
+            && index.dim() != embedding.len()
+        {
+            return Err(RegistryError::EmbeddingDimMismatch {
+                node_type: node_type.clone(),
+                expected: index.dim(),
+                actual: embedding.len(),
+            });
+        }
+        engine.set_embedding(&id, &node_type, &node_id, &embedding)?;
+        let index = indexes
+            .entry(node_type.clone())
+            .or_insert_with(|| HnswIndex::new(HnswConfig::new(embedding.len())));
+        index.insert(&node_id, &embedding);
+        Ok(())
+    })?;
     let response = EmbeddingResponse {
         node_type,
         node_id,
@@ -492,11 +522,85 @@ async fn delete_embedding(
     Path((id, node_type, node_id)): Path<(String, String, String)>,
 ) -> Result<StatusCode, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let existed =
-        entry.with_engine_write(|engine| engine.delete_embedding(&id, &node_type, &node_id))?;
+    let existed = entry.with_state_write(|engine, indexes| -> Result<bool, RegistryError> {
+        let existed = engine.delete_embedding(&id, &node_type, &node_id)?;
+        if existed && let Some(index) = indexes.get_mut(&node_type) {
+            index.remove(&node_id);
+        }
+        Ok(existed)
+    })?;
     if existed {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(RegistryError::EmbeddingNotFound { node_type, node_id })
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct SimilarBody {
+    embedding: Vec<f32>,
+    top_k: usize,
+    node_type: String,
+}
+
+/// HNSW vector search over the per-type index. `node_type` is
+/// required: per-type indexes can have different dimensions (set
+/// independently by the first `set_embedding` for each type), so a
+/// merged "search all types" answer is ambiguous about score
+/// comparability. If a real consumer needs cross-type search later,
+/// add it as an explicit second route.
+///
+/// If no index exists for `node_type` (no embedding has ever been
+/// set for any node of that type), returns an empty result list —
+/// the type-name is honest, just no data to search yet.
+async fn similar(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SimilarBody>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let SimilarBody {
+        embedding,
+        top_k,
+        node_type,
+    } = body;
+    if embedding.is_empty() {
+        return Err(RegistryError::BadRequest(
+            "embedding must be non-empty".to_string(),
+        ));
+    }
+    if top_k == 0 {
+        return Err(RegistryError::BadRequest("top_k must be > 0".to_string()));
+    }
+    let response = entry.with_state_read(
+        |engine, indexes| -> Result<SimilarResponse, RegistryError> {
+            if !engine.schema().node_types.contains_key(&node_type) {
+                return Err(RegistryError::BadRequest(format!(
+                    "unknown node type: {node_type}"
+                )));
+            }
+            let Some(index) = indexes.get(&node_type) else {
+                return Ok(SimilarResponse {
+                    results: Vec::new(),
+                });
+            };
+            if index.dim() != embedding.len() {
+                return Err(RegistryError::EmbeddingDimMismatch {
+                    node_type: node_type.clone(),
+                    expected: index.dim(),
+                    actual: embedding.len(),
+                });
+            }
+            let results = index
+                .search(&embedding, top_k)
+                .into_iter()
+                .map(|sr| SimilarHit {
+                    node_id: sr.id,
+                    score: sr.score,
+                })
+                .collect();
+            Ok(SimilarResponse { results })
+        },
+    )?;
+    Ok(Json(response).into_response())
 }

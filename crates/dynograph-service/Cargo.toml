@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 dynograph-core = { path = "../dynograph-core" }
 dynograph-storage = { path = "../dynograph-storage" }
+dynograph-vector = { path = "../dynograph-vector" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 axum = { workspace = true }
