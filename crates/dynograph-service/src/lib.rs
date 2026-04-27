@@ -13,5 +13,5 @@ pub use app::{AppState, app};
 pub use auth::{AuthProvider, Identity, NoAuth};
 pub use edge_response::EdgeResponse;
 pub use node_response::NodeResponse;
-pub use registry::{GraphEntry, GraphRegistry, RegistryError};
+pub use registry::{GraphEntry, GraphRegistry, RegistryError, StorageBackend, validate_graph_id};
 pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
