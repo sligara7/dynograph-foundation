@@ -5,19 +5,20 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 
-use dynograph_core::{Schema, Value};
+use dynograph_core::{PropertyType, Schema, Value};
 
 use crate::{
     auth::{AuthProvider, NoAuth},
     edge_response::EdgeResponse,
-    node_response::NodeResponse,
+    metadata_response::GraphMetadataResponse,
+    node_response::{NodeListResponse, NodeResponse},
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
     schema_response::SchemaResponse,
@@ -72,7 +73,8 @@ pub fn app(state: AppState) -> Router {
         .route("/ready", get(ready))
         .route("/v1/graphs", get(list_graphs).post(create_graph))
         .route("/v1/graphs/{id}", get(get_graph).delete(delete_graph))
-        .route("/v1/graphs/{id}/nodes", post(create_node))
+        .route("/v1/graphs/{id}/schema", get(get_schema))
+        .route("/v1/graphs/{id}/nodes", get(list_nodes).post(create_node))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
             get(get_node).put(replace_node).delete(delete_node),
@@ -138,7 +140,23 @@ async fn create_graph(
     Ok((StatusCode::CREATED, Json(response)).into_response())
 }
 
+/// Metadata-only view of a graph: id + wire_version + content_hash.
+/// Use `GET /v1/graphs/{id}/schema` for the full schema body. Splitting
+/// keeps existence checks and content-hash drift comparisons cheap —
+/// no schema serialization on the wire when the caller only needs
+/// "does this graph exist and at what content_hash."
 async fn get_graph(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = GraphMetadataResponse::new(id, entry.content_hash().to_string());
+    Ok(Json(response).into_response())
+}
+
+/// Full schema view: same shape consumed by generation_plus codegen
+/// (matches storyflow's C-partial `build_schema_contract` output).
+async fn get_schema(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Response, RegistryError> {
@@ -178,6 +196,88 @@ async fn create_node(
     let stored = entry
         .with_engine_write(|engine| engine.create_node(&id, &node_type, &node_id, properties))?;
     Ok((StatusCode::CREATED, Json(NodeResponse::from(stored))).into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct ListNodesQuery {
+    #[serde(rename = "type")]
+    node_type: String,
+    prop: Option<String>,
+    value: Option<String>,
+}
+
+/// List nodes of a given type, optionally filtered by a single
+/// (`prop`, `value`) pair. The pair must be supplied together — half
+/// of it is a 400. `value` arrives as a URL string and is coerced to
+/// the schema-declared `PropertyType` for the property; coerce
+/// failures are 400, not silent zero-result.
+async fn list_nodes(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<ListNodesQuery>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let ListNodesQuery {
+        node_type,
+        prop,
+        value,
+    } = q;
+
+    let nodes = entry.with_engine_read(|engine| -> Result<Vec<_>, RegistryError> {
+        match (prop, value) {
+            (None, None) => engine
+                .scan_nodes(&id, &node_type)
+                .map_err(RegistryError::Storage),
+            (Some(prop), Some(value)) => {
+                let coerced = coerce_query_value(engine.schema(), &node_type, &prop, &value)?;
+                engine
+                    .scan_nodes_by_property(&id, &node_type, &prop, &coerced)
+                    .map_err(RegistryError::Storage)
+            }
+            (Some(_), None) | (None, Some(_)) => Err(RegistryError::BadRequest(
+                "prop and value must be supplied together".to_string(),
+            )),
+        }
+    })?;
+
+    let response = NodeListResponse::new(nodes.into_iter().map(NodeResponse::from).collect());
+    Ok(Json(response).into_response())
+}
+
+/// Coerce a URL-string `value` into a `Value` typed per the schema's
+/// declaration of `node_type.prop`. Mirrors the indexable subset of
+/// `PropertyType`s — `Float`/`ListString` aren't indexed by storage's
+/// `scan_nodes_by_property`, so filtering by them is rejected up
+/// front (400) rather than silently returning empty. `Enum` accepts
+/// any string; storage validates it against `values` only on writes,
+/// so a non-member enum filter cleanly returns no matches.
+fn coerce_query_value(
+    schema: &Schema,
+    node_type: &str,
+    prop: &str,
+    value: &str,
+) -> Result<Value, RegistryError> {
+    let nt = schema
+        .node_types
+        .get(node_type)
+        .ok_or_else(|| RegistryError::BadRequest(format!("unknown node type: {node_type}")))?;
+    let pd = nt.properties.get(prop).ok_or_else(|| {
+        RegistryError::BadRequest(format!("unknown property: {node_type}.{prop}"))
+    })?;
+    match pd.prop_type {
+        PropertyType::String | PropertyType::Enum => Ok(Value::String(value.to_string())),
+        PropertyType::Datetime => Ok(Value::String(value.to_string())),
+        PropertyType::Int => value.parse::<i64>().map(Value::Int).map_err(|e| {
+            RegistryError::BadRequest(format!("value {value:?} is not a valid int: {e}"))
+        }),
+        PropertyType::Bool => value.parse::<bool>().map(Value::Bool).map_err(|e| {
+            RegistryError::BadRequest(format!("value {value:?} is not a valid bool: {e}"))
+        }),
+        PropertyType::Float | PropertyType::ListString => Err(RegistryError::BadRequest(format!(
+            "filtering by {node_type}.{prop} is not supported (property type {:?} is not indexed)",
+            pd.prop_type
+        ))),
+    }
 }
 
 async fn get_node(

@@ -44,6 +44,8 @@ pub enum RegistryError {
     },
     #[error("invalid graph id: {0}")]
     InvalidId(String),
+    #[error("bad request: {0}")]
+    BadRequest(String),
     #[error("filesystem error: {0}")]
     Filesystem(String),
     #[error("rehydration failed: {0}")]
@@ -59,7 +61,7 @@ impl IntoResponse for RegistryError {
             Self::NotFound(_) | Self::NodeNotFound { .. } | Self::EdgeNotFound { .. } => {
                 StatusCode::NOT_FOUND
             }
-            Self::InvalidId(_) => StatusCode::BAD_REQUEST,
+            Self::InvalidId(_) | Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Filesystem(_) | Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Storage(inner) => status_for_dyno_error(inner),
         };

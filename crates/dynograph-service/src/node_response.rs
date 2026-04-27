@@ -26,3 +26,18 @@ impl From<StoredNode> for NodeResponse {
         }
     }
 }
+
+/// Envelope for node-list endpoints. Matches the convention used by
+/// `GraphListResponse` (`{graphs: [...]}`) — a top-level object, not a
+/// bare array, so future additions (pagination cursor, total count)
+/// are non-breaking.
+#[derive(Debug, Serialize)]
+pub struct NodeListResponse {
+    pub nodes: Vec<NodeResponse>,
+}
+
+impl NodeListResponse {
+    pub fn new(nodes: Vec<NodeResponse>) -> Self {
+        Self { nodes }
+    }
+}

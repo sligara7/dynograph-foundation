@@ -16,7 +16,7 @@ fn build_app() -> axum::Router {
 }
 
 #[tokio::test]
-async fn create_then_get_round_trips_schema_and_content_hash() {
+async fn create_then_get_metadata_and_schema() {
     let app = build_app();
 
     let body = json!({
@@ -55,7 +55,13 @@ async fn create_then_get_round_trips_schema_and_content_hash() {
     assert_eq!(created["wire_version"], env!("CARGO_PKG_VERSION"));
     let first_hash = created["content_hash"].as_str().unwrap().to_string();
     assert_eq!(first_hash.len(), 64);
+    // POST returns the full schema body (creator wants confirmation of
+    // exactly what was stored).
+    assert_eq!(created["schema"]["name"], "demo");
 
+    // GET /v1/graphs/{id} is metadata-only — no schema body. Cheap
+    // existence check + content-hash drift comparison without the
+    // serialized schema on the wire.
     let res = app
         .clone()
         .oneshot(
@@ -68,13 +74,52 @@ async fn create_then_get_round_trips_schema_and_content_hash() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let metadata: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(metadata["id"], "g1");
+    assert_eq!(metadata["wire_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(metadata["content_hash"].as_str().unwrap(), first_hash);
+    assert!(
+        metadata.get("schema").is_none(),
+        "metadata response must not embed schema; got {metadata}"
+    );
 
+    // GET /v1/graphs/{id}/schema returns the full SchemaResponse —
+    // the shape generation_plus codegen reads (matches storyflow's
+    // C-partial `build_schema_contract`).
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/schema")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let fetched: Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(fetched["id"], "g1");
     assert_eq!(fetched["content_hash"].as_str().unwrap(), first_hash);
     assert_eq!(fetched["schema"]["name"], "demo");
     assert_eq!(fetched["schema"]["version"], 1);
+}
+
+#[tokio::test]
+async fn get_schema_on_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/missing/schema")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -797,6 +842,240 @@ async fn ready_returns_200_when_marked_ready() {
     assert_eq!(res.status(), StatusCode::OK);
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"ready");
+}
+
+/// Schema for slice 6 node-list tests — `Item` carries one indexed
+/// string property (`tag`), one indexed int property (`level`), one
+/// non-indexed float property (`score`, used to verify the unsupported-
+/// type 400 path). `name` stays required to keep create-call ergonomics.
+fn indexed_item_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "demo",
+            "version": 1,
+            "node_types": {
+                "Item": {
+                    "properties": {
+                        "name":  { "type": "string", "required": true },
+                        "tag":   { "type": "string", "indexed": true },
+                        "level": { "type": "int",    "indexed": true },
+                        "score": { "type": "float",  "indexed": true }
+                    }
+                }
+            },
+            "edge_types": {}
+        }
+    })
+}
+
+async fn build_app_with_indexed_graph() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(indexed_item_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+async fn create_indexed_item(app: &axum::Router, id: &str, tag: &str, level: i64) {
+    let body = json!({
+        "node_type": "Item",
+        "node_id": id,
+        "properties": { "name": id, "tag": tag, "level": level }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "create_indexed_item({id})"
+    );
+}
+
+async fn get_node_list(app: &axum::Router, query: &str) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/graphs/g1/nodes?{query}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, body)
+}
+
+#[tokio::test]
+async fn list_nodes_by_type_returns_all_of_type() {
+    let app = build_app_with_indexed_graph().await;
+    create_indexed_item(&app, "a", "red", 1).await;
+    create_indexed_item(&app, "b", "blue", 2).await;
+    create_indexed_item(&app, "c", "red", 3).await;
+
+    let (status, body) = get_node_list(&app, "type=Item").await;
+    assert_eq!(status, StatusCode::OK);
+    let nodes = body["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 3);
+    let mut ids: Vec<&str> = nodes
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["a", "b", "c"]);
+}
+
+#[tokio::test]
+async fn list_nodes_by_indexed_string_property() {
+    let app = build_app_with_indexed_graph().await;
+    create_indexed_item(&app, "a", "red", 1).await;
+    create_indexed_item(&app, "b", "blue", 2).await;
+    create_indexed_item(&app, "c", "red", 3).await;
+
+    let (status, body) = get_node_list(&app, "type=Item&prop=tag&value=red").await;
+    assert_eq!(status, StatusCode::OK);
+    let nodes = body["nodes"].as_array().unwrap();
+    let mut ids: Vec<&str> = nodes
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["a", "c"]);
+}
+
+#[tokio::test]
+async fn list_nodes_by_indexed_int_property_coerces_url_string() {
+    let app = build_app_with_indexed_graph().await;
+    create_indexed_item(&app, "a", "red", 1).await;
+    create_indexed_item(&app, "b", "blue", 2).await;
+    create_indexed_item(&app, "c", "red", 2).await;
+
+    let (status, body) = get_node_list(&app, "type=Item&prop=level&value=2").await;
+    assert_eq!(status, StatusCode::OK);
+    let nodes = body["nodes"].as_array().unwrap();
+    let mut ids: Vec<&str> = nodes
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    ids.sort();
+    assert_eq!(ids, vec!["b", "c"]);
+}
+
+#[tokio::test]
+async fn list_nodes_with_no_matches_returns_empty() {
+    let app = build_app_with_indexed_graph().await;
+    create_indexed_item(&app, "a", "red", 1).await;
+
+    let (status, body) = get_node_list(&app, "type=Item&prop=tag&value=green").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["nodes"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn list_nodes_missing_type_query_param_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/nodes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        res.status().is_client_error(),
+        "expected 4xx for missing ?type, got {}",
+        res.status()
+    );
+}
+
+#[tokio::test]
+async fn list_nodes_prop_without_value_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let (status, _) = get_node_list(&app, "type=Item&prop=tag").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_nodes_value_without_prop_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let (status, _) = get_node_list(&app, "type=Item&value=red").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_nodes_unknown_node_type_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let (status, _) = get_node_list(&app, "type=Bogus&prop=tag&value=red").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_nodes_unknown_property_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let (status, _) = get_node_list(&app, "type=Item&prop=bogus&value=x").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_nodes_int_value_unparseable_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let (status, _) = get_node_list(&app, "type=Item&prop=level&value=notanint").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+/// Filtering by an unsupported (non-indexable) property type fails
+/// loudly rather than silently returning empty. `Float`/`ListString`
+/// are never written into `CF_NODE_IDX`, so a `scan_nodes_by_property`
+/// against them would always return 0 rows — that would be a silent
+/// fallback (project-wide rule against). Coerce rejects up front.
+#[tokio::test]
+async fn list_nodes_unsupported_filter_type_returns_400() {
+    let app = build_app_with_indexed_graph().await;
+    let (status, _) = get_node_list(&app, "type=Item&prop=score&value=1.5").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_nodes_on_missing_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/nope/nodes?type=Item")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
