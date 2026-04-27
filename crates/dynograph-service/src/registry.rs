@@ -44,6 +44,8 @@ pub enum RegistryError {
     },
     #[error("invalid graph id: {0}")]
     InvalidId(String),
+    #[error("filesystem error: {0}")]
+    Filesystem(String),
     #[error("rehydration failed: {0}")]
     Rehydration(String),
     #[error(transparent)]
@@ -58,7 +60,7 @@ impl IntoResponse for RegistryError {
                 StatusCode::NOT_FOUND
             }
             Self::InvalidId(_) => StatusCode::BAD_REQUEST,
-            Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Filesystem(_) | Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Storage(inner) => status_for_dyno_error(inner),
         };
         (status, self.to_string()).into_response()
@@ -192,18 +194,14 @@ impl GraphRegistry {
         }
     }
 
-    pub fn backend(&self) -> &StorageBackend {
-        &self.backend
-    }
-
     pub fn create_graph(&self, id: &str, schema: Schema) -> Result<Arc<GraphEntry>, RegistryError> {
         validate_graph_id(id)?;
         let mut graphs = self.graphs.write().expect("registry write lock poisoned");
         if graphs.contains_key(id) {
             return Err(RegistryError::AlreadyExists(id.to_string()));
         }
-        let engine = build_engine(&self.backend, id, &schema)?;
         let hash = Arc::from(content_hash(&schema));
+        let engine = build_engine(&self.backend, id, schema)?;
         let entry = Arc::new(GraphEntry {
             engine: RwLock::new(engine),
             content_hash: hash,
@@ -231,20 +229,24 @@ impl GraphRegistry {
     /// need orderly drain should serialize DELETE with their own
     /// quiescence step.
     pub fn delete_graph(&self, id: &str) -> Result<(), RegistryError> {
-        validate_graph_id(id)?;
         let mut graphs = self.graphs.write().expect("registry write lock poisoned");
         if graphs.remove(id).is_none() {
             return Err(RegistryError::NotFound(id.to_string()));
         }
         if let StorageBackend::OnDisk { root } = &self.backend {
             let graph_dir = root.join(id);
-            if graph_dir.exists() {
-                std::fs::remove_dir_all(&graph_dir).map_err(|e| {
-                    RegistryError::Storage(DynoError::Storage(format!(
+            // Tolerate "already gone" — the registry entry was the
+            // source of truth that the dir should exist; if it
+            // doesn't, our job is done. Any other I/O error is real.
+            match std::fs::remove_dir_all(&graph_dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(RegistryError::Filesystem(format!(
                         "remove dir {}: {e}",
                         graph_dir.display()
-                    )))
-                })?;
+                    )));
+                }
             }
         }
         Ok(())
@@ -270,17 +272,28 @@ impl GraphRegistry {
     /// On the `InMemory` backend this is a no-op returning an empty
     /// list.
     ///
+    /// **Intended for startup, not steady-state.** Holds the registry
+    /// write-lock for the whole walk + per-graph RocksDB open
+    /// (~50ms each on disk), which would block concurrent reads. A
+    /// missing root dir is treated as "fresh start" (empty result),
+    /// not an error.
+    ///
     /// Returns the ids that were freshly rehydrated (excluding ones
     /// already present), in sorted order.
     pub fn rehydrate(&self) -> Result<Vec<String>, RegistryError> {
         let StorageBackend::OnDisk { root } = &self.backend else {
             return Ok(Vec::new());
         };
-        if !root.exists() {
-            return Ok(Vec::new());
-        }
-        let entries = std::fs::read_dir(root)
-            .map_err(|e| RegistryError::Rehydration(format!("read_dir {}: {e}", root.display())))?;
+        let entries = match std::fs::read_dir(root) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => {
+                return Err(RegistryError::Rehydration(format!(
+                    "read_dir {}: {e}",
+                    root.display()
+                )));
+            }
+        };
         let mut graphs = self.graphs.write().expect("registry write lock poisoned");
         let mut rehydrated = Vec::new();
         for entry in entries {
@@ -301,10 +314,10 @@ impl GraphRegistry {
             let db_path_str = db_path
                 .to_str()
                 .ok_or_else(|| RegistryError::Rehydration(format!("non-utf8 path {db_path:?}")))?;
-            let engine = StorageEngine::new_rocksdb(schema.clone(), db_path_str).map_err(|e| {
+            let hash = Arc::from(content_hash(&schema));
+            let engine = StorageEngine::new_rocksdb(schema, db_path_str).map_err(|e| {
                 RegistryError::Rehydration(format!("open rocksdb at {db_path_str}: {e}"))
             })?;
-            let hash = Arc::from(content_hash(&schema));
             let entry_arc = Arc::new(GraphEntry {
                 engine: RwLock::new(engine),
                 content_hash: hash,
@@ -325,30 +338,29 @@ impl GraphRegistry {
 /// caller can retry, manually clean up, or accept that the next
 /// `rehydrate` will fail loudly on the broken dir (preferred to
 /// silent cleanup that swallows the actual root cause).
+///
+/// Schema is consumed by value: `new_in_memory` and `new_rocksdb`
+/// take ownership, and the on-disk arm only borrows once for the
+/// schema.json write. Caller is expected to compute `content_hash`
+/// before passing the schema in.
 fn build_engine(
     backend: &StorageBackend,
     id: &str,
-    schema: &Schema,
+    schema: Schema,
 ) -> Result<StorageEngine, RegistryError> {
     match backend {
-        StorageBackend::InMemory => Ok(StorageEngine::new_in_memory(schema.clone())),
+        StorageBackend::InMemory => Ok(StorageEngine::new_in_memory(schema)),
         StorageBackend::OnDisk { root } => {
             let graph_dir = root.join(id);
             std::fs::create_dir_all(&graph_dir).map_err(|e| {
-                RegistryError::Storage(DynoError::Storage(format!(
-                    "create dir {}: {e}",
-                    graph_dir.display()
-                )))
+                RegistryError::Filesystem(format!("create dir {}: {e}", graph_dir.display()))
             })?;
-            write_schema_file(&graph_dir, schema)?;
+            write_schema_file(&graph_dir, &schema)?;
             let db_path = graph_dir.join("db");
             let db_path_str = db_path.to_str().ok_or_else(|| {
-                RegistryError::Storage(DynoError::Storage(format!(
-                    "non-utf8 path {}",
-                    db_path.display()
-                )))
+                RegistryError::Filesystem(format!("non-utf8 path {}", db_path.display()))
             })?;
-            StorageEngine::new_rocksdb(schema.clone(), db_path_str).map_err(RegistryError::Storage)
+            StorageEngine::new_rocksdb(schema, db_path_str).map_err(RegistryError::Storage)
         }
     }
 }
@@ -358,12 +370,8 @@ fn write_schema_file(graph_dir: &std::path::Path, schema: &Schema) -> Result<(),
     let schema_json = serde_json::to_string_pretty(schema).map_err(|e| {
         RegistryError::Storage(DynoError::Serialization(format!("serialize schema: {e}")))
     })?;
-    std::fs::write(&schema_path, schema_json).map_err(|e| {
-        RegistryError::Storage(DynoError::Storage(format!(
-            "write {}: {e}",
-            schema_path.display()
-        )))
-    })
+    std::fs::write(&schema_path, schema_json)
+        .map_err(|e| RegistryError::Filesystem(format!("write {}: {e}", schema_path.display())))
 }
 
 fn read_schema_file(graph_dir: &std::path::Path) -> Result<Schema, RegistryError> {
