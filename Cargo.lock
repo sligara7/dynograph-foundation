@@ -249,6 +249,7 @@ dependencies = [
  "axum",
  "dynograph-core",
  "dynograph-storage",
+ "dynograph-vector",
  "http-body-util",
  "serde",
  "serde_json",

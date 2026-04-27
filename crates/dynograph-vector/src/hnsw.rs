@@ -148,6 +148,13 @@ impl HnswIndex {
         self.config.dim
     }
 
+    /// Convenience: build an index with default `HnswConfig` for the
+    /// given dimensionality. Equivalent to
+    /// `HnswIndex::new(HnswConfig::new(dim))`.
+    pub fn with_dim(dim: usize) -> Self {
+        Self::new(HnswConfig::new(dim))
+    }
+
     /// Total slot count (includes tombstoned slots).
     pub fn len(&self) -> usize {
         self.nodes.len()

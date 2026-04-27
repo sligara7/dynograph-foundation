@@ -13,7 +13,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use dynograph_core::{PropertyType, Schema, Value};
-use dynograph_vector::{HnswConfig, HnswIndex};
+use dynograph_vector::HnswIndex;
 
 use crate::{
     auth::{AuthProvider, NoAuth},
@@ -459,13 +459,10 @@ struct SetEmbeddingBody {
     embedding: Vec<f32>,
 }
 
-/// Set the sidecar embedding for an existing node and update the
-/// per-type HNSW index in lockstep. The dim check happens against
-/// any existing index *before* the storage write, so a mismatch
-/// rejects without leaving on-disk state to roll back. The index is
-/// auto-created on first insert per type, with `dim` taken from the
-/// first vector. The node must exist (storage's `set_embedding`
-/// returns `NodeNotFound` → 404). Empty embeddings → 400.
+/// Set an embedding and update the per-type HNSW index in lockstep.
+/// Preflight order matters: dim check against any existing index
+/// runs *before* the storage write, so a mismatch rejects without
+/// on-disk rollback. Per-type dim is locked at first insert.
 async fn set_embedding(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -484,9 +481,16 @@ async fn set_embedding(
             });
         }
         engine.set_embedding(&id, &node_type, &node_id, &embedding)?;
-        let index = indexes
-            .entry(node_type.clone())
-            .or_insert_with(|| HnswIndex::new(HnswConfig::new(embedding.len())));
+        // Avoid the `entry()` clone on the hot post-first-insert
+        // path: only allocate the key when we actually need to
+        // insert. After the first insert per type, this is a single
+        // get_mut.
+        let index = match indexes.get_mut(&node_type) {
+            Some(i) => i,
+            None => indexes
+                .entry(node_type.clone())
+                .or_insert_with(|| HnswIndex::with_dim(embedding.len())),
+        };
         index.insert(&node_id, &embedding);
         Ok(())
     })?;

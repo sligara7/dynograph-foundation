@@ -25,7 +25,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use dynograph_core::{DynoError, Schema};
 use dynograph_storage::StorageEngine;
-use dynograph_vector::{HnswConfig, HnswIndex};
+use dynograph_vector::HnswIndex;
 
 use crate::schema_response::content_hash;
 
@@ -143,13 +143,13 @@ pub struct GraphEntry {
     state: RwLock<GraphState>,
 }
 
-pub(crate) struct GraphState {
-    pub(crate) engine: StorageEngine,
-    pub(crate) content_hash: Arc<str>,
+struct GraphState {
+    engine: StorageEngine,
+    content_hash: Arc<str>,
     /// Per-(node_type) HNSW index. Lazily created on first
     /// `set_embedding` call for a type, with `dim` taken from the
     /// first vector. Subsequent inserts must match that dim.
-    pub(crate) indexes: HashMap<String, HnswIndex>,
+    indexes: HashMap<String, HnswIndex>,
 }
 
 impl std::fmt::Debug for GraphEntry {
@@ -526,7 +526,7 @@ fn build_indexes_from_storage(
             continue;
         }
         let dim = entries[0].1.len();
-        let mut index = HnswIndex::new(HnswConfig::new(dim));
+        let mut index = HnswIndex::with_dim(dim);
         for (node_id, vec) in &entries {
             if vec.len() != dim {
                 return Err(RegistryError::Rehydration(format!(
