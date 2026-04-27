@@ -12,7 +12,13 @@ axum = { workspace = true }
 tokio = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = "0.3"
 thiserror = { workspace = true }
+toml = { workspace = true }
+
+[[bin]]
+name = "dynograph"
+path = "src/bin/dynograph.rs"
 
 [dev-dependencies]
 tower = { workspace = true }

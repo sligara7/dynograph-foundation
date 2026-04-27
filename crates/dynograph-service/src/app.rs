@@ -18,6 +18,7 @@ use crate::{
     auth::{AuthProvider, NoAuth},
     edge_response::EdgeResponse,
     node_response::NodeResponse,
+    readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
     schema_response::SchemaResponse,
 };
@@ -29,22 +30,41 @@ pub struct AppState {
     /// (any non-public route) will call `auth.authenticate(&headers)`.
     #[allow(dead_code)]
     pub(crate) auth: Arc<dyn AuthProvider>,
+    pub(crate) readiness: Arc<Readiness>,
 }
 
 impl AppState {
-    pub fn new(registry: Arc<GraphRegistry>, auth: Arc<dyn AuthProvider>) -> Self {
-        Self { registry, auth }
+    pub fn new(
+        registry: Arc<GraphRegistry>,
+        auth: Arc<dyn AuthProvider>,
+        readiness: Arc<Readiness>,
+    ) -> Self {
+        Self {
+            registry,
+            auth,
+            readiness,
+        }
     }
 
-    /// Convenience for the dev / private-network default.
+    /// Convenience for the dev / private-network default. Marks the
+    /// service ready immediately, which matches the slice 1–3
+    /// in-memory test expectation that there's nothing to load. The
+    /// `dynograph` binary uses `AppState::new` with an explicit
+    /// not-ready `Readiness` and flips it via `mark_ready()` once
+    /// rehydrate finishes.
     pub fn with_no_auth(registry: Arc<GraphRegistry>) -> Self {
-        Self::new(registry, Arc::new(NoAuth::new()))
+        Self::new(registry, Arc::new(NoAuth::new()), Readiness::ready())
+    }
+
+    pub fn readiness(&self) -> &Arc<Readiness> {
+        &self.readiness
     }
 }
 
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/v1/graphs", get(list_graphs).post(create_graph))
         .route("/v1/graphs/{id}", get(get_graph).delete(delete_graph))
         .route("/v1/graphs/{id}/nodes", post(create_node))
@@ -62,6 +82,18 @@ pub fn app(state: AppState) -> Router {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+/// Readiness probe — distinct from `/health`, which only confirms
+/// the process is running. `/ready` returns 200 once the service
+/// has finished startup work (notably `rehydrate()` on the on-disk
+/// backend); 503 before that.
+async fn ready(State(state): State<AppState>) -> (StatusCode, &'static str) {
+    if state.readiness.is_ready() {
+        (StatusCode::OK, "ready")
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "starting")
+    }
 }
 
 /// Look up a graph by id or surface a 404. Folds the

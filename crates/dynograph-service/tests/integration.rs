@@ -8,7 +8,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use dynograph_service::{AppState, GraphRegistry, app};
+use dynograph_service::{AppState, GraphRegistry, NoAuth, Readiness, app};
 
 fn build_app() -> axum::Router {
     let registry = Arc::new(GraphRegistry::new());
@@ -777,4 +777,61 @@ async fn health_returns_ok() {
     assert_eq!(res.status(), StatusCode::OK);
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"ok");
+}
+
+#[tokio::test]
+async fn ready_returns_200_when_marked_ready() {
+    // `with_no_auth` defaults to ready, matching slice 1–3 test
+    // expectations.
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], b"ready");
+}
+
+#[tokio::test]
+async fn ready_returns_503_before_mark_ready_then_flips() {
+    let registry = Arc::new(GraphRegistry::new());
+    let readiness = Readiness::not_ready();
+    let state = AppState::new(registry, Arc::new(NoAuth::new()), readiness.clone());
+    let app = app(state);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..], b"starting");
+
+    readiness.mark_ready();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }
