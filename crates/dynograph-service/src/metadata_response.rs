@@ -1,10 +1,5 @@
-//! Wire shape for graph metadata (schema-less).
-//!
-//! `GET /v1/graphs/{id}` returns this — id + version + content_hash, no
-//! schema body. Callers that need the schema fetch
-//! `GET /v1/graphs/{id}/schema` (returns `SchemaResponse`). Splitting
-//! avoids shipping the full schema on every metadata-style query
-//! (existence checks, drift comparisons by hash alone).
+//! Wire shape for `GET /v1/graphs/{id}`. Full schema lives at
+//! `GET /v1/graphs/{id}/schema` (returns `SchemaResponse`).
 
 use serde::Serialize;
 

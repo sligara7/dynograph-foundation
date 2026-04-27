@@ -140,11 +140,7 @@ async fn create_graph(
     Ok((StatusCode::CREATED, Json(response)).into_response())
 }
 
-/// Metadata-only view of a graph: id + wire_version + content_hash.
-/// Use `GET /v1/graphs/{id}/schema` for the full schema body. Splitting
-/// keeps existence checks and content-hash drift comparisons cheap —
-/// no schema serialization on the wire when the caller only needs
-/// "does this graph exist and at what content_hash."
+/// Metadata-only — see `GET /v1/graphs/{id}/schema` for the full schema.
 async fn get_graph(
     State(state): State<AppState>,
     Path(id): Path<String>,
