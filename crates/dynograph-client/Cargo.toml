@@ -1,0 +1,24 @@
+[package]
+name = "dynograph-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Async HTTP client for the dynograph-service /v1/ API."
+
+[dependencies]
+dynograph-core = { path = "../dynograph-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+# Integration tests bind a real TCP listener on 127.0.0.1:0 and run
+# `dynograph-service` in-process to exercise the client end-to-end.
+dynograph-service = { path = "../dynograph-service" }
+tokio = { workspace = true }
+axum = { workspace = true }
+jsonwebtoken = { workspace = true }
