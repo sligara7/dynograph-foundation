@@ -12,11 +12,47 @@
 //! - ef_search: beam width during query (default 50)
 //! - ml: level generation factor (default 1/ln(M))
 
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Instant;
 
+use rand::RngExt;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
 use crate::distance::cosine_similarity;
+
+/// `(node_index, score)` pair used inside `search_layer`'s heaps.
+///
+/// `score` is f32, so `Ord` uses `total_cmp` to give a strict total order
+/// across all bit patterns (NaN-safe). Ties on score are broken by node
+/// index for determinism — this matters because two distinct nodes with
+/// equal cosine similarity must compare in *some* stable way for heap
+/// ordering, otherwise insertion-order non-determinism leaks into the
+/// returned result set.
+#[derive(Copy, Clone, PartialEq)]
+struct Scored {
+    idx: usize,
+    score: f32,
+}
+
+impl Eq for Scored {}
+
+impl Ord for Scored {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.score
+            .total_cmp(&other.score)
+            .then_with(|| self.idx.cmp(&other.idx))
+    }
+}
+
+impl PartialOrd for Scored {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// Configuration for the HNSW index.
 #[derive(Debug, Clone)]
@@ -33,6 +69,11 @@ pub struct HnswConfig {
     pub ef_search: usize,
     /// Level multiplier (1/ln(M)).
     pub ml: f64,
+    /// Optional seed for the level-generation RNG. When `None`, the
+    /// index seeds from the OS RNG at construction. Set this in tests
+    /// to make level assignment — and therefore graph topology —
+    /// reproducible across runs.
+    pub seed: Option<u64>,
 }
 
 impl HnswConfig {
@@ -45,6 +86,7 @@ impl HnswConfig {
             ef_construction: 200,
             ef_search: 50,
             ml: 1.0 / (m as f64).ln(),
+            seed: None,
         }
     }
 
@@ -64,18 +106,27 @@ impl HnswConfig {
         self.ef_search = ef;
         self
     }
+
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = Some(seed);
+        self
+    }
 }
 
 /// A search result: node ID + similarity score.
+///
+/// `id` is `Arc<str>` so the same string is shared across the index's
+/// internal node table and every result that surfaces it — search hits
+/// are an arc-bump to clone, not a fresh allocation per call.
 #[derive(Debug, Clone)]
 pub struct SearchResult {
-    pub id: String,
+    pub id: Arc<str>,
     pub score: f32,
 }
 
 /// Internal node representation.
 struct Node {
-    id: String,
+    id: Arc<str>,
     vector: Vec<f32>,
     /// Connections per layer: layer_index -> list of neighbor node indices
     connections: Vec<Vec<usize>>,
@@ -107,14 +158,20 @@ pub struct HnswIndex {
     nodes: Vec<Node>,
     /// Map from string ID to internal index. Tombstoned ids are removed
     /// from this map so `contains()` / `get_vector()` return the right
-    /// answer after `remove()`.
-    id_to_index: HashMap<String, usize>,
+    /// answer after `remove()`. Keys share the same `Arc<str>` allocation
+    /// as the corresponding `Node.id`, so id storage doesn't double up.
+    id_to_index: HashMap<Arc<str>, usize>,
     /// Entry point (top-level node index). Always points at a non-
     /// tombstoned node while the index has any live nodes. `None` only
     /// when every node has been tombstoned (effectively empty).
     entry_point: Option<usize>,
     /// Current max level in the index
     max_level: usize,
+    /// Level-generation RNG. Seeded from `config.seed` when set, or from
+    /// the OS RNG otherwise. Owned by the index so a seeded config gives
+    /// reproducible level assignments — and therefore reproducible graph
+    /// topology — independent of any other RNG activity in the process.
+    rng: StdRng,
     /// Running count of tombstoned slots (for metrics + live-size).
     tombstoned_count: AtomicUsize,
     searches_total: AtomicU64,
@@ -126,12 +183,17 @@ pub struct HnswIndex {
 impl HnswIndex {
     /// Create a new empty HNSW index.
     pub fn new(config: HnswConfig) -> Self {
+        let rng = match config.seed {
+            Some(s) => StdRng::seed_from_u64(s),
+            None => rand::make_rng(),
+        };
         Self {
             config,
             nodes: Vec::new(),
             id_to_index: HashMap::new(),
             entry_point: None,
             max_level: 0,
+            rng,
             tombstoned_count: AtomicUsize::new(0),
             searches_total: AtomicU64::new(0),
             search_duration_micros_sum: AtomicU64::new(0),
@@ -173,7 +235,7 @@ impl HnswIndex {
         self.nodes.len() - self.tombstoned_count.load(Ordering::Relaxed)
     }
 
-    /// Snapshot of runtime counters for observability (tech-debt #47).
+    /// Snapshot of runtime counters for observability.
     pub fn stats(&self) -> HnswStats {
         HnswStats {
             searches_total: self.searches_total.load(Ordering::Relaxed),
@@ -185,17 +247,21 @@ impl HnswIndex {
         }
     }
 
-    /// Generate a random level for a new node.
-    fn random_level(&self) -> usize {
-        let r: f64 = rand::random();
+    /// Generate a random level for a new node. Uses the index's owned
+    /// RNG so a seeded config produces a deterministic level sequence.
+    fn random_level(&mut self) -> usize {
+        let r: f64 = self.rng.random();
         (-r.ln() * self.config.ml).floor() as usize
     }
 
     /// Insert a vector with an associated ID. If `id` already exists,
     /// the old slot is tombstoned and a new slot is created with
     /// freshly-computed layer neighbors — so the graph stays correctly
-    /// linked after the vector changes (tech-debt #45). The old
-    /// tombstoned slot becomes garbage until a future compaction.
+    /// linked after the vector changes. The old tombstoned slot becomes
+    /// garbage until a future compaction. (Overwriting in place would
+    /// leave the existing connection set pointing at the old vector's
+    /// content cluster — a silent quality-drift bug when the vector
+    /// moves far.)
     pub fn insert(&mut self, id: &str, vector: &[f32]) {
         assert_eq!(
             vector.len(),
@@ -206,9 +272,7 @@ impl HnswIndex {
         );
 
         // Re-insert: tombstone the old slot so the new vector gets
-        // freshly-computed neighbor connections. Overwriting in place
-        // leaves connections pointing at the old content cluster — a
-        // silent quality-drift bug when the vector moves far.
+        // freshly-computed neighbor connections.
         if self.id_to_index.contains_key(id) {
             self.remove(id);
         }
@@ -216,15 +280,16 @@ impl HnswIndex {
         let new_level = self.random_level();
         let new_idx = self.nodes.len();
 
+        let id_arc: Arc<str> = Arc::from(id);
         let mut node = Node {
-            id: id.to_string(),
+            id: Arc::clone(&id_arc),
             vector: vector.to_vec(),
             connections: vec![Vec::new(); new_level + 1],
             level: new_level,
             tombstoned: false,
         };
 
-        self.id_to_index.insert(id.to_string(), new_idx);
+        self.id_to_index.insert(id_arc, new_idx);
 
         if self.entry_point.is_none() {
             // First node
@@ -243,7 +308,12 @@ impl HnswIndex {
             current = self.greedy_closest(current, &node.vector, level);
         }
 
-        // Phase 2: Insert at each level from min(new_level, max_level) down to 0
+        // Phase 2: Insert at each level from min(new_level, max_level) down to 0.
+        // After picking neighbors at level L, advance `current` to the
+        // closest of them so the next-lower layer's search starts from
+        // a node already near `vector` instead of the stale top-of-
+        // phase-1 entry. Without this, recall on large indexes degrades
+        // because every layer searches from the same far-off seed.
         let insert_from = new_level.min(self.max_level);
         for level in (0..=insert_from).rev() {
             let ef = self.config.ef_construction;
@@ -260,6 +330,13 @@ impl HnswIndex {
                 .take(max_conn)
                 .map(|&(idx, _)| idx)
                 .collect();
+
+            // Advance entry point for the next layer down. `neighbors`
+            // is sorted best-first, so neighbors[0] is the closest node
+            // we found at this layer.
+            if let Some(&(closest_idx, _)) = neighbors.first() {
+                current = closest_idx;
+            }
 
             // Add bidirectional connections
             node.connections[level] = selected.clone();
@@ -296,7 +373,7 @@ impl HnswIndex {
                         .iter()
                         .map(|&idx| (idx, cosine_similarity(&nv, &self.nodes[idx].vector)))
                         .collect();
-                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
                     self.nodes[neighbor_idx].connections[level] = scored
                         .into_iter()
                         .take(max_conn)
@@ -387,7 +464,7 @@ impl HnswIndex {
             .filter(|(idx, _)| !self.nodes[*idx].tombstoned)
             .take(k)
             .map(|(idx, score)| SearchResult {
-                id: self.nodes[idx].id.clone(),
+                id: Arc::clone(&self.nodes[idx].id),
                 score,
             })
             .collect();
@@ -453,7 +530,20 @@ impl HnswIndex {
         current
     }
 
-    /// Search a single layer with beam width ef, returning sorted (idx, score) pairs.
+    /// Search a single layer with beam width `ef`, returning the top
+    /// candidates sorted best-first by similarity.
+    ///
+    /// Implementation is the textbook two-heap HNSW:
+    /// - `candidates` is a max-heap on similarity — `pop` yields the
+    ///   most-promising unvisited node to expand next.
+    /// - `results` is a min-heap on similarity (via `Reverse`) capped at
+    ///   `ef` — `peek` yields the *worst* kept result, which is what
+    ///   we compare against to decide whether to admit a new neighbor
+    ///   and whether to terminate the search.
+    ///
+    /// Termination: when the best remaining candidate is no better than
+    /// the worst kept result and we already have `ef` results, no
+    /// further expansion can improve the result set, so we stop.
     fn search_layer(
         &self,
         entry: usize,
@@ -462,59 +552,68 @@ impl HnswIndex {
         level: usize,
     ) -> Vec<(usize, f32)> {
         let entry_score = cosine_similarity(query, &self.nodes[entry].vector);
+        let entry_scored = Scored {
+            idx: entry,
+            score: entry_score,
+        };
 
-        // candidates: min-heap by score (worst first for easy eviction)
-        // best: max-heap by score (best first for result)
-        let mut visited = HashSet::new();
+        let mut visited: HashSet<usize> = HashSet::new();
         visited.insert(entry);
 
-        // We use a sorted vec approach for simplicity
-        let mut candidates: Vec<(usize, f32)> = vec![(entry, entry_score)];
-        let mut results: Vec<(usize, f32)> = vec![(entry, entry_score)];
+        let mut candidates: BinaryHeap<Scored> = BinaryHeap::new();
+        candidates.push(entry_scored);
 
-        while let Some(&(current_idx, _current_score)) = candidates.last() {
-            candidates.pop();
+        let mut results: BinaryHeap<Reverse<Scored>> = BinaryHeap::new();
+        results.push(Reverse(entry_scored));
 
-            // If current is worse than worst result and we have enough, stop
+        while let Some(current) = candidates.pop() {
+            // Stop when the best remaining candidate can't improve
+            // on the worst kept result.
             if results.len() >= ef {
-                let worst_result = results.iter().map(|r| r.1).fold(f32::MAX, f32::min);
-                if _current_score < worst_result {
+                let worst = results.peek().expect("results non-empty").0.score;
+                if current.score < worst {
                     break;
                 }
             }
 
-            // Explore neighbors
-            let connections = if level < self.nodes[current_idx].connections.len() {
-                &self.nodes[current_idx].connections[level]
+            let connections = if level < self.nodes[current.idx].connections.len() {
+                &self.nodes[current.idx].connections[level]
             } else {
                 continue;
             };
 
             for &neighbor in connections {
-                if visited.contains(&neighbor) {
+                if !visited.insert(neighbor) {
                     continue;
                 }
-                visited.insert(neighbor);
 
                 let score = cosine_similarity(query, &self.nodes[neighbor].vector);
+                let scored = Scored {
+                    idx: neighbor,
+                    score,
+                };
 
-                let should_add = results.len() < ef
-                    || score > results.iter().map(|r| r.1).fold(f32::MAX, f32::min);
-
-                if should_add {
-                    candidates.push((neighbor, score));
-                    candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-                    results.push((neighbor, score));
-                    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-                    if results.len() > ef {
+                if results.len() < ef {
+                    candidates.push(scored);
+                    results.push(Reverse(scored));
+                } else {
+                    let worst = results.peek().expect("results non-empty").0.score;
+                    if score > worst {
+                        candidates.push(scored);
+                        results.push(Reverse(scored));
                         results.pop();
                     }
                 }
             }
         }
 
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        results
+        // Drain into a vec sorted best-first to match the prior shape.
+        let mut out: Vec<(usize, f32)> = results
+            .into_iter()
+            .map(|Reverse(s)| (s.idx, s.score))
+            .collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1));
+        out
     }
 }
 
@@ -543,7 +642,7 @@ mod tests {
 
         let results = index.search(&[1.0, 0.0, 0.0], 1);
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].id, "a");
+        assert_eq!(&*results[0].id, "a");
         assert!((results[0].score - 1.0).abs() < 1e-6);
     }
 
@@ -559,9 +658,9 @@ mod tests {
         let results = index.search(&[0.9, 0.1, 0.0], 2);
         assert_eq!(results.len(), 2);
         // x_axis should be closest
-        assert_eq!(results[0].id, "x_axis");
+        assert_eq!(&*results[0].id, "x_axis");
         // xy_diag should be second
-        assert_eq!(results[1].id, "xy_diag");
+        assert_eq!(&*results[1].id, "xy_diag");
     }
 
     #[test]
@@ -608,9 +707,9 @@ mod tests {
 
         // Re-insert tombstones the old slot and creates a new one, so
         // total slot count is 2 but live count is 1. Contains/get_vector
-        // see only the live slot. This is the tech-debt #45 fix: the
-        // new vector gets re-linked into the HNSW graph, not just
-        // overwritten in place.
+        // see only the live slot. This guarantees the updated vector
+        // gets re-linked into the HNSW graph rather than reusing
+        // connections aimed at the old vector's content cluster.
         assert_eq!(index.len(), 2, "two slots (one tombstoned + one live)");
         assert_eq!(index.live_count(), 1, "only one live vector for id 'a'");
         assert!(index.contains("a"));
@@ -651,7 +750,7 @@ mod tests {
 
         assert_eq!(results.len(), 10);
         // First result should be v0 (which has the same formula with i=0)
-        assert_eq!(results[0].id, "v0");
+        assert_eq!(&*results[0].id, "v0");
         assert!(results[0].score > 0.9); // should be very similar
     }
 
@@ -675,7 +774,7 @@ mod tests {
 
         let before = index.search(&[1.0, 0.0, 0.0], 3);
         assert!(
-            before.iter().any(|r| r.id == "drop"),
+            before.iter().any(|r| &*r.id == "drop"),
             "'drop' should appear in search results before remove: {:?}",
             before
         );
@@ -687,7 +786,7 @@ mod tests {
 
         let after = index.search(&[1.0, 0.0, 0.0], 3);
         assert!(
-            !after.iter().any(|r| r.id == "drop"),
+            !after.iter().any(|r| &*r.id == "drop"),
             "'drop' must not appear in search results after tombstone: {:?}",
             after
         );
@@ -735,6 +834,32 @@ mod tests {
         assert_eq!(index.get_vector("id").unwrap(), &[0.0, 1.0, 0.0]);
         assert_eq!(index.live_count(), 1);
         assert_eq!(index.len(), 2, "tombstoned slot + live slot");
+    }
+
+    #[test]
+    fn seeded_config_gives_reproducible_topology() {
+        // Two indexes built from the same seed and the same insertion
+        // order must assign the same level to each node — that's the
+        // observable shape of a deterministic RNG. Without a seed,
+        // levels come from the OS RNG and would not match across runs.
+        let cfg_a = make_config(3).with_seed(42);
+        let cfg_b = make_config(3).with_seed(42);
+        let mut a = HnswIndex::new(cfg_a);
+        let mut b = HnswIndex::new(cfg_b);
+
+        for i in 0..32 {
+            let id = format!("v{i}");
+            let v = [i as f32, (i * 2) as f32, (i * 3) as f32];
+            a.insert(&id, &v);
+            b.insert(&id, &v);
+        }
+
+        let levels_a: Vec<usize> = a.nodes.iter().map(|n| n.level).collect();
+        let levels_b: Vec<usize> = b.nodes.iter().map(|n| n.level).collect();
+        assert_eq!(
+            levels_a, levels_b,
+            "seeded indexes must produce identical level assignments"
+        );
     }
 
     #[test]

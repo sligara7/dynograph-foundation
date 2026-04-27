@@ -1,14 +1,32 @@
-//! SIMD-accelerated vector distance functions.
+//! Vector distance functions, structured for autovectorization.
 //!
 //! Provides cosine similarity, dot product, and Euclidean distance
-//! for f32 vectors. Uses auto-vectorization hints that the compiler
-//! can lower to AVX2/NEON when available.
+//! for f32 vectors. The f32 inner loops are written so an
+//! autovectorizing compiler can lower them to SIMD instructions —
+//! **but only if the build enables the target features**. With a stock
+//! release build (`cargo build --release` on its own), the compiler
+//! targets a portable baseline (e.g. `x86-64-v1`) and these loops emit
+//! scalar code.
+//!
+//! To get SIMD, build with one of:
+//! - `RUSTFLAGS="-C target-cpu=native"` — best codegen for the host
+//!   CPU; the resulting binary may not run on older CPUs of the same
+//!   family.
+//! - `RUSTFLAGS="-C target-feature=+avx2,+fma"` (x86_64) or
+//!   `+neon` (aarch64) — portable across CPUs that have those
+//!   features.
+//!
+//! There is no runtime feature detection here. If your deployment
+//! cares about throughput, set the flag explicitly; the inner loops
+//! will autovectorize cleanly with either of the options above.
 
 /// Dot product of two f32 slices.
 ///
-/// The inner loop is structured for auto-vectorization — the compiler
-/// will emit SIMD instructions (AVX2 on x86_64, NEON on aarch64)
-/// when building with `-C target-cpu=native`.
+/// The 8-wide unrolled accumulator is structured to autovectorize when
+/// the build enables AVX2 (x86_64) or NEON (aarch64) — see the module
+/// docstring for the required `RUSTFLAGS`. Without those flags the
+/// loop emits scalar code; the function is still correct, just not
+/// SIMD-accelerated.
 #[inline]
 pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");

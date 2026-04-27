@@ -808,7 +808,7 @@ async fn similar(
                 .search(&embedding, top_k)
                 .into_iter()
                 .map(|sr| SimilarHit {
-                    node_id: sr.id,
+                    node_id: sr.id.to_string(),
                     score: sr.score,
                 })
                 .collect();
