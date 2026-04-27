@@ -286,7 +286,7 @@ mod tests {
         let in_range = adj_out_key("g1", "alice", "KNOWS", "bob");
         let out_of_range = adj_out_key("g1", "alice2", "KNOWS", "bob");
         assert!(in_range.as_slice() < end.as_slice());
-        assert!(!(out_of_range.as_slice() < end.as_slice()));
+        assert!(out_of_range.as_slice() >= end.as_slice());
     }
 
     #[test]
