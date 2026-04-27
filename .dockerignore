@@ -1,0 +1,20 @@
+# Avoid shipping build artifacts and developer state into the build
+# context. The runtime image only needs the source tree; cargo
+# rebuilds inside the builder stage.
+
+target/
+.git/
+.github/
+.idea/
+.vscode/
+**/*.rs.bk
+*.swp
+*.swo
+.env
+.envrc
+
+# Container artifacts themselves don't need to enter the build
+# context; they're driven from the host.
+docker-compose.yml
+.dockerignore
+Dockerfile

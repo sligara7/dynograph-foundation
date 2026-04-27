@@ -1,0 +1,41 @@
+# dynograph service configuration — example.
+#
+# All sections are optional; omitted ones use defaults. Env vars
+# override TOML values at startup:
+#   DYNOGRAPH_BIND          — overrides [server].bind
+#   DYNOGRAPH_STORAGE_ROOT  — overrides [storage].root
+#
+# Typical patterns:
+#   - In-memory dev (no [storage]): ephemeral, ready immediately,
+#     graphs lost on restart.
+#   - On-disk prod ([storage].root set): RocksDB-backed, rehydrates
+#     graphs at startup, /ready returns 503 until rehydrate finishes.
+
+[server]
+# Listen address. Default 127.0.0.1:8080 (localhost only). The
+# Docker image overrides to 0.0.0.0:8080 via env var so the host's
+# port mapping is the access boundary.
+bind = "0.0.0.0:8080"
+
+[storage]
+# RocksDB root. When set, every graph lives at {root}/{id}/db/
+# (RocksDB store) + {root}/{id}/schema.json (canonical schema for
+# rehydration). When absent, the service runs in-memory.
+root = "/data"
+
+[auth]
+# "noauth" (default) — every request authenticates as "anonymous";
+# downstream consumers can layer their own authorization.
+# "bearer_jwt" — HS256 JWT in `Authorization: Bearer <token>`.
+provider = "noauth"
+
+# Bearer-JWT example. Set exactly one of `secret` (literal — fine
+# for dev) or `secret_env = "VAR_NAME"` (recommended — keeps the
+# signing secret out of TOML committed to repos). Optional `issuer`
+# and `audience` enforce the corresponding token claims.
+#
+# [auth]
+# provider = "bearer_jwt"
+# secret_env = "DYNOGRAPH_JWT_SECRET"
+# issuer = "https://auth.example.com"
+# audience = "dynograph"

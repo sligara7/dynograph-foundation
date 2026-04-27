@@ -1,0 +1,19 @@
+# Local dev convenience: `docker compose up` to build, run, and
+# persist data under a named volume. Production deployments will
+# pull the published image (slice 13's release pipeline) rather
+# than building from source.
+
+services:
+  dynograph:
+    build: .
+    image: dynograph-foundation:dev
+    ports:
+      - "8080:8080"
+    environment:
+      DYNOGRAPH_STORAGE_ROOT: /data
+      RUST_LOG: info
+    volumes:
+      - dynograph-data:/data
+
+volumes:
+  dynograph-data:
