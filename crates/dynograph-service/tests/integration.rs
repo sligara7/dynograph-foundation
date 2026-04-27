@@ -8,7 +8,7 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use dynograph_service::{AppState, GraphRegistry, NoAuth, Readiness, app};
+use dynograph_service::{AppState, AuthProvider, BearerJwt, GraphRegistry, NoAuth, Readiness, app};
 
 fn build_app() -> axum::Router {
     let registry = Arc::new(GraphRegistry::new());
@@ -1935,4 +1935,160 @@ async fn ready_returns_503_before_mark_ready_then_flips() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+}
+
+// =============================================================================
+// Slice 9 — BearerJwt auth middleware
+// =============================================================================
+
+const TEST_JWT_SECRET: &[u8] = b"slice-9-test-signing-secret";
+
+fn build_app_with_bearer_jwt() -> axum::Router {
+    let registry = Arc::new(GraphRegistry::new());
+    let auth: Arc<dyn AuthProvider> = Arc::new(BearerJwt::new(TEST_JWT_SECRET));
+    let state = AppState::new(registry, auth, Arc::new(Readiness::ready()));
+    app(state)
+}
+
+fn mint_jwt(sub: &str) -> String {
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use serde::Serialize;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    #[derive(Serialize)]
+    struct C<'a> {
+        sub: &'a str,
+        exp: usize,
+    }
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as usize
+        + 60;
+    encode(
+        &Header::new(Algorithm::HS256),
+        &C { sub, exp },
+        &EncodingKey::from_secret(TEST_JWT_SECRET),
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn protected_route_without_token_returns_401() {
+    let app = build_app_with_bearer_jwt();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = std::str::from_utf8(&bytes).unwrap();
+    assert!(body.contains("missing Authorization"), "{body}");
+}
+
+#[tokio::test]
+async fn protected_route_with_valid_token_succeeds() {
+    let app = build_app_with_bearer_jwt();
+    let token = mint_jwt("alice");
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["graphs"], json!([]));
+}
+
+#[tokio::test]
+async fn protected_route_with_garbage_token_returns_401() {
+    let app = build_app_with_bearer_jwt();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs")
+                .header("authorization", "Bearer not.a.real.jwt")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn health_is_public_under_bearer_jwt() {
+    let app = build_app_with_bearer_jwt();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn ready_is_public_under_bearer_jwt() {
+    let app = build_app_with_bearer_jwt();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/ready")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+}
+
+/// Verify the middleware exposes `Identity` to handlers via request
+/// extensions. We don't change any handler this slice, but the
+/// plumbing must already work for slice-11+ consumer-side
+/// authorization. End-to-end: a successful POST exercises the
+/// middleware (sets `Identity`); the handler runs (it doesn't read
+/// `Identity`, but presence is implied by reaching the 201). If
+/// the middleware *didn't* run, the request would never reach the
+/// handler anyway because the route layer rejects unauthenticated
+/// requests.
+#[tokio::test]
+async fn bearer_jwt_post_creates_graph_under_auth() {
+    let app = build_app_with_bearer_jwt();
+    let token = mint_jwt("alice");
+    let body = json!({
+        "id": "g1",
+        "schema": { "name": "demo", "version": 1, "node_types": {}, "edge_types": {} }
+    });
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
 }

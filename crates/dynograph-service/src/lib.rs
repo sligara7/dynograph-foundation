@@ -16,8 +16,8 @@ mod schema_response;
 mod similar_response;
 
 pub use app::{AppState, app};
-pub use auth::{AuthProvider, Identity, NoAuth};
-pub use config::{Config, ConfigError, ServerConfig, StorageConfig};
+pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};
+pub use config::{AuthConfig, Config, ConfigError, ServerConfig, StorageConfig};
 pub use edge_response::EdgeResponse;
 pub use embedding_response::EmbeddingResponse;
 pub use metadata_response::GraphMetadataResponse;

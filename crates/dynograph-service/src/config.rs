@@ -25,6 +25,8 @@ pub enum ConfigError {
         path: PathBuf,
         source: toml::de::Error,
     },
+    #[error("auth config: {0}")]
+    Auth(String),
 }
 
 /// Top-level config denies unknown fields so a typo'd section name
@@ -38,6 +40,66 @@ pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+/// Auth provider selection. `noauth` (the default) accepts every
+/// request as `"anonymous"`; `bearer_jwt` requires a valid HS256
+/// JWT in `Authorization: Bearer …`.
+///
+/// `bearer_jwt.secret` may be a literal string (convenient for dev)
+/// or `secret_env = "VAR_NAME"` (resolves the secret from the
+/// process environment at startup — the recommended path for
+/// production so secrets aren't committed to TOML). Exactly one of
+/// `secret` / `secret_env` must be set; both or neither is a loud
+/// error from `resolve_secret`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
+#[serde(tag = "provider", rename_all = "snake_case")]
+pub enum AuthConfig {
+    #[default]
+    NoAuth,
+    BearerJwt {
+        #[serde(default)]
+        secret: Option<String>,
+        #[serde(default)]
+        secret_env: Option<String>,
+        #[serde(default)]
+        issuer: Option<String>,
+        #[serde(default)]
+        audience: Option<String>,
+    },
+}
+
+impl AuthConfig {
+    /// Resolve the symmetric signing secret at startup. Reading from
+    /// env happens here (not in `BearerJwt::new`) so missing-env-var
+    /// fails before the listener binds.
+    pub fn resolve_secret(&self) -> Result<Option<Vec<u8>>, ConfigError> {
+        match self {
+            AuthConfig::NoAuth => Ok(None),
+            AuthConfig::BearerJwt {
+                secret, secret_env, ..
+            } => match (secret, secret_env) {
+                (Some(s), None) => Ok(Some(s.as_bytes().to_vec())),
+                (None, Some(var)) => {
+                    std::env::var(var)
+                        .map(|v| Some(v.into_bytes()))
+                        .map_err(|_| {
+                            ConfigError::Auth(format!(
+                                "bearer_jwt.secret_env=\"{var}\" but env var not set"
+                            ))
+                        })
+                }
+                (Some(_), Some(_)) => Err(ConfigError::Auth(
+                    "bearer_jwt: set exactly one of `secret` / `secret_env`, not both".into(),
+                )),
+                (None, None) => Err(ConfigError::Auth(
+                    "bearer_jwt: must set one of `secret` / `secret_env`".into(),
+                )),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -147,6 +209,93 @@ bind = "x"
 "#,
         );
         assert!(res.is_err(), "top-level deny_unknown_fields should reject");
+    }
+
+    #[test]
+    fn auth_defaults_to_noauth() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert_eq!(cfg.auth, AuthConfig::NoAuth);
+        assert!(cfg.auth.resolve_secret().unwrap().is_none());
+    }
+
+    #[test]
+    fn auth_bearer_jwt_with_literal_secret() {
+        let cfg: Config = toml::from_str(
+            r#"
+[auth]
+provider = "bearer_jwt"
+secret = "dev-secret"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(cfg.auth, AuthConfig::BearerJwt { .. }));
+        let resolved = cfg.auth.resolve_secret().unwrap().unwrap();
+        assert_eq!(&resolved, b"dev-secret");
+    }
+
+    #[test]
+    fn auth_bearer_jwt_secret_env_resolves_at_load() {
+        // Use a uniquely-named env var so concurrent tests don't
+        // collide. SAFETY: set_var/remove_var require unsafe in
+        // edition 2024 — these are scoped to this single test.
+        let var = "DYNOGRAPH_TEST_SECRET_4f29";
+        // SAFETY: only this test reads or writes this env var name.
+        unsafe { std::env::set_var(var, "from-env") };
+        let cfg: Config = toml::from_str(&format!(
+            r#"
+[auth]
+provider = "bearer_jwt"
+secret_env = "{var}"
+"#,
+        ))
+        .unwrap();
+        let resolved = cfg.auth.resolve_secret().unwrap().unwrap();
+        assert_eq!(&resolved, b"from-env");
+        // SAFETY: same scope as the set_var above; isolated to this test.
+        unsafe { std::env::remove_var(var) };
+    }
+
+    #[test]
+    fn auth_bearer_jwt_missing_secret_is_loud_error() {
+        let cfg: Config = toml::from_str(
+            r#"
+[auth]
+provider = "bearer_jwt"
+"#,
+        )
+        .unwrap();
+        let err = cfg.auth.resolve_secret().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("must set one of"), "{msg}");
+    }
+
+    #[test]
+    fn auth_bearer_jwt_both_secrets_is_loud_error() {
+        let cfg: Config = toml::from_str(
+            r#"
+[auth]
+provider = "bearer_jwt"
+secret = "literal"
+secret_env = "VAR"
+"#,
+        )
+        .unwrap();
+        let err = cfg.auth.resolve_secret().unwrap_err();
+        assert!(err.to_string().contains("not both"), "{err}");
+    }
+
+    #[test]
+    fn auth_bearer_jwt_secret_env_unset_is_loud_error() {
+        let cfg: Config = toml::from_str(
+            r#"
+[auth]
+provider = "bearer_jwt"
+secret_env = "DYNOGRAPH_DEFINITELY_UNSET_zzz"
+"#,
+        )
+        .unwrap();
+        let err = cfg.auth.resolve_secret().unwrap_err();
+        assert!(err.to_string().contains("env var not set"), "{err}");
     }
 
     #[test]

@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Path, Query, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -30,9 +31,6 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub(crate) registry: Arc<GraphRegistry>,
-    /// Plumbed through now; first handler that needs an `Identity`
-    /// (any non-public route) will call `auth.authenticate(&headers)`.
-    #[allow(dead_code)]
     pub(crate) auth: Arc<dyn AuthProvider>,
     pub(crate) readiness: Arc<Readiness>,
 }
@@ -71,9 +69,9 @@ impl AppState {
 }
 
 pub fn app(state: AppState) -> Router {
-    Router::new()
-        .route("/health", get(health))
-        .route("/ready", get(ready))
+    // /v1/* routes go through the auth middleware; /health and /ready
+    // stay public so liveness/readiness probes work without a token.
+    let v1: Router<AppState> = Router::new()
         .route("/v1/graphs", get(list_graphs).post(create_graph))
         .route("/v1/graphs/{id}", get(get_graph).delete(delete_graph))
         .route(
@@ -97,7 +95,31 @@ pub fn app(state: AppState) -> Router {
                 .delete(delete_embedding),
         )
         .route("/v1/graphs/{id}/similar", post(similar))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ));
+
+    Router::new()
+        .route("/health", get(health))
+        .route("/ready", get(ready))
+        .merge(v1)
         .with_state(state)
+}
+
+/// Axum middleware: runs `state.auth.authenticate(headers)` on every
+/// protected request. On success, inserts the resolved `Identity`
+/// into request extensions so downstream handlers can read the
+/// caller's user_id via `Extension<Identity>` if they need it. On
+/// failure, short-circuits with 401 + the auth error's message.
+async fn auth_middleware(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
+    match state.auth.authenticate(req.headers()) {
+        Ok(identity) => {
+            req.extensions_mut().insert(identity);
+            next.run(req).await
+        }
+        Err(e) => (StatusCode::UNAUTHORIZED, e.message().to_string()).into_response(),
+    }
 }
 
 async fn health() -> &'static str {
