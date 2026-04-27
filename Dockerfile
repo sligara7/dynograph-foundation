@@ -1,10 +1,8 @@
 # syntax=docker/dockerfile:1.7
 
 # ---------- builder ----------
-# Pinned to the rust toolchain the workspace tests run against (1.94
-# stabilizes the `is_multiple_of` slice 8a uses; older nightlies will
-# fail to compile dynograph-storage). Bump alongside the workspace's
-# minimum rustc.
+# Pinned to the workspace MSRV (`rust-version` in Cargo.toml). Bump
+# both in lockstep.
 FROM rust:1.94-slim-bookworm AS builder
 
 # rocksdb vendors RocksDB and builds it from source, so the builder
@@ -21,7 +19,16 @@ RUN apt-get update \
 
 WORKDIR /build
 COPY . .
-RUN cargo build --release --bin dynograph
+# BuildKit cache mounts: the cargo registry + target dir persist
+# across iterative rebuilds on the same host, so a source-only
+# change skips the ~12-minute RocksDB recompile. The mount goes
+# away when the layer ends, so we copy the binary out to a stable
+# path the runtime stage can read. CI/cross-host rebuilds need
+# `cache-from`/`cache-to` (deferred to slice 13's publish workflow).
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/build/target \
+    cargo build --release --bin dynograph \
+ && cp /build/target/release/dynograph /usr/local/bin/dynograph
 
 # ---------- runtime ----------
 FROM debian:bookworm-slim
@@ -34,7 +41,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /build/target/release/dynograph /usr/local/bin/dynograph
+COPY --from=builder /usr/local/bin/dynograph /usr/local/bin/dynograph
 
 # Mount this volume for persistent storage. Pair with
 # `DYNOGRAPH_STORAGE_ROOT=/data` (or `[storage].root = "/data"` in a

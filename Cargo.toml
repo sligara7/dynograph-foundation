@@ -18,9 +18,23 @@ members = [
 [workspace.package]
 version = "0.2.1"
 edition = "2024"
+# `is_multiple_of` (used in dynograph-storage::engine::decode_embedding)
+# stabilized in 1.94. Bumping in lockstep with the slice-11 Dockerfile
+# pin so local `cargo build` fails loudly on older toolchains rather
+# than via a missing-method error.
+rust-version = "1.94"
 license = "MIT"
 authors = ["Anthony Sligar <sligara7@gmail.com>"]
 repository = "https://github.com/sligara7/dynograph-foundation"
+
+[profile.release]
+# Strip debuginfo (not symbols) — keeps function names in backtraces
+# but drops ~20-30 MB from the final binary. Slice 11's Docker image
+# was 99.8 MB; with strip it should land around the canonical ~80 MB
+# target. Affects local release builds too — debug builds keep full
+# symbols, so `RUST_BACKTRACE=1` on a debug build still gives line
+# numbers when needed.
+strip = "debuginfo"
 
 [workspace.dependencies]
 # Serialization

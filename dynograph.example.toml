@@ -23,16 +23,15 @@ bind = "0.0.0.0:8080"
 # rehydration). When absent, the service runs in-memory.
 root = "/data"
 
-[auth]
-# "noauth" (default) — every request authenticates as "anonymous";
-# downstream consumers can layer their own authorization.
-# "bearer_jwt" — HS256 JWT in `Authorization: Bearer <token>`.
-provider = "noauth"
-
-# Bearer-JWT example. Set exactly one of `secret` (literal — fine
-# for dev) or `secret_env = "VAR_NAME"` (recommended — keeps the
-# signing secret out of TOML committed to repos). Optional `issuer`
-# and `audience` enforce the corresponding token claims.
+# [auth] is omitted entirely → defaults to `provider = "noauth"`.
+# Every request authenticates as "anonymous"; downstream consumers
+# layer their own authorization on top.
+#
+# To switch to bearer JWT, uncomment exactly one of the blocks
+# below. Set exactly one of `secret` (literal — fine for dev) or
+# `secret_env = "VAR_NAME"` (recommended — keeps the signing secret
+# out of TOML committed to repos). Optional `issuer` and `audience`
+# enforce the corresponding token claims.
 #
 # [auth]
 # provider = "bearer_jwt"
