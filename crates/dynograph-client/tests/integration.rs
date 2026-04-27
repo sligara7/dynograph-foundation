@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use dynograph_client::{ClientError, DynographClient};
+use dynograph_client::{ClientError, CreateEdge, DynographClient};
 // `Value as DV` keeps assertions on received `properties` honest about
 // the wire-shape Value (typed enum from dynograph-core), distinct
 // from the `serde_json::Value` we use to *build* request bodies via
@@ -207,15 +207,18 @@ async fn edge_crud_round_trip() {
             .unwrap();
     }
 
+    let edge_props = props(&[("weight", json!(0.5))]);
     let created = client
         .create_edge(
             "g1",
-            "Likes",
-            "Item",
-            "a",
-            "Item",
-            "b",
-            &props(&[("weight", json!(0.5))]),
+            &CreateEdge {
+                edge_type: "Likes",
+                from_type: "Item",
+                from_id: "a",
+                to_type: "Item",
+                to_id: "b",
+                properties: &edge_props,
+            },
         )
         .await
         .unwrap();

@@ -25,6 +25,21 @@ pub use wire::{
     SchemaResponse, SimilarHit, SimilarResponse,
 };
 
+/// Request body for `create_edge`. Carries the same fields as the
+/// service's `CreateEdgeBody`; promoted to a struct so the client's
+/// signature stays under the `clippy::too_many_arguments` floor and
+/// reads like a declaration of intent at call sites.
+#[derive(Debug, Clone, Serialize)]
+pub struct CreateEdge<'a> {
+    pub edge_type: &'a str,
+    pub from_type: &'a str,
+    pub from_id: &'a str,
+    pub to_type: &'a str,
+    pub to_id: &'a str,
+    #[serde(borrow)]
+    pub properties: &'a serde_json::Map<String, serde_json::Value>,
+}
+
 #[derive(Clone)]
 pub struct DynographClient {
     http: reqwest::Client,
@@ -50,9 +65,8 @@ impl DynographClient {
         }
     }
 
-    /// Attach a bearer token. Sent as `Authorization: Bearer <token>`
-    /// on every request — matching the slice 9 BearerJwt provider's
-    /// case-insensitive scheme check.
+    /// Attach a bearer token. Sent on every request via reqwest's
+    /// `bearer_auth`.
     pub fn with_bearer(mut self, token: impl Into<String>) -> Self {
         self.bearer = Some(Arc::from(token.into()));
         self
@@ -68,9 +82,6 @@ impl DynographClient {
         format!("{}{}", self.base_url, path)
     }
 
-    /// Build a `RequestBuilder` for `(method, path)` with the bearer
-    /// header attached if configured. Centralizing this keeps every
-    /// method honest about auth.
     fn request(&self, method: Method, path: &str) -> RequestBuilder {
         let mut req = self.http.request(method, self.url(path));
         if let Some(token) = &self.bearer {
@@ -280,28 +291,14 @@ impl DynographClient {
     // Edges
     // =========================================================================
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn create_edge(
         &self,
         id: &str,
-        edge_type: &str,
-        from_type: &str,
-        from_id: &str,
-        to_type: &str,
-        to_id: &str,
-        properties: &serde_json::Map<String, serde_json::Value>,
+        edge: &CreateEdge<'_>,
     ) -> Result<EdgeResponse, ClientError> {
-        let body = json!({
-            "edge_type": edge_type,
-            "from_type": from_type,
-            "from_id": from_id,
-            "to_type": to_type,
-            "to_id": to_id,
-            "properties": properties,
-        });
         self.send_json(
             self.request(Method::POST, &format!("/v1/graphs/{id}/edges"))
-                .json(&body),
+                .json(edge),
         )
         .await
     }
