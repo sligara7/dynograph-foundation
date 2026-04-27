@@ -46,14 +46,19 @@ impl AppState {
         }
     }
 
-    /// Convenience for the dev / private-network default. Marks the
-    /// service ready immediately, which matches the slice 1–3
-    /// in-memory test expectation that there's nothing to load. The
-    /// `dynograph` binary uses `AppState::new` with an explicit
-    /// not-ready `Readiness` and flips it via `mark_ready()` once
-    /// rehydrate finishes.
+    /// Convenience for the dev / private-network default. Picks
+    /// `NoAuth` and `Readiness::ready` — the right defaults for
+    /// in-memory test code and embedded use, neither of which has
+    /// startup work that would warrant a not-ready window. The
+    /// `dynograph` binary uses the lower-level `AppState::new`
+    /// with an explicit not-ready `Readiness` because it does have
+    /// startup work (`rehydrate`) and flips ready only after.
     pub fn with_no_auth(registry: Arc<GraphRegistry>) -> Self {
-        Self::new(registry, Arc::new(NoAuth::new()), Readiness::ready())
+        Self::new(
+            registry,
+            Arc::new(NoAuth::new()),
+            Arc::new(Readiness::ready()),
+        )
     }
 
     pub fn readiness(&self) -> &Arc<Readiness> {

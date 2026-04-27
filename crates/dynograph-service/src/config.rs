@@ -27,6 +27,10 @@ pub enum ConfigError {
     },
 }
 
+/// Top-level config denies unknown fields so a typo'd section name
+/// (e.g. `[srever]`) fails loud at startup. Inner sections allow
+/// unknown fields so adding a new key in a future release doesn't
+/// break old binaries reading newer configs.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -37,14 +41,16 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
+    /// Field-level default for the `[server]` table being present
+    /// but missing `bind`. The `Default` impl below covers the
+    /// case where `[server]` is absent entirely (driven by
+    /// `Config`'s `#[serde(default)]` on the `server` field).
     #[serde(default = "default_bind")]
     pub bind: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
     /// `Some(path)` → on-disk RocksDB rooted at `path`. `None` →
     /// in-memory (HashMap-backed) storage.
@@ -127,15 +133,36 @@ root = "/var/lib/dynograph"
     }
 
     #[test]
-    fn unknown_field_is_loud_error() {
+    fn unknown_top_level_section_is_loud_error() {
+        // A typo'd section name — `[srever]` instead of `[server]` —
+        // is the failure mode that bites; without `deny_unknown_fields`
+        // at the top level the typo'd section is silently dropped and
+        // the binary boots with the wrong config. Inner sections
+        // deliberately allow unknown keys for forward-compat with
+        // newer config schemas.
         let res: Result<Config, _> = toml::from_str(
             r#"
-[server]
+[srever]
 bind = "x"
-nonexistent = "y"
 "#,
         );
-        assert!(res.is_err(), "deny_unknown_fields should reject");
+        assert!(res.is_err(), "top-level deny_unknown_fields should reject");
+    }
+
+    #[test]
+    fn unknown_field_in_inner_section_is_tolerated() {
+        // Forward-compat: a future foundation release may add new
+        // keys; old binaries reading newer configs must not refuse
+        // to boot.
+        let cfg: Config = toml::from_str(
+            r#"
+[server]
+bind = "0.0.0.0:9090"
+future_unknown_key = "ignored"
+"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.server.bind, "0.0.0.0:9090");
     }
 
     #[test]

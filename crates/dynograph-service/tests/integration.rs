@@ -802,7 +802,7 @@ async fn ready_returns_200_when_marked_ready() {
 #[tokio::test]
 async fn ready_returns_503_before_mark_ready_then_flips() {
     let registry = Arc::new(GraphRegistry::new());
-    let readiness = Readiness::not_ready();
+    let readiness = Arc::new(Readiness::not_ready());
     let state = AppState::new(registry, Arc::new(NoAuth::new()), readiness.clone());
     let app = app(state);
 

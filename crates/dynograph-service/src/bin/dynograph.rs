@@ -35,17 +35,17 @@ async fn main() -> ExitCode {
 }
 
 fn tracing_subscriber_init() {
-    // Minimal — env-var driven. RUST_LOG=info is the typical setting.
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let _ = tracing::subscriber::set_global_default(
-            tracing_subscriber::FmtSubscriber::builder()
-                .with_writer(std::io::stderr)
-                .with_max_level(tracing::Level::INFO)
-                .finish(),
-        );
-    });
+    // `set_global_default` errors if called twice; in `main` we call
+    // it once at startup, so warn and continue if it somehow fires
+    // again rather than swallow the failure silently.
+    if let Err(e) = tracing::subscriber::set_global_default(
+        tracing_subscriber::FmtSubscriber::builder()
+            .with_writer(std::io::stderr)
+            .with_max_level(tracing::Level::INFO)
+            .finish(),
+    ) {
+        eprintln!("warning: tracing subscriber already initialized: {e}");
+    }
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,14 +53,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = Config::load(config_path.as_deref())?;
     info!(?cfg, "loaded config");
 
-    let registry = match &cfg.storage.root {
-        Some(root) => Arc::new(GraphRegistry::on_disk(root.clone())),
-        None => Arc::new(GraphRegistry::in_memory()),
-    };
-
-    let readiness = match &cfg.storage.root {
-        Some(_) => Readiness::not_ready(),
-        None => Readiness::ready(),
+    // The storage-root presence is the single axis that decides
+    // both the registry backend and whether the service starts
+    // not-ready (waiting for rehydrate).
+    let (registry, readiness) = match &cfg.storage.root {
+        Some(root) => (
+            Arc::new(GraphRegistry::on_disk(root.clone())),
+            Arc::new(Readiness::not_ready()),
+        ),
+        None => (
+            Arc::new(GraphRegistry::in_memory()),
+            Arc::new(Readiness::ready()),
+        ),
     };
     let state = AppState::new(registry.clone(), Arc::new(NoAuth::new()), readiness.clone());
 

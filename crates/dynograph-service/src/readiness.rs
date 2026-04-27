@@ -14,7 +14,6 @@
 //! a readiness gate; the binary uses the lower-level `AppState::new`
 //! constructor with an explicit not-ready `Readiness`.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug)]
@@ -23,16 +22,16 @@ pub struct Readiness {
 }
 
 impl Readiness {
-    pub fn ready() -> Arc<Self> {
-        Arc::new(Self {
+    pub fn ready() -> Self {
+        Self {
             ready: AtomicBool::new(true),
-        })
+        }
     }
 
-    pub fn not_ready() -> Arc<Self> {
-        Arc::new(Self {
+    pub fn not_ready() -> Self {
+        Self {
             ready: AtomicBool::new(false),
-        })
+        }
     }
 
     pub fn is_ready(&self) -> bool {
