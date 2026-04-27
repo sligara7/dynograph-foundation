@@ -114,12 +114,22 @@ impl AuthProvider for BearerJwt {
         let header_str = header
             .to_str()
             .map_err(|_| AuthError::new("Authorization header is not valid UTF-8"))?;
-        let token = header_str
-            .strip_prefix("Bearer ")
+        // RFC 6750 §2.1: scheme matching is case-insensitive
+        // ("Bearer" / "bearer" / "BEARER" all valid).
+        let (scheme, token) = header_str
+            .split_once(' ')
             .ok_or_else(|| AuthError::new("Authorization header must use Bearer scheme"))?;
+        if !scheme.eq_ignore_ascii_case("Bearer") {
+            return Err(AuthError::new(
+                "Authorization header must use Bearer scheme",
+            ));
+        }
         let data = decode::<Claims>(token, &self.decoding_key, &self.validation)
             .map_err(|e| AuthError::new(format!("invalid token: {e}")))?;
-        Ok(Identity(Arc::from(data.claims.sub.as_str())))
+        // Move the decoded `String` into the `Arc<str>`: `From<String>`
+        // reuses the heap buffer where possible, avoiding the alloc +
+        // memcpy that `Arc::from(s.as_str())` would do.
+        Ok(Identity(Arc::from(data.claims.sub)))
     }
 }
 
@@ -264,6 +274,31 @@ mod tests {
         let provider = BearerJwt::new(b"s");
         let err = provider.authenticate(&headers).unwrap_err();
         assert!(err.message().contains("Bearer scheme"), "{err:?}");
+    }
+
+    #[test]
+    fn bearer_jwt_scheme_match_is_case_insensitive() {
+        // RFC 6750 §2.1 — clients may send `bearer`, `BEARER`, etc.
+        let secret = b"s";
+        let token = mint_token(
+            secret,
+            &TestClaims {
+                sub: "alice".into(),
+                exp: now_secs() + 60,
+                iss: None,
+                aud: None,
+            },
+        );
+        let provider = BearerJwt::new(secret);
+        for prefix in ["Bearer ", "bearer ", "BEARER ", "BeArEr "] {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("{prefix}{token}")).unwrap(),
+            );
+            let id = provider.authenticate(&headers).unwrap();
+            assert_eq!(&*id.0, "alice", "prefix {prefix:?} should be accepted");
+        }
     }
 
     #[test]

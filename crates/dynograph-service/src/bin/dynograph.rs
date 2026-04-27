@@ -18,9 +18,7 @@ use std::sync::Arc;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{error, info, warn};
 
-use dynograph_service::{
-    AppState, AuthConfig, AuthProvider, BearerJwt, Config, GraphRegistry, NoAuth, Readiness, app,
-};
+use dynograph_service::{AppState, Config, GraphRegistry, Readiness, app};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -68,8 +66,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             Arc::new(Readiness::ready()),
         ),
     };
-    let auth = build_auth_provider(&cfg.auth)?;
-    let state = AppState::new(registry.clone(), auth, readiness.clone());
+    let state = AppState::new(
+        registry.clone(),
+        cfg.auth.build_provider()?,
+        readiness.clone(),
+    );
 
     if cfg.storage.root.is_some() {
         let rehydrated = registry.rehydrate()?;
@@ -84,34 +85,6 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     info!("shutdown complete");
     Ok(())
-}
-
-/// Resolve the configured auth provider at startup. Reading the
-/// JWT secret from env happens here (via `AuthConfig::resolve_secret`)
-/// so a missing env var fails before the listener binds — better to
-/// crash on startup with a clear message than to accept connections
-/// and 401 every request.
-fn build_auth_provider(
-    cfg: &AuthConfig,
-) -> Result<Arc<dyn AuthProvider>, Box<dyn std::error::Error>> {
-    match cfg {
-        AuthConfig::NoAuth => Ok(Arc::new(NoAuth::new())),
-        AuthConfig::BearerJwt {
-            issuer, audience, ..
-        } => {
-            let secret = cfg
-                .resolve_secret()?
-                .expect("BearerJwt resolve_secret returns Some on success");
-            let mut bj = BearerJwt::new(&secret);
-            if let Some(iss) = issuer {
-                bj = bj.with_issuer(iss);
-            }
-            if let Some(aud) = audience {
-                bj = bj.with_audience(aud);
-            }
-            Ok(Arc::new(bj))
-        }
-    }
 }
 
 /// Parse `--config <path>` from argv. Anything else is rejected.

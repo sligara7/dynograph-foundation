@@ -10,8 +10,11 @@
 //! startup.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::Deserialize;
+
+use crate::auth::{AuthProvider, BearerJwt, NoAuth};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -72,32 +75,54 @@ pub enum AuthConfig {
 }
 
 impl AuthConfig {
-    /// Resolve the symmetric signing secret at startup. Reading from
-    /// env happens here (not in `BearerJwt::new`) so missing-env-var
-    /// fails before the listener binds.
-    pub fn resolve_secret(&self) -> Result<Option<Vec<u8>>, ConfigError> {
+    /// Construct the configured `AuthProvider`. Reading the JWT
+    /// secret from env happens here (at startup) so a missing env
+    /// var fails before the listener binds — better to crash with a
+    /// clear message than to accept connections and 401 every
+    /// request.
+    pub fn build_provider(&self) -> Result<Arc<dyn AuthProvider>, ConfigError> {
         match self {
-            AuthConfig::NoAuth => Ok(None),
+            AuthConfig::NoAuth => Ok(Arc::new(NoAuth::new())),
             AuthConfig::BearerJwt {
-                secret, secret_env, ..
-            } => match (secret, secret_env) {
-                (Some(s), None) => Ok(Some(s.as_bytes().to_vec())),
-                (None, Some(var)) => {
-                    std::env::var(var)
-                        .map(|v| Some(v.into_bytes()))
-                        .map_err(|_| {
-                            ConfigError::Auth(format!(
-                                "bearer_jwt.secret_env=\"{var}\" but env var not set"
-                            ))
-                        })
+                issuer, audience, ..
+            } => {
+                let secret = self.resolve_bearer_secret()?;
+                let mut bj = BearerJwt::new(&secret);
+                if let Some(iss) = issuer {
+                    bj = bj.with_issuer(iss);
                 }
-                (Some(_), Some(_)) => Err(ConfigError::Auth(
-                    "bearer_jwt: set exactly one of `secret` / `secret_env`, not both".into(),
-                )),
-                (None, None) => Err(ConfigError::Auth(
-                    "bearer_jwt: must set one of `secret` / `secret_env`".into(),
-                )),
-            },
+                if let Some(aud) = audience {
+                    bj = bj.with_audience(aud);
+                }
+                Ok(Arc::new(bj))
+            }
+        }
+    }
+
+    /// Resolve the symmetric signing secret. Private — `build_provider`
+    /// is the public entry point. Only valid on the BearerJwt arm;
+    /// callers via `build_provider` only reach this through that
+    /// branch.
+    fn resolve_bearer_secret(&self) -> Result<Vec<u8>, ConfigError> {
+        let AuthConfig::BearerJwt {
+            secret, secret_env, ..
+        } = self
+        else {
+            unreachable!("resolve_bearer_secret called on non-BearerJwt variant");
+        };
+        match (secret, secret_env) {
+            (Some(s), None) => Ok(s.as_bytes().to_vec()),
+            (None, Some(var)) => std::env::var(var).map(String::into_bytes).map_err(|_| {
+                ConfigError::Auth(format!(
+                    "bearer_jwt.secret_env=\"{var}\" but env var not set"
+                ))
+            }),
+            (Some(_), Some(_)) => Err(ConfigError::Auth(
+                "bearer_jwt: set exactly one of `secret` / `secret_env`, not both".into(),
+            )),
+            (None, None) => Err(ConfigError::Auth(
+                "bearer_jwt: must set one of `secret` / `secret_env`".into(),
+            )),
         }
     }
 }
@@ -215,7 +240,7 @@ bind = "x"
     fn auth_defaults_to_noauth() {
         let cfg: Config = toml::from_str("").unwrap();
         assert_eq!(cfg.auth, AuthConfig::NoAuth);
-        assert!(cfg.auth.resolve_secret().unwrap().is_none());
+        assert!(cfg.auth.build_provider().is_ok());
     }
 
     #[test]
@@ -229,15 +254,11 @@ secret = "dev-secret"
         )
         .unwrap();
         assert!(matches!(cfg.auth, AuthConfig::BearerJwt { .. }));
-        let resolved = cfg.auth.resolve_secret().unwrap().unwrap();
-        assert_eq!(&resolved, b"dev-secret");
+        cfg.auth.build_provider().expect("provider builds");
     }
 
     #[test]
     fn auth_bearer_jwt_secret_env_resolves_at_load() {
-        // Use a uniquely-named env var so concurrent tests don't
-        // collide. SAFETY: set_var/remove_var require unsafe in
-        // edition 2024 — these are scoped to this single test.
         let var = "DYNOGRAPH_TEST_SECRET_4f29";
         // SAFETY: only this test reads or writes this env var name.
         unsafe { std::env::set_var(var, "from-env") };
@@ -249,8 +270,9 @@ secret_env = "{var}"
 "#,
         ))
         .unwrap();
-        let resolved = cfg.auth.resolve_secret().unwrap().unwrap();
-        assert_eq!(&resolved, b"from-env");
+        cfg.auth
+            .build_provider()
+            .expect("provider builds with resolved env-var secret");
         // SAFETY: same scope as the set_var above; isolated to this test.
         unsafe { std::env::remove_var(var) };
     }
@@ -264,9 +286,8 @@ provider = "bearer_jwt"
 "#,
         )
         .unwrap();
-        let err = cfg.auth.resolve_secret().unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("must set one of"), "{msg}");
+        let err = cfg.auth.build_provider().err().expect("expected error");
+        assert!(err.to_string().contains("must set one of"), "{err}");
     }
 
     #[test]
@@ -280,7 +301,7 @@ secret_env = "VAR"
 "#,
         )
         .unwrap();
-        let err = cfg.auth.resolve_secret().unwrap_err();
+        let err = cfg.auth.build_provider().err().expect("expected error");
         assert!(err.to_string().contains("not both"), "{err}");
     }
 
@@ -294,7 +315,7 @@ secret_env = "DYNOGRAPH_DEFINITELY_UNSET_zzz"
 "#,
         )
         .unwrap();
-        let err = cfg.auth.resolve_secret().unwrap_err();
+        let err = cfg.auth.build_provider().err().expect("expected error");
         assert!(err.to_string().contains("env var not set"), "{err}");
     }
 
