@@ -18,26 +18,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct RequestKey {
+pub(crate) struct RequestKey {
     pub method: String,
     pub path: String,
     pub status: u16,
 }
 
 #[derive(Debug, Default)]
-pub struct RequestCounter {
-    pub count: AtomicU64,
-    pub latency_micros_sum: AtomicU64,
+struct RequestCounter {
+    count: AtomicU64,
+    latency_micros_sum: AtomicU64,
 }
 
 impl RequestCounter {
-    pub fn record(&self, latency_micros: u64) {
+    fn record(&self, latency_micros: u64) {
         self.count.fetch_add(1, Ordering::Relaxed);
         self.latency_micros_sum
             .fetch_add(latency_micros, Ordering::Relaxed);
     }
 
-    pub fn snapshot(&self) -> (u64, u64) {
+    fn snapshot(&self) -> (u64, u64) {
         (
             self.count.load(Ordering::Relaxed),
             self.latency_micros_sum.load(Ordering::Relaxed),
@@ -45,7 +45,7 @@ impl RequestCounter {
     }
 }
 
-pub struct MetricsState {
+pub(crate) struct MetricsState {
     counters: Mutex<HashMap<RequestKey, RequestCounter>>,
     started_at: Instant,
 }
@@ -58,24 +58,18 @@ impl MetricsState {
         }
     }
 
+    /// Record one (method, path, status, latency) observation.
+    /// `entry().or_default()` keeps the lock acquisition single — the
+    /// `RequestCounter`'s atomic increments don't need `&mut`, so the
+    /// briefly-held lock just covers the hash + entry construction.
     pub fn record(&self, method: &str, path: &str, status: u16, latency_micros: u64) {
         let key = RequestKey {
             method: method.to_string(),
             path: path.to_string(),
             status,
         };
-        let counters = self.counters.lock().expect("metrics counters poisoned");
-        // Look up existing entry under the lock; if absent, drop and
-        // re-acquire a write to insert. The fast path (entry exists)
-        // does one lookup + two atomic increments without re-locking.
-        if let Some(c) = counters.get(&key) {
-            c.record(latency_micros);
-            return;
-        }
-        drop(counters);
         let mut counters = self.counters.lock().expect("metrics counters poisoned");
-        let c = counters.entry(key).or_default();
-        c.record(latency_micros);
+        counters.entry(key).or_default().record(latency_micros);
     }
 
     /// Snapshot of all counters. Sorted by key for stable output —

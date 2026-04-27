@@ -217,14 +217,14 @@ impl GraphEntry {
     /// the per-graph indexes. Sorted by node_type for stable scrape
     /// output.
     pub fn hnsw_stats_snapshot(&self) -> Vec<(String, HnswStats)> {
-        let guard = self.state.read().expect("graph state read lock poisoned");
-        let mut out: Vec<(String, HnswStats)> = guard
-            .indexes
-            .iter()
-            .map(|(t, idx)| (t.clone(), idx.stats()))
-            .collect();
-        out.sort_by(|a, b| a.0.cmp(&b.0));
-        out
+        self.with_state_read(|_, indexes| {
+            let mut out: Vec<(String, HnswStats)> = indexes
+                .iter()
+                .map(|(t, idx)| (t.clone(), idx.stats()))
+                .collect();
+            out.sort_by(|a, b| a.0.cmp(&b.0));
+            out
+        })
     }
 
     /// Run a closure with a write-lock that exposes both the engine

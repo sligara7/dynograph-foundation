@@ -22,7 +22,6 @@ pub use config::{AuthConfig, Config, ConfigError, ServerConfig, StorageConfig};
 pub use edge_response::EdgeResponse;
 pub use embedding_response::EmbeddingResponse;
 pub use metadata_response::GraphMetadataResponse;
-pub use metrics_state::MetricsState;
 pub use node_response::{NodeListResponse, NodeResponse};
 pub use readiness::Readiness;
 pub use registry::{GraphEntry, GraphRegistry, RegistryError, StorageBackend, validate_graph_id};

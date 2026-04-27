@@ -147,19 +147,25 @@ async fn auth_middleware(State(state): State<AppState>, mut req: Request, next: 
 /// (404 from the router itself) won't have a `MatchedPath` set —
 /// those are intentionally skipped to keep the label set finite.
 async fn metrics_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let method = req.method().as_str().to_string();
-    let matched = req
+    // Skip recording (and the per-request String allocs) when the
+    // router didn't match anything — those 404s have no MatchedPath
+    // and would inflate label cardinality if we made up a `__none__`
+    // bucket. Allocate the owned method+path strings only after we
+    // know we're going to insert.
+    let matched_path = req
         .extensions()
         .get::<MatchedPath>()
         .map(|p| p.as_str().to_string());
+    let Some(path) = matched_path else {
+        return next.run(req).await;
+    };
+    let method = req.method().as_str().to_string();
     let start = Instant::now();
     let response = next.run(req).await;
-    if let Some(path) = matched {
-        let elapsed_micros = start.elapsed().as_micros() as u64;
-        state
-            .metrics
-            .record(&method, &path, response.status().as_u16(), elapsed_micros);
-    }
+    let elapsed_micros = start.elapsed().as_micros() as u64;
+    state
+        .metrics
+        .record(&method, &path, response.status().as_u16(), elapsed_micros);
     response
 }
 
@@ -229,75 +235,46 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     // graphs × node_types-with-embeddings — for the foreseeable
     // range (dozens of graphs, single-digit indexed types each)
     // this is microseconds per scrape.
-    let _ = writeln!(
-        out,
-        "# HELP dynograph_hnsw_index_size Live (non-tombstoned) embeddings per index"
-    );
-    let _ = writeln!(out, "# TYPE dynograph_hnsw_index_size gauge");
-    let mut hnsw_lines: Vec<(String, String, String)> = Vec::new();
+    let mut hnsw_snap: Vec<(String, String, dynograph_vector::HnswStats)> = Vec::new();
     for graph_id in state.registry.list_ids() {
         if let Some(entry) = state.registry.get(&graph_id) {
-            let stats_per_type = entry.hnsw_stats_snapshot();
-            for (node_type, stats) in stats_per_type {
-                let label = format!("graph=\"{}\",node_type=\"{}\"", graph_id, node_type);
-                hnsw_lines.push((
-                    "dynograph_hnsw_index_size".to_string(),
-                    label.clone(),
-                    stats.index_size.to_string(),
-                ));
-                hnsw_lines.push((
-                    "dynograph_hnsw_searches_total".to_string(),
-                    label.clone(),
-                    stats.searches_total.to_string(),
-                ));
-                hnsw_lines.push((
-                    "dynograph_hnsw_inserts_total".to_string(),
-                    label.clone(),
-                    stats.inserts_total.to_string(),
-                ));
-                hnsw_lines.push((
-                    "dynograph_hnsw_removes_total".to_string(),
-                    label,
-                    stats.removes_total.to_string(),
-                ));
+            for (node_type, stats) in entry.hnsw_stats_snapshot() {
+                hnsw_snap.push((graph_id.clone(), node_type, stats));
             }
         }
     }
-    for (metric, labels, value) in &hnsw_lines {
-        if metric == "dynograph_hnsw_index_size" {
-            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
-        }
-    }
-    let _ = writeln!(
-        out,
-        "# HELP dynograph_hnsw_searches_total HNSW search calls per index"
+    emit_hnsw_metric(
+        &mut out,
+        "dynograph_hnsw_index_size",
+        "gauge",
+        "Live (non-tombstoned) embeddings per index",
+        &hnsw_snap,
+        |s| s.index_size as u64,
     );
-    let _ = writeln!(out, "# TYPE dynograph_hnsw_searches_total counter");
-    for (metric, labels, value) in &hnsw_lines {
-        if metric == "dynograph_hnsw_searches_total" {
-            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
-        }
-    }
-    let _ = writeln!(
-        out,
-        "# HELP dynograph_hnsw_inserts_total HNSW insert calls per index"
+    emit_hnsw_metric(
+        &mut out,
+        "dynograph_hnsw_searches_total",
+        "counter",
+        "HNSW search calls per index",
+        &hnsw_snap,
+        |s| s.searches_total,
     );
-    let _ = writeln!(out, "# TYPE dynograph_hnsw_inserts_total counter");
-    for (metric, labels, value) in &hnsw_lines {
-        if metric == "dynograph_hnsw_inserts_total" {
-            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
-        }
-    }
-    let _ = writeln!(
-        out,
-        "# HELP dynograph_hnsw_removes_total HNSW remove calls per index"
+    emit_hnsw_metric(
+        &mut out,
+        "dynograph_hnsw_inserts_total",
+        "counter",
+        "HNSW insert calls per index",
+        &hnsw_snap,
+        |s| s.inserts_total,
     );
-    let _ = writeln!(out, "# TYPE dynograph_hnsw_removes_total counter");
-    for (metric, labels, value) in &hnsw_lines {
-        if metric == "dynograph_hnsw_removes_total" {
-            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
-        }
-    }
+    emit_hnsw_metric(
+        &mut out,
+        "dynograph_hnsw_removes_total",
+        "counter",
+        "HNSW remove calls per index",
+        &hnsw_snap,
+        |s| s.removes_total,
+    );
 
     (
         [(
@@ -306,6 +283,30 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
         )],
         out,
     )
+}
+
+/// Emit one HNSW metric block (HELP + TYPE header + per-(graph,
+/// node_type) line). The `field` projector picks the relevant stat
+/// — collapses the four near-identical emission blocks (one per
+/// counter) to one helper.
+fn emit_hnsw_metric(
+    out: &mut String,
+    metric: &str,
+    metric_type: &str,
+    help: &str,
+    snap: &[(String, String, dynograph_vector::HnswStats)],
+    field: impl Fn(&dynograph_vector::HnswStats) -> u64,
+) {
+    use std::fmt::Write;
+    let _ = writeln!(out, "# HELP {metric} {help}");
+    let _ = writeln!(out, "# TYPE {metric} {metric_type}");
+    for (graph, node_type, stats) in snap {
+        let _ = writeln!(
+            out,
+            "{metric}{{graph=\"{graph}\",node_type=\"{node_type}\"}} {}",
+            field(stats)
+        );
+    }
 }
 
 async fn health() -> &'static str {
