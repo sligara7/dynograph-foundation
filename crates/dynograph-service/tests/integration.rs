@@ -2061,6 +2061,162 @@ async fn ready_is_public_under_bearer_jwt() {
     assert_eq!(res.status(), StatusCode::OK);
 }
 
+// =============================================================================
+// Slice 10 — /metrics endpoint + middleware
+// =============================================================================
+
+async fn fetch_metrics(app: &axum::Router) -> (StatusCode, String) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8(bytes.to_vec()).unwrap())
+}
+
+#[tokio::test]
+async fn metrics_endpoint_emits_prometheus_text() {
+    let app = build_app();
+    let (status, body) = fetch_metrics(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    // Static metrics are always present.
+    assert!(body.contains("# TYPE dynograph_build_info gauge"), "{body}");
+    assert!(body.contains("dynograph_build_info{version=\""), "{body}");
+    assert!(body.contains("dynograph_uptime_seconds"), "{body}");
+}
+
+#[tokio::test]
+async fn metrics_records_request_under_matched_route_label() {
+    let app = build_app();
+    // Drive a known route so we see its matched-path label.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let (_, body) = fetch_metrics(&app).await;
+    assert!(
+        body.contains(
+            r#"dynograph_http_requests_total{method="GET",path="/v1/graphs",status="200"} 1"#
+        ),
+        "{body}"
+    );
+    // And the latency-sum counter is present for the same series.
+    assert!(
+        body.contains(
+            r#"dynograph_http_request_duration_microseconds_sum{method="GET",path="/v1/graphs",status="200"}"#
+        ),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn metrics_uses_route_pattern_not_literal_url() {
+    // Two requests to different graph IDs should collapse into one
+    // matched-path series — the cardinality protection that makes
+    // /metrics safe to expose under arbitrary client traffic.
+    let app = build_app();
+    for id in ["alpha", "beta"] {
+        let body = json!({
+            "id": id,
+            "schema": { "name": "demo", "version": 1, "node_types": {}, "edge_types": {} }
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/v1/graphs/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+    let (_, body) = fetch_metrics(&app).await;
+    // One series for the matched pattern, count=2.
+    assert!(
+        body.contains(
+            r#"dynograph_http_requests_total{method="GET",path="/v1/graphs/{id}",status="200"} 2"#
+        ),
+        "{body}"
+    );
+    // The literal IDs must not appear as labels.
+    assert!(!body.contains("path=\"/v1/graphs/alpha\""), "{body}");
+    assert!(!body.contains("path=\"/v1/graphs/beta\""), "{body}");
+}
+
+#[tokio::test]
+async fn metrics_endpoint_is_not_self_recorded() {
+    // Scrapes shouldn't show up in the request-counter series — that
+    // would inflate cardinality and primarily measure Prometheus's
+    // own scrape interval. Hit /metrics twice; the second body must
+    // not contain a series for path="/metrics".
+    let app = build_app();
+    let _ = fetch_metrics(&app).await;
+    let (_, body) = fetch_metrics(&app).await;
+    assert!(!body.contains("path=\"/metrics\""), "{body}");
+}
+
+#[tokio::test]
+async fn metrics_is_public_under_bearer_jwt() {
+    // /metrics sits alongside /health and /ready — accessible
+    // without a token even when BearerJwt is the configured
+    // provider. Operators gate access at the network layer.
+    let app = build_app_with_bearer_jwt();
+    let (status, body) = fetch_metrics(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("dynograph_build_info"), "{body}");
+}
+
+#[tokio::test]
+async fn metrics_emits_hnsw_stats_after_an_embedding_set() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    put_embedding(&app, "Item", "n1", &[0.1, 0.2, 0.3]).await;
+    let (status, body) = fetch_metrics(&app).await;
+    assert_eq!(status, StatusCode::OK);
+    // The Item index now has 1 live entry + 1 insert.
+    assert!(
+        body.contains(r#"dynograph_hnsw_index_size{graph="g1",node_type="Item"} 1"#),
+        "{body}"
+    );
+    assert!(
+        body.contains(r#"dynograph_hnsw_inserts_total{graph="g1",node_type="Item"} 1"#),
+        "{body}"
+    );
+}
+
 /// Verify the middleware exposes `Identity` to handlers via request
 /// extensions. We don't change any handler this slice, but the
 /// plumbing must already work for slice-11+ consumer-side

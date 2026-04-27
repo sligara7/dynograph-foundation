@@ -3,9 +3,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use std::time::Instant;
+
 use axum::{
     Json, Router,
-    extract::{Path, Query, Request, State},
+    extract::{MatchedPath, Path, Query, Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -21,6 +23,7 @@ use crate::{
     edge_response::EdgeResponse,
     embedding_response::EmbeddingResponse,
     metadata_response::GraphMetadataResponse,
+    metrics_state::MetricsState,
     node_response::{NodeListResponse, NodeResponse},
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
@@ -33,6 +36,7 @@ pub struct AppState {
     pub(crate) registry: Arc<GraphRegistry>,
     pub(crate) auth: Arc<dyn AuthProvider>,
     pub(crate) readiness: Arc<Readiness>,
+    pub(crate) metrics: Arc<MetricsState>,
 }
 
 impl AppState {
@@ -45,6 +49,7 @@ impl AppState {
             registry,
             auth,
             readiness,
+            metrics: Arc::new(MetricsState::new()),
         }
     }
 
@@ -69,8 +74,12 @@ impl AppState {
 }
 
 pub fn app(state: AppState) -> Router {
-    // /v1/* routes go through the auth middleware; /health and /ready
-    // stay public so liveness/readiness probes work without a token.
+    // /v1/* routes go through both the metrics middleware (outer)
+    // and the auth middleware (inner): incoming → record start time
+    // → authenticate → handler → record latency. /metrics itself is
+    // public AND skips the metrics middleware (no self-recording on
+    // every scrape). /health and /ready are public but ARE recorded
+    // — useful for "is anyone hitting the probes" debugging.
     let v1: Router<AppState> = Router::new()
         .route("/v1/graphs", get(list_graphs).post(create_graph))
         .route("/v1/graphs/{id}", get(get_graph).delete(delete_graph))
@@ -100,10 +109,18 @@ pub fn app(state: AppState) -> Router {
             auth_middleware,
         ));
 
-    Router::new()
+    let observed_public: Router<AppState> = Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
         .merge(v1)
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            metrics_middleware,
+        ));
+
+    Router::new()
+        .route("/metrics", get(metrics_handler))
+        .merge(observed_public)
         .with_state(state)
 }
 
@@ -120,6 +137,175 @@ async fn auth_middleware(State(state): State<AppState>, mut req: Request, next: 
         }
         Err(e) => (StatusCode::UNAUTHORIZED, e.message().to_string()).into_response(),
     }
+}
+
+/// Axum middleware: records (method, matched-path, status) +
+/// latency into `MetricsState`. The matched-path label uses axum's
+/// `MatchedPath` extension so cardinality stays bounded by static
+/// route count (e.g. `/v1/graphs/{id}` is one label, regardless of
+/// how many distinct ids were hit). Requests that miss every route
+/// (404 from the router itself) won't have a `MatchedPath` set —
+/// those are intentionally skipped to keep the label set finite.
+async fn metrics_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    let method = req.method().as_str().to_string();
+    let matched = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_string());
+    let start = Instant::now();
+    let response = next.run(req).await;
+    if let Some(path) = matched {
+        let elapsed_micros = start.elapsed().as_micros() as u64;
+        state
+            .metrics
+            .record(&method, &path, response.status().as_u16(), elapsed_micros);
+    }
+    response
+}
+
+/// Prometheus text-format scrape endpoint. Public — sit alongside
+/// `/health` and `/ready`; the assumption is that the network/
+/// ingress layer gates Prometheus scrape access to the metrics
+/// endpoint when needed (k8s NetworkPolicy / Caddy IP allowlist /
+/// etc). `/metrics` itself bypasses the metrics middleware to avoid
+/// recording every scrape into the request-counter series, which
+/// would inflate cardinality and mostly measure Prometheus's own
+/// scrape interval.
+async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+    use std::fmt::Write;
+    let mut out = String::new();
+
+    let _ = writeln!(out, "# HELP dynograph_build_info Build information");
+    let _ = writeln!(out, "# TYPE dynograph_build_info gauge");
+    let _ = writeln!(
+        out,
+        "dynograph_build_info{{version=\"{}\"}} 1",
+        env!("CARGO_PKG_VERSION")
+    );
+
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_uptime_seconds Process uptime since start"
+    );
+    let _ = writeln!(out, "# TYPE dynograph_uptime_seconds gauge");
+    let _ = writeln!(
+        out,
+        "dynograph_uptime_seconds {:.3}",
+        state.metrics.uptime_secs()
+    );
+
+    let snap = state.metrics.snapshot();
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_http_requests_total Requests handled, by route + status"
+    );
+    let _ = writeln!(out, "# TYPE dynograph_http_requests_total counter");
+    for (key, count, _sum) in &snap {
+        let _ = writeln!(
+            out,
+            "dynograph_http_requests_total{{method=\"{}\",path=\"{}\",status=\"{}\"}} {}",
+            key.method, key.path, key.status, count
+        );
+    }
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_http_request_duration_microseconds_sum Cumulative request latency"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE dynograph_http_request_duration_microseconds_sum counter"
+    );
+    for (key, _count, sum) in &snap {
+        let _ = writeln!(
+            out,
+            "dynograph_http_request_duration_microseconds_sum{{method=\"{}\",path=\"{}\",status=\"{}\"}} {}",
+            key.method, key.path, key.status, sum
+        );
+    }
+
+    // Per-(graph, node_type) HNSW stats. Walks the registry under
+    // its read lock; per-graph stats acquire the per-graph state
+    // read lock briefly. Scrape cost scales with the number of
+    // graphs × node_types-with-embeddings — for the foreseeable
+    // range (dozens of graphs, single-digit indexed types each)
+    // this is microseconds per scrape.
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_hnsw_index_size Live (non-tombstoned) embeddings per index"
+    );
+    let _ = writeln!(out, "# TYPE dynograph_hnsw_index_size gauge");
+    let mut hnsw_lines: Vec<(String, String, String)> = Vec::new();
+    for graph_id in state.registry.list_ids() {
+        if let Some(entry) = state.registry.get(&graph_id) {
+            let stats_per_type = entry.hnsw_stats_snapshot();
+            for (node_type, stats) in stats_per_type {
+                let label = format!("graph=\"{}\",node_type=\"{}\"", graph_id, node_type);
+                hnsw_lines.push((
+                    "dynograph_hnsw_index_size".to_string(),
+                    label.clone(),
+                    stats.index_size.to_string(),
+                ));
+                hnsw_lines.push((
+                    "dynograph_hnsw_searches_total".to_string(),
+                    label.clone(),
+                    stats.searches_total.to_string(),
+                ));
+                hnsw_lines.push((
+                    "dynograph_hnsw_inserts_total".to_string(),
+                    label.clone(),
+                    stats.inserts_total.to_string(),
+                ));
+                hnsw_lines.push((
+                    "dynograph_hnsw_removes_total".to_string(),
+                    label,
+                    stats.removes_total.to_string(),
+                ));
+            }
+        }
+    }
+    for (metric, labels, value) in &hnsw_lines {
+        if metric == "dynograph_hnsw_index_size" {
+            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_hnsw_searches_total HNSW search calls per index"
+    );
+    let _ = writeln!(out, "# TYPE dynograph_hnsw_searches_total counter");
+    for (metric, labels, value) in &hnsw_lines {
+        if metric == "dynograph_hnsw_searches_total" {
+            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_hnsw_inserts_total HNSW insert calls per index"
+    );
+    let _ = writeln!(out, "# TYPE dynograph_hnsw_inserts_total counter");
+    for (metric, labels, value) in &hnsw_lines {
+        if metric == "dynograph_hnsw_inserts_total" {
+            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
+        }
+    }
+    let _ = writeln!(
+        out,
+        "# HELP dynograph_hnsw_removes_total HNSW remove calls per index"
+    );
+    let _ = writeln!(out, "# TYPE dynograph_hnsw_removes_total counter");
+    for (metric, labels, value) in &hnsw_lines {
+        if metric == "dynograph_hnsw_removes_total" {
+            let _ = writeln!(out, "{metric}{{{labels}}} {value}");
+        }
+    }
+
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        out,
+    )
 }
 
 async fn health() -> &'static str {

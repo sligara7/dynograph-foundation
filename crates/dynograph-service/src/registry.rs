@@ -25,7 +25,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use dynograph_core::{DynoError, Schema};
 use dynograph_storage::StorageEngine;
-use dynograph_vector::HnswIndex;
+use dynograph_vector::{HnswIndex, HnswStats};
 
 use crate::schema_response::content_hash;
 
@@ -210,6 +210,21 @@ impl GraphEntry {
     ) -> R {
         let guard = self.state.read().expect("graph state read lock poisoned");
         f(&guard.engine, &guard.indexes)
+    }
+
+    /// Snapshot of per-(node_type) HNSW stats. Used by the
+    /// `/metrics` handler — runs under a brief read lock and walks
+    /// the per-graph indexes. Sorted by node_type for stable scrape
+    /// output.
+    pub fn hnsw_stats_snapshot(&self) -> Vec<(String, HnswStats)> {
+        let guard = self.state.read().expect("graph state read lock poisoned");
+        let mut out: Vec<(String, HnswStats)> = guard
+            .indexes
+            .iter()
+            .map(|(t, idx)| (t.clone(), idx.stats()))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     }
 
     /// Run a closure with a write-lock that exposes both the engine
