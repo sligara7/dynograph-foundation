@@ -23,6 +23,8 @@
 //! Reports **all** violations, not just the first. Callers see the
 //! full incompat set in one response.
 
+use std::collections::HashMap;
+
 use dynograph_core::{EdgeEndpoint, EdgeTypeDef, NodeTypeDef, PropertyDef, PropertyType, Schema};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -150,48 +152,26 @@ fn check_node_type(
     new: &NodeTypeDef,
     errors: &mut Vec<EvolutionError>,
 ) {
-    for (prop_name, old_prop) in &old.properties {
-        match new.properties.get(prop_name) {
-            None => errors.push(EvolutionError::RemovedNodeProperty {
-                node_type: name.to_string(),
-                property: prop_name.clone(),
-            }),
-            Some(new_prop) if new_prop.prop_type != old_prop.prop_type => {
-                errors.push(EvolutionError::ChangedNodePropertyType {
-                    node_type: name.to_string(),
-                    property: prop_name.clone(),
-                    old: old_prop.prop_type.clone(),
-                    new: new_prop.prop_type.clone(),
-                });
-            }
-            Some(_) => {}
-        }
-    }
-    // New required property without a default fails validation for
-    // every existing row of this type — equivalent to a removal.
-    for (prop_name, new_prop) in &new.properties {
-        if !old.properties.contains_key(prop_name)
-            && new_prop.required
-            && new_prop.default.is_none()
-        {
-            errors.push(EvolutionError::NodePropertyBecameRequiredWithoutDefault {
-                node_type: name.to_string(),
-                property: prop_name.clone(),
-            });
-        }
-    }
-    // An existing property tightening from optional → required
-    // without a default has the same effect.
-    for (prop_name, old_prop) in &old.properties {
-        if let Some(new_prop) = new.properties.get(prop_name)
-            && tightened_to_required_without_default(old_prop, new_prop)
-        {
-            errors.push(EvolutionError::NodePropertyBecameRequiredWithoutDefault {
-                node_type: name.to_string(),
-                property: prop_name.clone(),
-            });
-        }
-    }
+    check_properties(
+        name,
+        &old.properties,
+        &new.properties,
+        errors,
+        |t, p| EvolutionError::RemovedNodeProperty {
+            node_type: t,
+            property: p,
+        },
+        |t, p, old_pt, new_pt| EvolutionError::ChangedNodePropertyType {
+            node_type: t,
+            property: p,
+            old: old_pt,
+            new: new_pt,
+        },
+        |t, p| EvolutionError::NodePropertyBecameRequiredWithoutDefault {
+            node_type: t,
+            property: p,
+        },
+    );
 }
 
 fn check_edge_type(
@@ -210,42 +190,68 @@ fn check_edge_type(
             edge_type: name.to_string(),
         });
     }
-    for (prop_name, old_prop) in &old.properties {
-        match new.properties.get(prop_name) {
-            None => errors.push(EvolutionError::RemovedEdgeProperty {
-                edge_type: name.to_string(),
-                property: prop_name.clone(),
-            }),
-            Some(new_prop) if new_prop.prop_type != old_prop.prop_type => {
-                errors.push(EvolutionError::ChangedEdgePropertyType {
-                    edge_type: name.to_string(),
-                    property: prop_name.clone(),
-                    old: old_prop.prop_type.clone(),
-                    new: new_prop.prop_type.clone(),
-                });
+    check_properties(
+        name,
+        &old.properties,
+        &new.properties,
+        errors,
+        |t, p| EvolutionError::RemovedEdgeProperty {
+            edge_type: t,
+            property: p,
+        },
+        |t, p, old_pt, new_pt| EvolutionError::ChangedEdgePropertyType {
+            edge_type: t,
+            property: p,
+            old: old_pt,
+            new: new_pt,
+        },
+        |t, p| EvolutionError::EdgePropertyBecameRequiredWithoutDefault {
+            edge_type: t,
+            property: p,
+        },
+    );
+}
+
+/// Property-diff shared by node and edge types. The four paired
+/// `EvolutionError` variants (Removed/Changed/RequiredWithoutDefault
+/// for nodes vs edges) differ only in which struct field name they
+/// use, so the caller injects the variant constructor for each kind.
+fn check_properties(
+    container: &str,
+    old: &HashMap<String, PropertyDef>,
+    new: &HashMap<String, PropertyDef>,
+    errors: &mut Vec<EvolutionError>,
+    on_removed: impl Fn(String, String) -> EvolutionError,
+    on_changed_type: impl Fn(String, String, PropertyType, PropertyType) -> EvolutionError,
+    on_required_without_default: impl Fn(String, String) -> EvolutionError,
+) {
+    for (prop_name, old_prop) in old {
+        match new.get(prop_name) {
+            None => errors.push(on_removed(container.to_string(), prop_name.clone())),
+            Some(new_prop) => {
+                if new_prop.prop_type != old_prop.prop_type {
+                    errors.push(on_changed_type(
+                        container.to_string(),
+                        prop_name.clone(),
+                        old_prop.prop_type.clone(),
+                        new_prop.prop_type.clone(),
+                    ));
+                }
+                if tightened_to_required_without_default(old_prop, new_prop) {
+                    errors.push(on_required_without_default(
+                        container.to_string(),
+                        prop_name.clone(),
+                    ));
+                }
             }
-            Some(_) => {}
         }
     }
-    for (prop_name, new_prop) in &new.properties {
-        if !old.properties.contains_key(prop_name)
-            && new_prop.required
-            && new_prop.default.is_none()
-        {
-            errors.push(EvolutionError::EdgePropertyBecameRequiredWithoutDefault {
-                edge_type: name.to_string(),
-                property: prop_name.clone(),
-            });
-        }
-    }
-    for (prop_name, old_prop) in &old.properties {
-        if let Some(new_prop) = new.properties.get(prop_name)
-            && tightened_to_required_without_default(old_prop, new_prop)
-        {
-            errors.push(EvolutionError::EdgePropertyBecameRequiredWithoutDefault {
-                edge_type: name.to_string(),
-                property: prop_name.clone(),
-            });
+    for (prop_name, new_prop) in new {
+        if !old.contains_key(prop_name) && new_prop.required && new_prop.default.is_none() {
+            errors.push(on_required_without_default(
+                container.to_string(),
+                prop_name.clone(),
+            ));
         }
     }
 }

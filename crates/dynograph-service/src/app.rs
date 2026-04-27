@@ -165,13 +165,8 @@ async fn get_schema(
     Ok(Json(response).into_response())
 }
 
-/// Replace the graph's schema. The new schema must be additively
-/// compatible with the old one (no removed types/properties, no
-/// changed property types, no narrowed edge endpoints, no
-/// optional→required-without-default transitions). Validation +
-/// optional disk persistence + in-memory swap run under one engine
-/// write-lock; readers never observe a torn (schema, content_hash)
-/// pair, and a disk-write failure leaves the in-memory state intact.
+/// Replace a graph's schema. Compat rules + atomicity guarantees
+/// live on `GraphRegistry::replace_schema`; this is a thin wrapper.
 async fn replace_schema(
     State(state): State<AppState>,
     Path(id): Path<String>,
