@@ -1078,6 +1078,397 @@ async fn list_nodes_on_missing_graph_returns_404() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
+// =============================================================================
+// Slice 7 — PUT /v1/graphs/{id}/schema
+// =============================================================================
+
+/// Body shape: PUT takes a bare `Schema` (id is in URL; wire_version
+/// and content_hash are server-derived). Helper folds the construction
+/// of the inner schema (no `{schema: ...}` envelope).
+fn put_schema(node_types: Value, edge_types: Value) -> Value {
+    json!({
+        "name": "demo",
+        "version": 2,
+        "node_types": node_types,
+        "edge_types": edge_types,
+    })
+}
+
+async fn put_g1_schema(app: &axum::Router, schema: Value) -> (StatusCode, String) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/graphs/g1/schema")
+                .header("content-type", "application/json")
+                .body(Body::from(schema.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8_lossy(&bytes).into_owned();
+    (status, body)
+}
+
+#[tokio::test]
+async fn put_schema_compatible_addition_succeeds_and_hash_changes() {
+    let app = build_app_with_item_graph().await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/schema")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let before: Value = serde_json::from_slice(&bytes).unwrap();
+    let old_hash = before["content_hash"].as_str().unwrap().to_string();
+
+    // Compatible change: add an optional `nickname` property to Item.
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "string", "required": true },
+                    "tier": { "type": "string", "default": "standard" },
+                    "nickname": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item",
+                "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    let parsed: Value = serde_json::from_str(&body).unwrap();
+    let new_hash = parsed["content_hash"].as_str().unwrap();
+    assert_ne!(
+        new_hash, old_hash,
+        "content_hash should change on schema swap"
+    );
+    // Response embeds the new schema.
+    assert!(parsed["schema"]["node_types"]["Item"]["properties"]["nickname"].is_object());
+
+    // Subsequent GET /schema reflects the new shape.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/schema")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let after: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(after["content_hash"].as_str().unwrap(), new_hash);
+    assert!(after["schema"]["node_types"]["Item"]["properties"]["nickname"].is_object());
+}
+
+#[tokio::test]
+async fn put_schema_can_add_new_node_type() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "string", "required": true },
+                    "tier": { "type": "string", "default": "standard" }
+                }
+            },
+            "Place": {
+                "properties": {
+                    "name": { "type": "string", "required": true }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item",
+                "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+}
+
+#[tokio::test]
+async fn put_schema_can_relax_required_to_optional() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "string" },
+                    "tier": { "type": "string", "default": "standard" }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item", "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+}
+
+#[tokio::test]
+async fn put_schema_rejects_removed_node_type() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({}),
+        json!({
+            "Likes": {
+                "from": "Item", "to": "Item",
+                "properties": {}
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("removed node type") && body.contains("Item"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn put_schema_rejects_removed_property() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "string", "required": true }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item", "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("removed node property") && body.contains("Item.tier"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn put_schema_rejects_changed_property_type() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "int", "required": true },
+                    "tier": { "type": "string", "default": "standard" }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item", "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("changed node property type"), "{body}");
+}
+
+#[tokio::test]
+async fn put_schema_rejects_required_without_default_added() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "string", "required": true },
+                    "tier": { "type": "string", "default": "standard" },
+                    "ssn":  { "type": "string", "required": true }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item", "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.contains("required without a default") && body.contains("ssn"),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn put_schema_rejects_narrowed_edge_endpoint() {
+    let app = build_app_with_item_graph().await;
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "string", "required": true },
+                    "tier": { "type": "string", "default": "standard" }
+                }
+            },
+            "Place": {
+                "properties": { "name": { "type": "string" } }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item",
+                "to": "Place",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("`to` endpoint narrowed"), "{body}");
+}
+
+#[tokio::test]
+async fn put_schema_lists_all_violations_in_one_response() {
+    let app = build_app_with_item_graph().await;
+    // Three violations: removed property, changed type on existing,
+    // and a required-without-default new property.
+    let new = put_schema(
+        json!({
+            "Item": {
+                "properties": {
+                    "name": { "type": "int", "required": true },
+                    "ssn":  { "type": "string", "required": true }
+                }
+            }
+        }),
+        json!({
+            "Likes": {
+                "from": "Item", "to": "Item",
+                "properties": {
+                    "weight": { "type": "float" },
+                    "source": { "type": "string" }
+                }
+            }
+        }),
+    );
+    let (status, body) = put_g1_schema(&app, new).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.contains("removed node property"), "{body}");
+    assert!(body.contains("changed node property type"), "{body}");
+    assert!(body.contains("required without a default"), "{body}");
+}
+
+#[tokio::test]
+async fn put_schema_on_missing_graph_returns_404() {
+    let app = build_app();
+    let new = put_schema(json!({}), json!({}));
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/graphs/nope/schema")
+                .header("content-type", "application/json")
+                .body(Body::from(new.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn put_schema_failure_leaves_state_intact() {
+    // After a rejected PUT, the in-memory schema must be unchanged
+    // and existing nodes must still be readable.
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+
+    // Submit a breaking PUT.
+    let bad = put_schema(json!({}), json!({}));
+    let (status, _) = put_g1_schema(&app, bad).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Existing node still readable + the schema still has the
+    // original Item type.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/nodes/Item/n1")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/schema")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let schema: Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(schema["schema"]["node_types"]["Item"].is_object());
+}
+
 #[tokio::test]
 async fn ready_returns_503_before_mark_ready_then_flips() {
     let registry = Arc::new(GraphRegistry::new());

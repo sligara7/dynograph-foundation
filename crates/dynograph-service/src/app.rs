@@ -73,7 +73,10 @@ pub fn app(state: AppState) -> Router {
         .route("/ready", get(ready))
         .route("/v1/graphs", get(list_graphs).post(create_graph))
         .route("/v1/graphs/{id}", get(get_graph).delete(delete_graph))
-        .route("/v1/graphs/{id}/schema", get(get_schema))
+        .route(
+            "/v1/graphs/{id}/schema",
+            get(get_schema).put(replace_schema),
+        )
         .route("/v1/graphs/{id}/nodes", get(list_nodes).post(create_node))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
@@ -159,6 +162,23 @@ async fn get_schema(
     let entry = graph_entry(&state, &id)?;
     let schema = entry.with_engine_read(|engine| engine.schema().clone());
     let response = SchemaResponse::with_cached_hash(id, schema, entry.content_hash().to_string());
+    Ok(Json(response).into_response())
+}
+
+/// Replace the graph's schema. The new schema must be additively
+/// compatible with the old one (no removed types/properties, no
+/// changed property types, no narrowed edge endpoints, no
+/// optional→required-without-default transitions). Validation +
+/// optional disk persistence + in-memory swap run under one engine
+/// write-lock; readers never observe a torn (schema, content_hash)
+/// pair, and a disk-write failure leaves the in-memory state intact.
+async fn replace_schema(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(new_schema): Json<Schema>,
+) -> Result<Response, RegistryError> {
+    let new_hash = state.registry.replace_schema(&id, new_schema.clone())?;
+    let response = SchemaResponse::with_cached_hash(id, new_schema, new_hash.to_string());
     Ok(Json(response).into_response())
 }
 

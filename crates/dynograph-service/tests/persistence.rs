@@ -204,6 +204,91 @@ async fn rehydrate_fails_loud_on_corrupt_schema_file() {
 }
 
 #[tokio::test]
+async fn put_schema_persists_through_rehydrate() {
+    let tmp = TempDir::new().unwrap();
+
+    // Round 1: create + PUT a compatible schema (add an optional
+    // `nickname` property).
+    let new_hash;
+    {
+        let (app, _registry) = build_persistent_app(tmp.path());
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(schema_body("g1").to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let new_schema = json!({
+            "name": "demo",
+            "version": 2,
+            "node_types": {
+                "Item": {
+                    "properties": {
+                        "name":     { "type": "string", "required": true },
+                        "nickname": { "type": "string" }
+                    }
+                }
+            },
+            "edge_types": {}
+        });
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/v1/graphs/g1/schema")
+                    .header("content-type", "application/json")
+                    .body(Body::from(new_schema.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let parsed: Value = serde_json::from_slice(&bytes).unwrap();
+        new_hash = parsed["content_hash"].as_str().unwrap().to_string();
+    }
+    // First service dropped — RocksDB lock released, in-memory state gone.
+
+    // Round 2: rehydrate, verify the persisted schema is the new one
+    // (not the original `name` only) and content_hash matches.
+    let (app, registry) = build_persistent_app(tmp.path());
+    let rehydrated = registry.rehydrate().expect("rehydrate");
+    assert_eq!(rehydrated, vec!["g1".to_string()]);
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs/g1/schema")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let fetched: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        fetched["content_hash"].as_str().unwrap(),
+        new_hash,
+        "rehydrated content_hash must match the PUT-time hash"
+    );
+    assert!(
+        fetched["schema"]["node_types"]["Item"]["properties"]["nickname"].is_object(),
+        "post-rehydrate schema must include the property added by PUT"
+    );
+    assert_eq!(fetched["schema"]["version"], 2);
+}
+
+#[tokio::test]
 async fn create_graph_with_invalid_id_returns_400() {
     let tmp = TempDir::new().unwrap();
     let (app, _registry) = build_persistent_app(tmp.path());

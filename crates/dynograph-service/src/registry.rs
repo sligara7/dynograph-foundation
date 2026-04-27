@@ -120,39 +120,84 @@ fn status_for_dyno_error(e: &DynoError) -> StatusCode {
     }
 }
 
-/// A graph hosted by the registry.
+/// A graph hosted by the registry. Engine + cached content_hash live
+/// together under one lock so a schema replacement (slice 7's PUT
+/// `/v1/graphs/{id}/schema`) can swap both atomically — concurrent
+/// readers never observe a torn (schema, hash) pair.
 pub struct GraphEntry {
-    engine: RwLock<StorageEngine>,
+    state: RwLock<GraphState>,
+}
+
+struct GraphState {
+    engine: StorageEngine,
     content_hash: Arc<str>,
 }
 
 impl std::fmt::Debug for GraphEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GraphEntry")
-            .field("content_hash", &self.content_hash)
+            .field("content_hash", &self.content_hash())
             .field("engine", &"<StorageEngine>")
             .finish()
     }
 }
 
 impl GraphEntry {
-    /// Cached SHA256 of the schema's canonical JSON. Computed once at
-    /// create time; refreshed by `replace_schema` (when that lands).
-    pub fn content_hash(&self) -> &Arc<str> {
-        &self.content_hash
+    fn new(engine: StorageEngine, content_hash: Arc<str>) -> Self {
+        Self {
+            state: RwLock::new(GraphState {
+                engine,
+                content_hash,
+            }),
+        }
     }
 
-    /// Run a closure with a read-lock on the engine. Hides the
-    /// per-engine locking strategy from handlers.
+    /// Cached SHA256 of the schema's canonical JSON. Returns an owned
+    /// `Arc<str>` (cheap refcount bump) rather than a borrow because
+    /// the underlying value lives behind a `RwLock` and a borrow
+    /// would tie the caller to the lock guard.
+    pub fn content_hash(&self) -> Arc<str> {
+        self.state
+            .read()
+            .expect("graph state read lock poisoned")
+            .content_hash
+            .clone()
+    }
+
+    /// Run a closure with a read-lock on the engine.
     pub fn with_engine_read<R>(&self, f: impl FnOnce(&StorageEngine) -> R) -> R {
-        let guard = self.engine.read().expect("engine read lock poisoned");
-        f(&guard)
+        let guard = self.state.read().expect("graph state read lock poisoned");
+        f(&guard.engine)
     }
 
     /// Run a closure with a write-lock on the engine.
     pub fn with_engine_write<R>(&self, f: impl FnOnce(&mut StorageEngine) -> R) -> R {
-        let mut guard = self.engine.write().expect("engine write lock poisoned");
-        f(&mut guard)
+        let mut guard = self.state.write().expect("graph state write lock poisoned");
+        f(&mut guard.engine)
+    }
+
+    /// Replace the schema after `validator(old, new)` accepts it and
+    /// `persist(new)` succeeds. The whole sequence — validate, persist
+    /// (e.g. write `schema.json` for `OnDisk` backends), swap the
+    /// engine's schema, store the new `content_hash` — runs under one
+    /// write lock. Concurrent observers never see a torn (schema,
+    /// hash) pair, and a `persist` failure leaves the in-memory state
+    /// untouched (no in-memory-vs-disk skew across a process restart).
+    /// Returns the new `Arc<str>` content hash so the caller can
+    /// construct the response without re-acquiring the lock.
+    pub fn replace_schema_with(
+        &self,
+        new_schema: Schema,
+        validator: impl FnOnce(&Schema, &Schema) -> Result<(), RegistryError>,
+        persist: impl FnOnce(&Schema) -> Result<(), RegistryError>,
+    ) -> Result<Arc<str>, RegistryError> {
+        let mut guard = self.state.write().expect("graph state write lock poisoned");
+        validator(guard.engine.schema(), &new_schema)?;
+        persist(&new_schema)?;
+        let new_hash: Arc<str> = Arc::from(content_hash(&new_schema).as_str());
+        guard.engine.replace_schema(new_schema);
+        guard.content_hash = new_hash.clone();
+        Ok(new_hash)
     }
 }
 
@@ -204,10 +249,7 @@ impl GraphRegistry {
         }
         let hash = Arc::from(content_hash(&schema));
         let engine = build_engine(&self.backend, id, schema)?;
-        let entry = Arc::new(GraphEntry {
-            engine: RwLock::new(engine),
-            content_hash: hash,
-        });
+        let entry = Arc::new(GraphEntry::new(engine, hash));
         graphs.insert(id.to_string(), entry.clone());
         Ok(entry)
     }
@@ -252,6 +294,39 @@ impl GraphRegistry {
             }
         }
         Ok(())
+    }
+
+    /// Replace the schema for `id` with `new_schema` after running
+    /// the additive-evolution check. On `OnDisk` backends the new
+    /// schema is also written to `{root}/{id}/schema.json` before the
+    /// in-memory swap; if disk-write fails, the in-memory state is
+    /// untouched. Returns the new `content_hash` (cached, shared via
+    /// `Arc<str>`) on success.
+    pub fn replace_schema(&self, id: &str, new_schema: Schema) -> Result<Arc<str>, RegistryError> {
+        let entry = self
+            .get(id)
+            .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
+        let backend = &self.backend;
+        entry.replace_schema_with(
+            new_schema,
+            |old, new| {
+                crate::schema_evolution::validate_compatible(old, new).map_err(|errors| {
+                    let joined = errors
+                        .iter()
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    RegistryError::BadRequest(format!("schema evolution rejected: {joined}"))
+                })
+            },
+            |new| match backend {
+                StorageBackend::InMemory => Ok(()),
+                StorageBackend::OnDisk { root } => {
+                    let graph_dir = root.join(id);
+                    write_schema_file(&graph_dir, new)
+                }
+            },
+        )
     }
 
     /// Snapshot of registered graph ids. Sorted for stable output.
@@ -320,10 +395,7 @@ impl GraphRegistry {
             let engine = StorageEngine::new_rocksdb(schema, db_path_str).map_err(|e| {
                 RegistryError::Rehydration(format!("open rocksdb at {db_path_str}: {e}"))
             })?;
-            let entry_arc = Arc::new(GraphEntry {
-                engine: RwLock::new(engine),
-                content_hash: hash,
-            });
+            let entry_arc = Arc::new(GraphEntry::new(engine, hash));
             graphs.insert(id.clone(), entry_arc);
             rehydrated.push(id);
         }
@@ -443,8 +515,8 @@ schema:
         // Proves the hash returned by GET == GET == … without recompute.
         let r = GraphRegistry::new();
         r.create_graph("g1", tiny_schema()).unwrap();
-        let h1 = r.get("g1").unwrap().content_hash().clone();
-        let h2 = r.get("g1").unwrap().content_hash().clone();
+        let h1 = r.get("g1").unwrap().content_hash();
+        let h2 = r.get("g1").unwrap().content_hash();
         assert!(
             Arc::ptr_eq(&h1, &h2),
             "Arc<str> should be shared, not re-allocated"
@@ -483,8 +555,10 @@ schema:
         let a = r.create_graph("a", tiny_schema()).unwrap();
         // Same schema → same hash, but separate Arcs.
         let b = r.create_graph("b", tiny_schema()).unwrap();
-        assert_eq!(a.content_hash(), b.content_hash());
-        assert!(!Arc::ptr_eq(a.content_hash(), b.content_hash()));
+        let ha = a.content_hash();
+        let hb = b.content_hash();
+        assert_eq!(ha, hb);
+        assert!(!Arc::ptr_eq(&ha, &hb));
     }
 
     #[test]

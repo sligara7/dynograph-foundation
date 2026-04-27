@@ -252,6 +252,20 @@ impl StorageEngine {
         &self.schema
     }
 
+    /// Replace the in-memory schema. Caller is responsible for any
+    /// schema-evolution compatibility checks — this is a pure field
+    /// swap. No re-indexing happens: indexed-property names are
+    /// derived from `schema` on each scan, so adding a new indexed
+    /// property starts indexing forward; existing rows won't be
+    /// back-indexed but they don't have the new property anyway. A
+    /// previously-indexed property losing its `indexed: true` flag
+    /// leaves stale entries in `CF_NODE_IDX` — those are unreachable
+    /// (the property may not exist on the new schema) and tolerable
+    /// garbage; cleaning them up is a future-slice concern.
+    pub fn replace_schema(&mut self, new_schema: Schema) {
+        self.schema = new_schema;
+    }
+
     // =========================================================================
     // Internal backend operations
     // =========================================================================
@@ -2111,5 +2125,57 @@ schema:
             engine.scan_incoming_edges("g1", "bob", None).unwrap().len(),
             0
         );
+    }
+
+    #[test]
+    fn replace_schema_swaps_validation_rules() {
+        // Old schema: Person has `name: string, required`. New schema:
+        // adds `age: int, required` with a default. Verify (a) the
+        // schema accessor returns the new shape and (b) writes
+        // post-swap apply the new validation rules (default applied
+        // for `age`).
+        let old = Schema::from_yaml(
+            r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Person:
+      properties:
+        name: { type: string, required: true }
+  edge_types: {}
+"#,
+        )
+        .unwrap();
+        let new = Schema::from_yaml(
+            r#"
+schema:
+  name: t
+  version: 2
+  node_types:
+    Person:
+      properties:
+        name: { type: string, required: true }
+        age:  { type: int,    required: true, default: 0 }
+  edge_types: {}
+"#,
+        )
+        .unwrap();
+
+        let mut engine = StorageEngine::new_in_memory(old);
+        engine
+            .create_node("g1", "Person", "alice", HashMap::new())
+            .unwrap_err(); // missing required `name` — sanity check old schema in force
+
+        engine.replace_schema(new);
+        assert_eq!(engine.schema().version, 2);
+
+        // New schema's `age` default applies on create — `name` still
+        // required.
+        let mut props = HashMap::new();
+        props.insert("name".to_string(), Value::String("alice".into()));
+        engine.create_node("g1", "Person", "alice", props).unwrap();
+        let stored = engine.get_node("g1", "Person", "alice").unwrap().unwrap();
+        assert_eq!(stored.properties.get("age"), Some(&Value::Int(0)));
     }
 }
