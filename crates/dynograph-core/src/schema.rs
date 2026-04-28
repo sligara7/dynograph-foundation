@@ -236,18 +236,7 @@ fn default_max_tokens() -> u32 {
 impl Schema {
     /// Parse a schema from YAML and run `validate()` on the result.
     pub fn from_yaml(yaml: &str) -> Result<Self, DynoError> {
-        // YAML may wrap in a top-level `schema:` key
-        let raw: serde_yaml::Value =
-            serde_yaml::from_str(yaml).map_err(|e| DynoError::Schema(e.to_string()))?;
-
-        let schema_value = if let Some(inner) = raw.get("schema") {
-            inner.clone()
-        } else {
-            raw
-        };
-
-        let schema: Schema =
-            serde_yaml::from_value(schema_value).map_err(|e| DynoError::Schema(e.to_string()))?;
+        let schema = Self::from_yaml_unvalidated(yaml)?;
         schema.validate()?;
         Ok(schema)
     }
@@ -260,17 +249,14 @@ impl Schema {
         Ok(schema)
     }
 
-    /// Merge multiple YAML schema files into one. Each individual file
-    /// is parsed and validated standalone; the merged result is
-    /// validated again at the end so cross-file references (e.g. an
-    /// edge in file A that points at a node defined in file B) settle
-    /// correctly.
+    /// Merge multiple YAML schema files into one. Per-file `validate()`
+    /// is skipped — cross-file references (e.g. an edge in file A that
+    /// points at a node defined in file B) would fail otherwise. The
+    /// merged result is validated once at the end.
     pub fn from_multiple_yamls(yamls: &[&str]) -> Result<Self, DynoError> {
         if yamls.is_empty() {
             return Err(DynoError::Schema("No schema files provided".to_string()));
         }
-        // Parse each file but skip the per-file validation — cross-file
-        // references would fail otherwise. Validate once after merge.
         let mut base = Self::from_yaml_unvalidated(yamls[0])?;
         for yaml in &yamls[1..] {
             let overlay = Self::from_yaml_unvalidated(yaml)?;
@@ -280,9 +266,8 @@ impl Schema {
         Ok(base)
     }
 
-    /// YAML parse without the `validate()` step. Internal helper for
-    /// `from_multiple_yamls`, which has to defer validation until after
-    /// the merge resolves cross-file references.
+    /// Raw YAML parse with the top-level `schema:` key unwrapped if
+    /// present. No `validate()` — callers add it.
     fn from_yaml_unvalidated(yaml: &str) -> Result<Self, DynoError> {
         let raw: serde_yaml::Value =
             serde_yaml::from_str(yaml).map_err(|e| DynoError::Schema(e.to_string()))?;
@@ -294,27 +279,18 @@ impl Schema {
         serde_yaml::from_value(schema_value).map_err(|e| DynoError::Schema(e.to_string()))
     }
 
-    /// Merge another schema into this one. Symmetric across kinds:
+    /// Merge another schema into this one.
     ///
     /// - **Node types**: properties merge additively (existing wins on
     ///   conflict). Optional fields (`embedding_field`, `resolution`,
     ///   `extraction_hint`) on the overlay override the base when the
     ///   overlay has `Some(_)`.
     /// - **Edge types**: properties merge additively (existing wins).
-    ///   `extraction_hint` overrides on overlay-`Some`. `inference_category`
-    ///   overrides when the overlay sets one. `pass_1_extractable`
-    ///   overrides when the overlay's value differs from the default
-    ///   `false` (i.e. only `true` overrides — `false` is treated as
-    ///   "unset" since it's the serde default).
-    /// - **Extraction modes**: overlay replaces base on conflict. These
-    ///   are top-level configuration, not data — accumulating them
-    ///   additively makes no sense.
-    ///
-    /// Previously: edge_types and extraction_modes were insert-only
-    /// (existing always won, even on overlay-set non-default fields);
-    /// node merge silently dropped overlay's `embedding_field` and
-    /// `resolution`. The asymmetry was a footgun for layered schemas
-    /// where a base file declared types and an overlay refined them.
+    ///   `extraction_hint` overrides on overlay-`Some`.
+    ///   `inference_category` overrides when the overlay sets one.
+    ///   `pass_1_extractable` overrides only when the overlay sets it
+    ///   `true` — `false` is the serde default and so treated as unset.
+    /// - **Extraction modes**: overlay replaces base on conflict.
     pub fn merge(&mut self, other: Schema) {
         for (name, node_def) in other.node_types {
             self.node_types
@@ -394,21 +370,10 @@ impl Schema {
             return Ok(());
         }
 
-        // Type check.
-        //
-        // Numeric arms are strict-symmetric (TD-3 H3): `type: int`
-        // accepts only `Value::Int(_)`, `type: float` accepts only
-        // `Value::Float(_)`. Previously `Float` quietly accepted `Int`
-        // (lossless widening) while `Int` rejected `Float`, an
-        // asymmetry that made schema-as-contract less reliable —
-        // callers passing the wrong variant for a float property would
-        // succeed validation but expose a `Value::Int` to downstream
-        // consumers that pattern-match on the variant.
-        //
-        // `ListString` validates each element (TD-3 H4): a list with
-        // any non-string element is now rejected, where previously
-        // `Value::List(vec![Value::Int(1)])` passed for a `list:string`
-        // property and only blew up downstream.
+        // Numeric arms are strict-symmetric: `type: int` accepts only
+        // `Value::Int`, `type: float` accepts only `Value::Float`.
+        // `ListString` checks each element so a non-string element
+        // can't sneak past schema validation and surface downstream.
         match (&prop_def.prop_type, value) {
             (PropertyType::String, Value::String(_)) => {}
             (PropertyType::Int, Value::Int(_)) => {}
@@ -474,20 +439,15 @@ impl Schema {
         Ok(())
     }
 
-    /// Validate the schema's internal consistency.
+    /// Validate the schema's internal consistency. Currently checks
+    /// that every `EdgeTypeDef`'s `from`/`to` endpoints name a node
+    /// type that exists (or is the wildcard `"*"`); a typo would
+    /// otherwise parse cleanly and only fail every edge-create call.
     ///
-    /// Today's check: every `EdgeTypeDef`'s `from`/`to` endpoints name
-    /// node types that exist in `self.node_types` (or are the wildcard
-    /// `"*"`). Without this, a YAML with `MENTIONS: from: Charcater
-    /// (typo) → Location` parsed cleanly but silently rejected every
-    /// edge create call at write time, which is exactly the kind of
-    /// "looks correct, isn't" failure the no-silent-fallbacks principle
-    /// guards against.
-    ///
-    /// Called automatically by `from_yaml`, `from_json`, and after
-    /// every step in `from_multiple_yamls`'s merge loop. Consumers
-    /// that build schemas programmatically can (and should) call this
-    /// themselves before handing the schema to a `StorageEngine`.
+    /// Called automatically by `from_yaml`, `from_json`, and once
+    /// after merge in `from_multiple_yamls`. Consumers building
+    /// schemas programmatically should call it themselves before
+    /// handing the schema to a `StorageEngine`.
     pub fn validate(&self) -> Result<(), DynoError> {
         for (edge_name, edge_def) in &self.edge_types {
             self.check_endpoint(edge_name, "from", &edge_def.from)?;
@@ -680,17 +640,11 @@ impl Schema {
 
     /// Ensure a property exists on a node type.
     ///
-    /// Three outcomes, distinguishable by the caller:
     /// - `Ok(true)` — the property was added.
     /// - `Ok(false)` — the property was already present; no change.
     /// - `Err(DynoError::UnknownNodeType(_))` — the node type doesn't
-    ///   exist on this schema.
-    ///
-    /// The previous signature collapsed "already present" and "node
-    /// missing" both into `false`, so callers couldn't tell whether a
-    /// migration step was a no-op or had silently failed because the
-    /// node type was gone — exactly the failure mode the no-silent-
-    /// fallbacks principle warns against.
+    ///   exist on this schema. Returning `Ok(false)` for the missing-
+    ///   type case would let a migration step look like a benign no-op.
     pub fn ensure_node_property(
         &mut self,
         node_type: &str,

@@ -21,9 +21,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   semver-checks:
-    # Run on PRs and on direct pushes to main. PR-only gating let
-    # bypass-PR pushes silently break the public surface (a pattern
-    # that bit us during the v0.2.x → v0.3.0 transition).
+    # PRs and direct pushes to main. Gating on PRs alone lets a
+    # bypass-PR push silently break the public surface.
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     steps:

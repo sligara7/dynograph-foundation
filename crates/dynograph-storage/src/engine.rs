@@ -241,11 +241,9 @@ impl BufferedOp {
 
 /// The storage engine — schema-validated graph storage.
 pub struct StorageEngine {
-    /// `Arc<Schema>` so the schema can be cheaply shared with consumers
-    /// (e.g. response builders) without paying a deep `Schema::clone`.
-    /// `schema()` derefs through the arc; constructors and
-    /// `replace_schema` accept `Schema` and wrap internally so the
-    /// public API doesn't expose the arc shape.
+    /// `Arc<Schema>` so the schema can be reference-shared without a
+    /// deep `Schema::clone`. Public `schema()` derefs through the arc;
+    /// constructors and `replace_schema` take `Schema` and wrap.
     schema: Arc<Schema>,
     backend: Backend,
     /// LRU read cache for node lookups and adjacency scans.
@@ -301,13 +299,6 @@ impl StorageEngine {
     /// Get the schema.
     pub fn schema(&self) -> &Schema {
         &self.schema
-    }
-
-    /// Cheap clone of the schema for callers that want to hold an
-    /// owned reference past the engine's borrow (e.g. response
-    /// builders). Refcount bump, not a deep clone.
-    pub fn schema_arc(&self) -> Arc<Schema> {
-        Arc::clone(&self.schema)
     }
 
     /// Replace the in-memory schema. Caller is responsible for any
@@ -480,13 +471,13 @@ impl StorageEngine {
                 .backend
                 .memory_store(cf)?
                 .get(key)
-                .map(|v| Arc::from(v.clone().into_boxed_slice()))),
+                .map(|v| Arc::<[u8]>::from(v.as_slice()))),
             Backend::Rocks { db } => {
                 let cf_handle = db
                     .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
                 db.get_cf(&cf_handle, key)
-                    .map(|opt| opt.map(|v| Arc::from(v.into_boxed_slice())))
+                    .map(|opt| opt.map(Arc::<[u8]>::from))
                     .map_err(|e| DynoError::Storage(e.to_string()))
             }
         }
@@ -1286,16 +1277,11 @@ impl StorageEngine {
     // Graph lifecycle
     // =========================================================================
 
-    /// Drop every key belonging to `graph_id` across all column families.
-    /// Idempotent: clearing an unknown graph is `Ok(())`, not an error,
-    /// since "the graph has no data" is the post-condition either way.
-    ///
-    /// Implementation: one prefix-delete per CF using
-    /// `keys::graph_prefix(graph_id)`. On RocksDB this is a single range
-    /// tombstone per CF; on the in-memory backend it's a `retain` over
-    /// each store. Both paths route through the existing
-    /// `prefix_delete` so write batching, cache invalidation, and
-    /// snapshot-interaction caveats all match the rest of the engine.
+    /// Drop every key belonging to `graph_id` across all column
+    /// families. Idempotent — clearing an unknown graph returns `Ok`
+    /// since the post-condition holds either way. Routes through
+    /// `prefix_delete` per CF, so write batching / cache invalidation
+    /// / snapshot-interaction caveats match every other write path.
     pub fn clear_graph(&mut self, graph_id: &str) -> Result<(), DynoError> {
         let prefix = crate::keys::graph_prefix(graph_id);
         for cf in ALL_CFS {
@@ -1327,12 +1313,9 @@ impl StorageEngine {
 
 /// Decode a key segment as UTF-8. Every key the storage layer writes
 /// is built from `&str` arguments, so a non-UTF-8 byte sequence on
-/// readback can only mean on-disk corruption (or a key shape that was
-/// never written by this code path). Fail loud with the surrounding
-/// context — silently mangling via `from_utf8_lossy` would produce
-/// believable-looking node/edge ids that don't actually exist, which
-/// is exactly the "looks correct, isn't" anti-pattern the no-silent-
-/// fallbacks principle warns against.
+/// readback can only mean on-disk corruption — fail loud with the
+/// surrounding context rather than mangling silently into a
+/// believable-looking but fictional node/edge id.
 fn decode_key_segment(bytes: &[u8], context: &str) -> Result<String, DynoError> {
     std::str::from_utf8(bytes)
         .map(|s| s.to_string())
@@ -2534,14 +2517,10 @@ schema:
         );
     }
 
-    #[test]
-    fn clear_graph_drops_every_cf_for_graph_only() {
-        // Two graphs share the schema and overlap in node/edge ids.
-        // After clear_graph("g1"), every g1 key — nodes, edges, both
-        // adjacency CFs, and embeddings — must be gone, but g2's data
-        // must survive untouched. Idempotent: a second clear is Ok.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
-        for graph in ["g1", "g2"] {
+    /// alice→bob KNOWS in each named graph. Optionally also sets an
+    /// embedding on alice. Used by clear_graph + S7 adjacency tests.
+    fn seed_alice_bob(engine: &mut StorageEngine, graphs: &[&str], with_embedding: bool) {
+        for graph in graphs {
             engine
                 .create_node(graph, "Character", "alice", props! { "name" => "A" })
                 .unwrap();
@@ -2559,10 +2538,22 @@ schema:
                     HashMap::new(),
                 )
                 .unwrap();
-            engine
-                .set_embedding(graph, "Character", "alice", &[0.1, 0.2, 0.3])
-                .unwrap();
+            if with_embedding {
+                engine
+                    .set_embedding(graph, "Character", "alice", &[0.1, 0.2, 0.3])
+                    .unwrap();
+            }
         }
+    }
+
+    #[test]
+    fn clear_graph_drops_every_cf_for_graph_only() {
+        // Two graphs share the schema and overlap in node/edge ids.
+        // After clear_graph("g1"), every g1 key — nodes, edges, both
+        // adjacency CFs, and embeddings — must be gone, but g2's data
+        // must survive untouched. Idempotent: a second clear is Ok.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        seed_alice_bob(&mut engine, &["g1", "g2"], true);
 
         engine.clear_graph("g1").unwrap();
 
@@ -2663,25 +2654,7 @@ schema:
         let dir = tempfile::tempdir().unwrap();
         let mut engine =
             StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
-        for graph in ["g1", "g2"] {
-            engine
-                .create_node(graph, "Character", "alice", props! { "name" => "A" })
-                .unwrap();
-            engine
-                .create_node(graph, "Character", "bob", props! { "name" => "B" })
-                .unwrap();
-            engine
-                .create_edge(
-                    graph,
-                    "KNOWS",
-                    "Character",
-                    "alice",
-                    "Character",
-                    "bob",
-                    HashMap::new(),
-                )
-                .unwrap();
-        }
+        seed_alice_bob(&mut engine, &["g1", "g2"], false);
         // Per-graph adjacency must not bleed across graphs.
         let g1_out = engine.scan_outgoing_edges("g1", "alice", None).unwrap();
         let g2_out = engine.scan_outgoing_edges("g2", "alice", None).unwrap();

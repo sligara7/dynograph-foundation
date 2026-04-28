@@ -1,17 +1,10 @@
 //! Read cache — LRU cache for RocksDB reads.
 //!
-//! Caches individual `get()` results to avoid repeated disk reads for hot
-//! data. Invalidated synchronously on writes so reads are never stale.
-//!
-//! Backed by the `lru` crate's `LruCache`, which gives O(1) eviction
-//! (the previous implementation walked the entire entries map on every
-//! cache-full insert to find the least-recently-accessed key — quadratic
-//! in the eviction-heavy workloads we see during bulk loads).
-//!
-//! Values are stored as `Arc<[u8]>`. A cache hit clones the arc (refcount
-//! bump) instead of cloning the underlying bytes. The engine's read
-//! path threads `Arc<[u8]>` through to the public-API decoders, which
-//! deref to `&[u8]` for `rmp_serde::from_slice`.
+//! Caches individual `get()` results to avoid repeated disk reads for
+//! hot data. Invalidated synchronously on writes so reads are never
+//! stale. Backed by the `lru` crate's `LruCache` for O(1) eviction.
+//! Values are `Arc<[u8]>` — cache hits arc-bump rather than cloning
+//! the bytes; the engine derefs through to `&[u8]` for decoding.
 
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -22,10 +15,9 @@ use lru::LruCache;
 const DEFAULT_MAX_ENTRIES: usize = 10_000;
 const DEFAULT_TTL_SECS: u64 = 300; // 5 minutes
 
-/// A single cached entry. `created` is the wall-clock time the entry was
-/// inserted; expiry is checked against `created + ttl` on `get`. The
-/// LRU promotion order tracks recency separately inside `LruCache`, so
-/// no per-entry `accessed` field is needed any more.
+/// A single cached entry. `created` is the wall-clock time the entry
+/// was inserted; expiry is checked against `created + ttl` on `get`.
+/// Recency for LRU eviction lives inside `LruCache` itself.
 struct CacheEntry {
     data: Arc<[u8]>,
     created: Instant,
@@ -72,26 +64,27 @@ impl ReadCache {
     /// stale entry is evicted lazily.
     pub fn get(&mut self, key: &[u8]) -> Option<Arc<[u8]>> {
         let now = Instant::now();
-        // `LruCache::get` returns `Option<&V>` and promotes to MRU. We
-        // need to either return a clone of the arc or evict on expiry,
-        // so check expiry first via `peek` (no promote), then `get` to
-        // promote on a real hit.
-        match self.entries.peek(key) {
-            Some(entry) if now.duration_since(entry.created) >= self.ttl => {
-                self.entries.pop(key);
-                self.misses += 1;
-                None
-            }
-            Some(_) => {
-                let entry = self.entries.get(key).expect("present from peek");
-                self.hits += 1;
-                Some(Arc::clone(&entry.data))
+        // One hashmap lookup per call: `LruCache::get` both fetches
+        // and promotes. The Some-but-expired branch falls through to
+        // `pop` after the borrow ends; spuriously promoting a stale
+        // entry is a single linked-list move and cheaper than a
+        // second lookup.
+        match self.entries.get(key) {
+            Some(entry) => {
+                if now.duration_since(entry.created) < self.ttl {
+                    let data = Arc::clone(&entry.data);
+                    self.hits += 1;
+                    return Some(data);
+                }
             }
             None => {
                 self.misses += 1;
-                None
+                return None;
             }
         }
+        self.entries.pop(key);
+        self.misses += 1;
+        None
     }
 
     /// Insert a value into the cache. Eviction of the LRU entry happens
@@ -112,13 +105,9 @@ impl ReadCache {
     }
 
     /// Invalidate all entries whose key starts with the given prefix.
-    ///
-    /// Walks the entries store once to collect matching keys, then pops
-    /// each. O(n) in the cache size — there is no prefix index. This is
-    /// only called from `commit_batch` for `PrefixDelete` ops, which in
-    /// the current codebase fires on `delete_node` and (TD-2) `clear_graph`
-    /// — operations that already rewrite multiple CFs, so the cache scan
-    /// is a small fraction of the work.
+    /// O(n) in the cache size — there is no prefix index. Only fires
+    /// from `commit_batch` for `PrefixDelete` ops, which already
+    /// rewrite multiple CFs.
     pub fn invalidate_prefix(&mut self, prefix: &[u8]) {
         let to_remove: Vec<Vec<u8>> = self
             .entries

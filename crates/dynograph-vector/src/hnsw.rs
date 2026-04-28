@@ -25,13 +25,9 @@ use rand::rngs::StdRng;
 use crate::distance::cosine_similarity;
 
 /// `(node_index, score)` pair used inside `search_layer`'s heaps.
-///
-/// `score` is f32, so `Ord` uses `total_cmp` to give a strict total order
-/// across all bit patterns (NaN-safe). Ties on score are broken by node
-/// index for determinism — this matters because two distinct nodes with
-/// equal cosine similarity must compare in *some* stable way for heap
-/// ordering, otherwise insertion-order non-determinism leaks into the
-/// returned result set.
+/// `Ord` uses `f32::total_cmp` for a strict total order (NaN-safe),
+/// with idx as tie-break so two nodes with equal cosine similarity
+/// don't shuffle by insertion order.
 #[derive(Copy, Clone, PartialEq)]
 struct Scored {
     idx: usize,
@@ -271,11 +267,11 @@ impl HnswIndex {
             self.config.dim
         );
 
-        // Re-insert: tombstone the old slot so the new vector gets
-        // freshly-computed neighbor connections.
-        if self.id_to_index.contains_key(id) {
-            self.remove(id);
-        }
+        // Re-insert: tombstone any old slot so the new vector gets
+        // freshly-computed neighbor connections. `remove` is a no-op
+        // when `id` isn't present, so the existence check would only
+        // re-hash the same key.
+        self.remove(id);
 
         let new_level = self.random_level();
         let new_idx = self.nodes.len();
@@ -308,12 +304,11 @@ impl HnswIndex {
             current = self.greedy_closest(current, &node.vector, level);
         }
 
-        // Phase 2: Insert at each level from min(new_level, max_level) down to 0.
-        // After picking neighbors at level L, advance `current` to the
-        // closest of them so the next-lower layer's search starts from
-        // a node already near `vector` instead of the stale top-of-
-        // phase-1 entry. Without this, recall on large indexes degrades
-        // because every layer searches from the same far-off seed.
+        // Phase 2: Insert at each level from min(new_level, max_level)
+        // down to 0. After picking neighbors at a layer, advance
+        // `current` to the closest of them so the next-lower layer's
+        // search starts from a node already near `vector` instead of
+        // the stale top-of-phase-1 entry.
         let insert_from = new_level.min(self.max_level);
         for level in (0..=insert_from).rev() {
             let ef = self.config.ef_construction;
@@ -331,9 +326,6 @@ impl HnswIndex {
                 .map(|&(idx, _)| idx)
                 .collect();
 
-            // Advance entry point for the next layer down. `neighbors`
-            // is sorted best-first, so neighbors[0] is the closest node
-            // we found at this layer.
             if let Some(&(closest_idx, _)) = neighbors.first() {
                 current = closest_idx;
             }

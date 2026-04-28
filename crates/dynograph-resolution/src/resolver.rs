@@ -124,7 +124,7 @@ impl EntityResolver {
                     .iter()
                     .filter(|c| c.fuzzy_score >= self.fuzzy_threshold)
                     .filter_map(|c| c.vector_score.map(|v| (c, v)))
-                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+                    .max_by(|a, b| a.1.total_cmp(&b.1));
 
                 if let Some((best_c, vscore)) = best_vector
                     && vscore >= self.vector_threshold
