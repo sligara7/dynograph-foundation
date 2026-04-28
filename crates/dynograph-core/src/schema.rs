@@ -79,23 +79,27 @@ pub enum EdgeEndpoint {
     Multiple(Vec<String>),
 }
 
-impl Default for EdgeEndpoint {
-    /// `Single("*")` — accepts any node type. Reasonable default for
-    /// builder-style construction (`EdgeTypeDef { from: ..., to: ...,
-    /// ..Default::default() }`) where the caller will fill in real
-    /// endpoints.
-    fn default() -> Self {
-        EdgeEndpoint::Single("*".to_string())
-    }
-}
-
 impl EdgeEndpoint {
+    /// Wildcard endpoint marker — accepts any node type.
+    pub const WILDCARD: &str = "*";
+
     /// Check if a node type is valid for this endpoint.
     pub fn accepts(&self, node_type: &str) -> bool {
         match self {
-            EdgeEndpoint::Single(t) => t == "*" || t == node_type,
-            EdgeEndpoint::Multiple(types) => types.iter().any(|t| t == "*" || t == node_type),
+            EdgeEndpoint::Single(t) => t == Self::WILDCARD || t == node_type,
+            EdgeEndpoint::Multiple(types) => {
+                types.iter().any(|t| t == Self::WILDCARD || t == node_type)
+            }
         }
+    }
+}
+
+impl Default for EdgeEndpoint {
+    /// Wildcard `Single("*")` so a partially-built `EdgeTypeDef` validates
+    /// permissively (matches every node type) rather than rejecting all
+    /// writes before the caller fills in real endpoints.
+    fn default() -> Self {
+        EdgeEndpoint::Single(Self::WILDCARD.to_string())
     }
 }
 
@@ -475,7 +479,7 @@ impl Schema {
             EdgeEndpoint::Multiple(ts) => ts.iter().map(String::as_str).collect(),
         };
         for name in names {
-            if name == "*" {
+            if name == EdgeEndpoint::WILDCARD {
                 continue;
             }
             if !self.node_types.contains_key(name) {
@@ -615,10 +619,7 @@ impl Schema {
             EdgeTypeDef {
                 from,
                 to,
-                properties: HashMap::new(),
-                extraction_hint: None,
-                inference_category: None,
-                pass_1_extractable: false,
+                ..Default::default()
             },
         );
         true
@@ -638,9 +639,7 @@ impl Schema {
             name.to_string(),
             NodeTypeDef {
                 properties,
-                embedding_field: None,
-                resolution: None,
-                extraction_hint: None,
+                ..Default::default()
             },
         );
         true
@@ -1228,13 +1227,7 @@ schema:
         let mut schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
         let pd = PropertyDef {
             prop_type: PropertyType::String,
-            required: false,
-            indexed: false,
-            nullable: false,
-            default: None,
-            values: None,
-            range: None,
-            description: None,
+            ..Default::default()
         };
 
         // Added.
