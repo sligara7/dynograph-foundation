@@ -290,9 +290,6 @@ version = "0.3.0"
 dependencies = [
  "dynograph-core",
  "dynograph-vector",
- "serde",
- "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -326,11 +323,8 @@ dependencies = [
  "rmp-serde",
  "rocksdb",
  "serde",
- "serde_json",
  "tempfile",
- "thiserror",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -338,11 +332,6 @@ name = "dynograph-vector"
 version = "0.3.0"
 dependencies = [
  "rand 0.10.1",
- "serde",
- "serde_json",
- "thiserror",
- "tracing",
- "uuid",
 ]
 
 [[package]]

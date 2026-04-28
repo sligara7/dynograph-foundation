@@ -56,11 +56,17 @@ impl EntityResolver {
 
     /// Resolve a name against a list of existing entity names.
     ///
-    /// Returns the resolution decision and the list of candidates considered.
+    /// Returns the resolution decision and the list of candidates
+    /// considered, sorted best-first by fuzzy score. Callers pass
+    /// `&[(&str, &str)]` so a `Vec<(String, String)>` doesn't need to
+    /// be cloned at every call site — this previously forced every
+    /// caller to allocate even when their data was already in-place.
+    /// (The function still allocates owned `Candidate.id`/`.name`
+    /// strings on its own — the candidates outlive the input slice.)
     pub fn resolve(
         &self,
         query_name: &str,
-        existing: &[(String, String)], // (id, name) pairs
+        existing: &[(&str, &str)], // (id, name) pairs
         query_embedding: Option<&[f32]>,
         vector_index: Option<&HnswIndex>,
     ) -> (ResolutionResult, Vec<Candidate>) {
@@ -75,8 +81,8 @@ impl EntityResolver {
                 let fuzzy_score = fuzzy::token_sort_ratio(query_name, name)
                     .max(fuzzy::jaro_winkler(query_name, name));
                 Candidate {
-                    id: id.clone(),
-                    name: name.clone(),
+                    id: (*id).to_string(),
+                    name: (*name).to_string(),
                     fuzzy_score,
                     vector_score: None,
                 }
@@ -141,6 +147,7 @@ impl EntityResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dynograph_core::ResolutionStrategy;
     use dynograph_vector::HnswConfig;
 
     fn default_resolver() -> EntityResolver {
@@ -158,7 +165,7 @@ mod tests {
     #[test]
     fn exact_match_auto_merges() {
         let resolver = default_resolver();
-        let existing = vec![("id1".to_string(), "Alice".to_string())];
+        let existing = [("id1", "Alice")];
         let (result, _) = resolver.resolve("Alice", &existing, None, None);
         assert!(matches!(result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"));
     }
@@ -166,7 +173,7 @@ mod tests {
     #[test]
     fn near_exact_match_auto_merges() {
         let resolver = default_resolver();
-        let existing = vec![("id1".to_string(), "Marcus Whitfield".to_string())];
+        let existing = [("id1", "Marcus Whitfield")];
         let (result, _) = resolver.resolve("Marcus Whitfeld", &existing, None, None);
         // Jaro-Winkler for near-matches should be >= 95
         assert!(
@@ -179,7 +186,7 @@ mod tests {
     #[test]
     fn completely_different_creates_new() {
         let resolver = default_resolver();
-        let existing = vec![("id1".to_string(), "Alice".to_string())];
+        let existing = [("id1", "Alice")];
         let (result, _) = resolver.resolve("Xylophone", &existing, None, None);
         assert_eq!(result, ResolutionResult::CreateNew);
     }
@@ -188,7 +195,7 @@ mod tests {
     fn tiebreaker_zone_without_vector_creates_new() {
         let resolver = default_resolver();
         // "Professor" vs "Professor Whitfield" — fuzzy score in 70-94 range
-        let existing = vec![("id1".to_string(), "Professor Whitfield".to_string())];
+        let existing = [("id1", "Professor Whitfield")];
         let (result, candidates) = resolver.resolve("the old professor", &existing, None, None);
         // Without vector index, tiebreaker zone defaults to CreateNew
         assert_eq!(result, ResolutionResult::CreateNew);
@@ -200,7 +207,7 @@ mod tests {
     fn tiebreaker_zone_with_vector_match() {
         let resolver = default_resolver();
         // Use names that land in the fuzzy tiebreaker zone (70-94)
-        let existing = vec![("id1".to_string(), "Professor Edwin Whitfield".to_string())];
+        let existing = [("id1", "Professor Edwin Whitfield")];
 
         let mut index = HnswIndex::new(HnswConfig::new(3));
         index.insert("id1", &[0.9, 0.1, 0.0]);
@@ -231,7 +238,7 @@ mod tests {
     #[test]
     fn tiebreaker_zone_with_weak_vector_creates_new() {
         let resolver = default_resolver();
-        let existing = vec![("id1".to_string(), "Professor Whitfield".to_string())];
+        let existing = [("id1", "Professor Whitfield")];
 
         let mut index = HnswIndex::new(HnswConfig::new(3));
         index.insert("id1", &[1.0, 0.0, 0.0]);
@@ -252,10 +259,10 @@ mod tests {
     #[test]
     fn multiple_candidates_best_wins() {
         let resolver = default_resolver();
-        let existing = vec![
-            ("id1".to_string(), "Alice Smith".to_string()),
-            ("id2".to_string(), "Alice Johnson".to_string()),
-            ("id3".to_string(), "Bob Wilson".to_string()),
+        let existing = [
+            ("id1", "Alice Smith"),
+            ("id2", "Alice Johnson"),
+            ("id3", "Bob Wilson"),
         ];
         let (result, candidates) = resolver.resolve("Alice Smyth", &existing, None, None);
         // "Alice Smyth" is closest to "Alice Smith"
@@ -270,15 +277,13 @@ mod tests {
 
     #[test]
     fn from_schema_config() {
-        let config = ResolutionConfig {
-            strategy: "fuzzy_then_vector".to_string(),
-            fuzzy_threshold: 60,
-            vector_threshold: 0.9,
-            auto_merge_threshold: 90,
-        };
+        let config = ResolutionConfig::new(ResolutionStrategy::FuzzyThenVector)
+            .with_fuzzy_threshold(60)
+            .with_vector_threshold(0.9)
+            .with_auto_merge_threshold(90);
         let resolver = EntityResolver::from_config(&config);
         // Verify custom thresholds work — exact match should still auto-merge at 90+
-        let existing = vec![("id1".to_string(), "Alice".to_string())];
+        let existing = [("id1", "Alice")];
         let (result, _) = resolver.resolve("Alice", &existing, None, None);
         assert!(matches!(result, ResolutionResult::AutoMerge { .. }));
     }
@@ -286,7 +291,7 @@ mod tests {
     #[test]
     fn reordered_name_matches() {
         let resolver = default_resolver();
-        let existing = vec![("id1".to_string(), "John Smith".to_string())];
+        let existing = [("id1", "John Smith")];
         let (result, _) = resolver.resolve("Smith, John", &existing, None, None);
         // token_sort_ratio handles reordering
         assert!(

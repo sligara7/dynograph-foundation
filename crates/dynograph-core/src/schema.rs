@@ -17,6 +17,7 @@ use crate::value::Value;
 
 /// Top-level schema definition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Schema {
     pub name: String,
     pub version: u32,
@@ -28,6 +29,7 @@ pub struct Schema {
 
 /// Definition of a node type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct NodeTypeDef {
     pub properties: HashMap<String, PropertyDef>,
     /// Which property to generate embeddings from (if any).
@@ -43,6 +45,7 @@ pub struct NodeTypeDef {
 
 /// Definition of an edge type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct EdgeTypeDef {
     /// Source node type(s). "*" means any.
     pub from: EdgeEndpoint,
@@ -90,6 +93,7 @@ impl EdgeEndpoint {
 
 /// Property definition with type and constraints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct PropertyDef {
     #[serde(rename = "type")]
     pub prop_type: PropertyType,
@@ -128,11 +132,29 @@ pub enum PropertyType {
     ListString,
 }
 
+/// Resolution strategy a node type asks for.
+///
+/// Declarative metadata today — `EntityResolver` reads the threshold
+/// fields off `ResolutionConfig` directly and doesn't switch on this
+/// variant. Kept as an enum (instead of a free-form string) so YAML
+/// typos surface at parse time, and so a future resolver can dispatch
+/// on this without revalidating string contents at every call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolutionStrategy {
+    #[default]
+    FuzzyThenVector,
+    Exact,
+    FuzzyOnly,
+    VectorOnly,
+}
+
 /// Entity resolution configuration per node type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ResolutionConfig {
-    /// Resolution strategy: fuzzy_then_vector, exact, fuzzy_only, vector_only
-    pub strategy: String,
+    /// Resolution strategy. See `ResolutionStrategy`.
+    pub strategy: ResolutionStrategy,
     /// Fuzzy match threshold (0-100). Below this → create new.
     #[serde(default = "default_fuzzy_threshold")]
     pub fuzzy_threshold: u32,
@@ -147,6 +169,34 @@ pub struct ResolutionConfig {
 impl ResolutionConfig {
     /// Default fuzzy match threshold used across integration and resolution.
     pub const DEFAULT_FUZZY_THRESHOLD: u32 = 70;
+
+    /// Build a config with default thresholds for the given strategy.
+    /// Combine with `with_*` setters to override individual thresholds.
+    /// This is the supported construction path now that
+    /// `ResolutionConfig` is `#[non_exhaustive]`.
+    pub fn new(strategy: ResolutionStrategy) -> Self {
+        Self {
+            strategy,
+            fuzzy_threshold: default_fuzzy_threshold(),
+            vector_threshold: default_vector_threshold(),
+            auto_merge_threshold: default_auto_merge(),
+        }
+    }
+
+    pub fn with_fuzzy_threshold(mut self, t: u32) -> Self {
+        self.fuzzy_threshold = t;
+        self
+    }
+
+    pub fn with_vector_threshold(mut self, t: f64) -> Self {
+        self.vector_threshold = t;
+        self
+    }
+
+    pub fn with_auto_merge_threshold(mut self, t: u32) -> Self {
+        self.auto_merge_threshold = t;
+        self
+    }
 }
 
 fn default_fuzzy_threshold() -> u32 {
@@ -184,7 +234,7 @@ fn default_max_tokens() -> u32 {
 // =============================================================================
 
 impl Schema {
-    /// Parse a schema from YAML.
+    /// Parse a schema from YAML and run `validate()` on the result.
     pub fn from_yaml(yaml: &str) -> Result<Self, DynoError> {
         // YAML may wrap in a top-level `schema:` key
         let raw: serde_yaml::Value =
@@ -196,43 +246,92 @@ impl Schema {
             raw
         };
 
-        serde_yaml::from_value(schema_value).map_err(|e| DynoError::Schema(e.to_string()))
+        let schema: Schema =
+            serde_yaml::from_value(schema_value).map_err(|e| DynoError::Schema(e.to_string()))?;
+        schema.validate()?;
+        Ok(schema)
     }
 
-    /// Parse a schema from JSON.
+    /// Parse a schema from JSON and run `validate()` on the result.
     pub fn from_json(json: &str) -> Result<Self, DynoError> {
-        serde_json::from_str(json).map_err(|e| DynoError::Schema(e.to_string()))
+        let schema: Schema =
+            serde_json::from_str(json).map_err(|e| DynoError::Schema(e.to_string()))?;
+        schema.validate()?;
+        Ok(schema)
     }
 
-    /// Merge multiple YAML schema files into one.
-    /// Later schemas override earlier ones for conflicting keys.
+    /// Merge multiple YAML schema files into one. Each individual file
+    /// is parsed and validated standalone; the merged result is
+    /// validated again at the end so cross-file references (e.g. an
+    /// edge in file A that points at a node defined in file B) settle
+    /// correctly.
     pub fn from_multiple_yamls(yamls: &[&str]) -> Result<Self, DynoError> {
         if yamls.is_empty() {
             return Err(DynoError::Schema("No schema files provided".to_string()));
         }
-        let mut base = Self::from_yaml(yamls[0])?;
+        // Parse each file but skip the per-file validation — cross-file
+        // references would fail otherwise. Validate once after merge.
+        let mut base = Self::from_yaml_unvalidated(yamls[0])?;
         for yaml in &yamls[1..] {
-            let overlay = Self::from_yaml(yaml)?;
+            let overlay = Self::from_yaml_unvalidated(yaml)?;
             base.merge(overlay);
         }
+        base.validate()?;
         Ok(base)
     }
 
-    /// Merge another schema into this one. Additive — new types are added,
-    /// existing types have their properties extended (not replaced).
+    /// YAML parse without the `validate()` step. Internal helper for
+    /// `from_multiple_yamls`, which has to defer validation until after
+    /// the merge resolves cross-file references.
+    fn from_yaml_unvalidated(yaml: &str) -> Result<Self, DynoError> {
+        let raw: serde_yaml::Value =
+            serde_yaml::from_str(yaml).map_err(|e| DynoError::Schema(e.to_string()))?;
+        let schema_value = if let Some(inner) = raw.get("schema") {
+            inner.clone()
+        } else {
+            raw
+        };
+        serde_yaml::from_value(schema_value).map_err(|e| DynoError::Schema(e.to_string()))
+    }
+
+    /// Merge another schema into this one. Symmetric across kinds:
+    ///
+    /// - **Node types**: properties merge additively (existing wins on
+    ///   conflict). Optional fields (`embedding_field`, `resolution`,
+    ///   `extraction_hint`) on the overlay override the base when the
+    ///   overlay has `Some(_)`.
+    /// - **Edge types**: properties merge additively (existing wins).
+    ///   `extraction_hint` overrides on overlay-`Some`. `inference_category`
+    ///   overrides when the overlay sets one. `pass_1_extractable`
+    ///   overrides when the overlay's value differs from the default
+    ///   `false` (i.e. only `true` overrides — `false` is treated as
+    ///   "unset" since it's the serde default).
+    /// - **Extraction modes**: overlay replaces base on conflict. These
+    ///   are top-level configuration, not data — accumulating them
+    ///   additively makes no sense.
+    ///
+    /// Previously: edge_types and extraction_modes were insert-only
+    /// (existing always won, even on overlay-set non-default fields);
+    /// node merge silently dropped overlay's `embedding_field` and
+    /// `resolution`. The asymmetry was a footgun for layered schemas
+    /// where a base file declared types and an overlay refined them.
     pub fn merge(&mut self, other: Schema) {
         for (name, node_def) in other.node_types {
             self.node_types
                 .entry(name)
                 .and_modify(|existing| {
-                    // Merge properties additively
                     for (prop_name, prop_def) in &node_def.properties {
                         existing
                             .properties
                             .entry(prop_name.clone())
                             .or_insert_with(|| prop_def.clone());
                     }
-                    // Override extraction_hint if new one is provided
+                    if node_def.embedding_field.is_some() {
+                        existing.embedding_field = node_def.embedding_field.clone();
+                    }
+                    if node_def.resolution.is_some() {
+                        existing.resolution = node_def.resolution.clone();
+                    }
                     if node_def.extraction_hint.is_some() {
                         existing.extraction_hint = node_def.extraction_hint.clone();
                     }
@@ -240,10 +339,29 @@ impl Schema {
                 .or_insert(node_def);
         }
         for (name, edge_def) in other.edge_types {
-            self.edge_types.entry(name).or_insert(edge_def);
+            self.edge_types
+                .entry(name)
+                .and_modify(|existing| {
+                    for (prop_name, prop_def) in &edge_def.properties {
+                        existing
+                            .properties
+                            .entry(prop_name.clone())
+                            .or_insert_with(|| prop_def.clone());
+                    }
+                    if edge_def.extraction_hint.is_some() {
+                        existing.extraction_hint = edge_def.extraction_hint.clone();
+                    }
+                    if edge_def.inference_category.is_some() {
+                        existing.inference_category = edge_def.inference_category.clone();
+                    }
+                    if edge_def.pass_1_extractable {
+                        existing.pass_1_extractable = true;
+                    }
+                })
+                .or_insert(edge_def);
         }
         for (name, mode) in other.extraction_modes {
-            self.extraction_modes.entry(name).or_insert(mode);
+            self.extraction_modes.insert(name, mode);
         }
     }
 
@@ -276,11 +394,25 @@ impl Schema {
             return Ok(());
         }
 
-        // Type check
+        // Type check.
+        //
+        // Numeric arms are strict-symmetric (TD-3 H3): `type: int`
+        // accepts only `Value::Int(_)`, `type: float` accepts only
+        // `Value::Float(_)`. Previously `Float` quietly accepted `Int`
+        // (lossless widening) while `Int` rejected `Float`, an
+        // asymmetry that made schema-as-contract less reliable —
+        // callers passing the wrong variant for a float property would
+        // succeed validation but expose a `Value::Int` to downstream
+        // consumers that pattern-match on the variant.
+        //
+        // `ListString` validates each element (TD-3 H4): a list with
+        // any non-string element is now rejected, where previously
+        // `Value::List(vec![Value::Int(1)])` passed for a `list:string`
+        // property and only blew up downstream.
         match (&prop_def.prop_type, value) {
             (PropertyType::String, Value::String(_)) => {}
             (PropertyType::Int, Value::Int(_)) => {}
-            (PropertyType::Float, Value::Float(_) | Value::Int(_)) => {}
+            (PropertyType::Float, Value::Float(_)) => {}
             (PropertyType::Bool, Value::Bool(_)) => {}
             (PropertyType::Enum, Value::String(s)) => {
                 if let Some(ref valid) = prop_def.values
@@ -293,7 +425,20 @@ impl Schema {
                     });
                 }
             }
-            (PropertyType::ListString, Value::List(_)) => {}
+            (PropertyType::ListString, Value::List(items)) => {
+                for (i, item) in items.iter().enumerate() {
+                    if !matches!(item, Value::String(_)) {
+                        return Err(DynoError::Validation {
+                            node_type: node_type.to_string(),
+                            property: property.to_string(),
+                            message: format!(
+                                "list:string element {i} is not a string: got {}",
+                                item.type_name()
+                            ),
+                        });
+                    }
+                }
+            }
             // Datetime is stored as an ISO-8601 string. We accept any
             // string here rather than parsing — consumers that need
             // strict format validation can layer their own check on top.
@@ -326,6 +471,51 @@ impl Schema {
             });
         }
 
+        Ok(())
+    }
+
+    /// Validate the schema's internal consistency.
+    ///
+    /// Today's check: every `EdgeTypeDef`'s `from`/`to` endpoints name
+    /// node types that exist in `self.node_types` (or are the wildcard
+    /// `"*"`). Without this, a YAML with `MENTIONS: from: Charcater
+    /// (typo) → Location` parsed cleanly but silently rejected every
+    /// edge create call at write time, which is exactly the kind of
+    /// "looks correct, isn't" failure the no-silent-fallbacks principle
+    /// guards against.
+    ///
+    /// Called automatically by `from_yaml`, `from_json`, and after
+    /// every step in `from_multiple_yamls`'s merge loop. Consumers
+    /// that build schemas programmatically can (and should) call this
+    /// themselves before handing the schema to a `StorageEngine`.
+    pub fn validate(&self) -> Result<(), DynoError> {
+        for (edge_name, edge_def) in &self.edge_types {
+            self.check_endpoint(edge_name, "from", &edge_def.from)?;
+            self.check_endpoint(edge_name, "to", &edge_def.to)?;
+        }
+        Ok(())
+    }
+
+    fn check_endpoint(
+        &self,
+        edge_name: &str,
+        side: &str,
+        endpoint: &EdgeEndpoint,
+    ) -> Result<(), DynoError> {
+        let names: Vec<&str> = match endpoint {
+            EdgeEndpoint::Single(t) => vec![t.as_str()],
+            EdgeEndpoint::Multiple(ts) => ts.iter().map(String::as_str).collect(),
+        };
+        for name in names {
+            if name == "*" {
+                continue;
+            }
+            if !self.node_types.contains_key(name) {
+                return Err(DynoError::Schema(format!(
+                    "edge type '{edge_name}' {side} endpoint references unknown node type '{name}'",
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -404,14 +594,23 @@ impl Schema {
     }
 
     /// Generate a text summary of this schema for LLM consumption.
+    ///
+    /// Deterministic across runs: node types, edge types, and properties
+    /// inside each node are emitted in name-sorted order. Without the
+    /// sort, the underlying `HashMap` iteration order would shuffle
+    /// between processes, defeating prompt caching for any consumer that
+    /// stitched this string into an LLM prompt.
     pub fn to_llm_summary(&self) -> String {
         let mut lines = vec![format!("Schema: {} (v{})", self.name, self.version)];
         lines.push(String::new());
         lines.push("Node Types:".to_string());
-        for (name, def) in &self.node_types {
-            let props: Vec<String> = def
-                .properties
-                .iter()
+        let mut node_entries: Vec<(&String, &NodeTypeDef)> = self.node_types.iter().collect();
+        node_entries.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, def) in node_entries {
+            let mut prop_entries: Vec<(&String, &PropertyDef)> = def.properties.iter().collect();
+            prop_entries.sort_by(|a, b| a.0.cmp(b.0));
+            let props: Vec<String> = prop_entries
+                .into_iter()
                 .map(|(k, v)| {
                     format!(
                         "{}: {:?}{}",
@@ -425,7 +624,9 @@ impl Schema {
         }
         lines.push(String::new());
         lines.push("Edge Types:".to_string());
-        for (name, def) in &self.edge_types {
+        let mut edge_entries: Vec<(&String, &EdgeTypeDef)> = self.edge_types.iter().collect();
+        edge_entries.sort_by(|a, b| a.0.cmp(b.0));
+        for (name, def) in edge_entries {
             lines.push(format!("  {} — {:?} -> {:?}", name, def.from, def.to));
         }
         lines.join("\n")
@@ -477,23 +678,34 @@ impl Schema {
         true
     }
 
-    /// Ensure a property exists on a node type. If already present, does nothing.
-    /// Returns true if the property was added.
+    /// Ensure a property exists on a node type.
+    ///
+    /// Three outcomes, distinguishable by the caller:
+    /// - `Ok(true)` — the property was added.
+    /// - `Ok(false)` — the property was already present; no change.
+    /// - `Err(DynoError::UnknownNodeType(_))` — the node type doesn't
+    ///   exist on this schema.
+    ///
+    /// The previous signature collapsed "already present" and "node
+    /// missing" both into `false`, so callers couldn't tell whether a
+    /// migration step was a no-op or had silently failed because the
+    /// node type was gone — exactly the failure mode the no-silent-
+    /// fallbacks principle warns against.
     pub fn ensure_node_property(
         &mut self,
         node_type: &str,
         property: &str,
         prop_def: PropertyDef,
-    ) -> bool {
-        if let Some(node_def) = self.node_types.get_mut(node_type) {
-            if node_def.properties.contains_key(property) {
-                return false;
-            }
-            node_def.properties.insert(property.to_string(), prop_def);
-            true
-        } else {
-            false
+    ) -> Result<bool, DynoError> {
+        let node_def = self
+            .node_types
+            .get_mut(node_type)
+            .ok_or_else(|| DynoError::UnknownNodeType(node_type.to_string()))?;
+        if node_def.properties.contains_key(property) {
+            return Ok(false);
         }
+        node_def.properties.insert(property.to_string(), prop_def);
+        Ok(true)
     }
 
     /// Get the schema version.
@@ -895,6 +1107,218 @@ schema:
                 .description
                 .as_deref(),
             Some("Human-readable label"),
+        );
+    }
+
+    #[test]
+    fn merge_overlay_overrides_optional_node_fields() {
+        // S2 regression: previously, merging a node-type from the overlay
+        // dropped the overlay's `embedding_field` and `resolution` when
+        // the base already had a node by that name. Now overlay-`Some`
+        // wins, base-`None` doesn't get to keep winning.
+        let base_yaml = r#"
+schema:
+  name: test
+  version: 1
+  node_types:
+    Character:
+      properties:
+        name: { type: string, required: true }
+  edge_types: {}
+"#;
+        let overlay_yaml = r#"
+schema:
+  name: test
+  version: 1
+  node_types:
+    Character:
+      properties:
+        bio: { type: string }
+      embedding_field: bio
+      resolution:
+        strategy: fuzzy_then_vector
+        fuzzy_threshold: 80
+  edge_types: {}
+"#;
+        let mut base = Schema::from_yaml(base_yaml).unwrap();
+        let overlay = Schema::from_yaml(overlay_yaml).unwrap();
+        base.merge(overlay);
+        let merged = &base.node_types["Character"];
+        assert_eq!(merged.embedding_field.as_deref(), Some("bio"));
+        let res = merged.resolution.as_ref().expect("overlay resolution kept");
+        assert_eq!(res.fuzzy_threshold, 80);
+        assert!(merged.properties.contains_key("name"));
+        assert!(merged.properties.contains_key("bio"));
+    }
+
+    #[test]
+    fn merge_edge_properties_additive_and_inference_overrides() {
+        // S2 regression: previously, edge_types were insert-only — an
+        // overlay never updated an existing edge_type at all. Now
+        // properties merge additively and overlay's inference_category /
+        // pass_1_extractable / extraction_hint override.
+        let base_yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    A: { properties: { name: { type: string } } }
+  edge_types:
+    REL:
+      from: A
+      to: A
+      properties:
+        weight: { type: float }
+"#;
+        let overlay_yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    A: { properties: { name: { type: string } } }
+  edge_types:
+    REL:
+      from: A
+      to: A
+      properties:
+        confidence: { type: float }
+      inference_category: causal
+      pass_1_extractable: true
+"#;
+        let mut base = Schema::from_yaml(base_yaml).unwrap();
+        base.merge(Schema::from_yaml(overlay_yaml).unwrap());
+        let edge = &base.edge_types["REL"];
+        assert!(edge.properties.contains_key("weight"));
+        assert!(edge.properties.contains_key("confidence"));
+        assert_eq!(edge.inference_category.as_deref(), Some("causal"));
+        assert!(edge.pass_1_extractable);
+    }
+
+    #[test]
+    fn validate_int_rejects_float() {
+        // H3: numerics are strict-symmetric. type:int rejects Value::Float.
+        let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
+        let r = schema.validate_property("Character", "age", &Value::Float(42.0));
+        assert!(r.is_err(), "type:int must reject Value::Float");
+    }
+
+    #[test]
+    fn validate_float_rejects_int() {
+        // H3: type:float rejects Value::Int (previously accepted via
+        // silent widening).
+        let schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
+        let r = schema.validate_property("Character", "score", &Value::Int(1));
+        assert!(r.is_err(), "type:float must reject Value::Int");
+    }
+
+    #[test]
+    fn validate_list_string_checks_each_element() {
+        // H4: ListString verifies element types. A list with any
+        // non-string element is now rejected at the schema layer.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Item:
+      properties:
+        tags: { type: "list:string" }
+  edge_types: {}
+"#;
+        let schema = Schema::from_yaml(yaml).unwrap();
+        let ok = Value::List(vec![Value::from("a"), Value::from("b")]);
+        assert!(schema.validate_property("Item", "tags", &ok).is_ok());
+
+        let bad = Value::List(vec![Value::from("a"), Value::Int(1)]);
+        let r = schema.validate_property("Item", "tags", &bad);
+        assert!(r.is_err(), "list:string must reject non-string element");
+    }
+
+    #[test]
+    fn validate_rejects_edge_to_unknown_node_type() {
+        // H5: from_yaml runs validate(); an edge endpoint pointing at a
+        // nonexistent node type is now caught at parse time instead of
+        // failing silently every edge create call.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Character: { properties: { name: { type: string } } }
+  edge_types:
+    KNOWS:
+      from: Character
+      to: Charcater
+"#;
+        let r = Schema::from_yaml(yaml);
+        assert!(r.is_err(), "schema with typo'd edge endpoint must reject");
+        let msg = format!("{:?}", r.unwrap_err());
+        assert!(
+            msg.contains("Charcater") && msg.contains("unknown node type"),
+            "error must name the missing type: {msg}"
+        );
+    }
+
+    #[test]
+    fn ensure_node_property_signals_unknown_type() {
+        // H2: tristate. Caller can now distinguish "added" from
+        // "already there" from "node type missing".
+        let mut schema = Schema::from_yaml(sample_schema_yaml()).unwrap();
+        let pd = PropertyDef {
+            prop_type: PropertyType::String,
+            required: false,
+            indexed: false,
+            nullable: false,
+            default: None,
+            values: None,
+            range: None,
+            description: None,
+        };
+
+        // Added.
+        let r = schema.ensure_node_property("Character", "newprop", pd.clone());
+        assert!(matches!(r, Ok(true)));
+        // Already present.
+        let r = schema.ensure_node_property("Character", "newprop", pd.clone());
+        assert!(matches!(r, Ok(false)));
+        // Unknown type.
+        let r = schema.ensure_node_property("UnknownType", "x", pd);
+        assert!(matches!(r, Err(DynoError::UnknownNodeType(_))));
+    }
+
+    #[test]
+    fn to_llm_summary_is_deterministic_across_calls() {
+        // S3: HashMap iteration order varies; the formatter must impose
+        // a stable order so prompt caching works downstream.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Zeta: { properties: { z: { type: string }, a: { type: int } } }
+    Alpha: { properties: { name: { type: string } } }
+    Mu: { properties: { value: { type: int } } }
+  edge_types:
+    Z_EDGE: { from: Zeta, to: Alpha }
+    A_EDGE: { from: Alpha, to: Mu }
+"#;
+        let schema = Schema::from_yaml(yaml).unwrap();
+        let s1 = schema.to_llm_summary();
+        let s2 = schema.to_llm_summary();
+        assert_eq!(s1, s2);
+        // And types appear in name-sorted order.
+        let alpha = s1.find("Alpha").unwrap();
+        let mu = s1.find("Mu").unwrap();
+        let zeta = s1.find("Zeta").unwrap();
+        assert!(alpha < mu && mu < zeta, "node types must be sorted");
+        let a_edge = s1.find("A_EDGE").unwrap();
+        let z_edge = s1.find("Z_EDGE").unwrap();
+        assert!(a_edge < z_edge, "edge types must be sorted");
+        // Properties inside Zeta must be sorted (a before z).
+        let zeta_line = s1.lines().find(|l| l.contains("Zeta —")).unwrap();
+        assert!(
+            zeta_line.find("a:").unwrap() < zeta_line.find("z:").unwrap(),
+            "node properties must be sorted: {zeta_line}"
         );
     }
 
