@@ -28,8 +28,7 @@ pub struct Schema {
 }
 
 /// Definition of a node type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeTypeDef {
     pub properties: HashMap<String, PropertyDef>,
     /// Which property to generate embeddings from (if any).
@@ -44,8 +43,7 @@ pub struct NodeTypeDef {
 }
 
 /// Definition of an edge type.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EdgeTypeDef {
     /// Source node type(s). "*" means any.
     pub from: EdgeEndpoint,
@@ -81,6 +79,16 @@ pub enum EdgeEndpoint {
     Multiple(Vec<String>),
 }
 
+impl Default for EdgeEndpoint {
+    /// `Single("*")` — accepts any node type. Reasonable default for
+    /// builder-style construction (`EdgeTypeDef { from: ..., to: ...,
+    /// ..Default::default() }`) where the caller will fill in real
+    /// endpoints.
+    fn default() -> Self {
+        EdgeEndpoint::Single("*".to_string())
+    }
+}
+
 impl EdgeEndpoint {
     /// Check if a node type is valid for this endpoint.
     pub fn accepts(&self, node_type: &str) -> bool {
@@ -92,8 +100,7 @@ impl EdgeEndpoint {
 }
 
 /// Property definition with type and constraints.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PropertyDef {
     #[serde(rename = "type")]
     pub prop_type: PropertyType,
@@ -119,9 +126,10 @@ pub struct PropertyDef {
 }
 
 /// Supported property types.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PropertyType {
+    #[default]
     String,
     Int,
     Float,
