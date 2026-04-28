@@ -2,13 +2,10 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use dynograph_core::{DynoError, Schema, Value};
-use rocksdb::{
-    BlockBasedOptions, ColumnFamilyDescriptor, DB, IteratorMode, Options, SliceTransform,
-    WriteBatch,
-};
+use rocksdb::{BlockBasedOptions, ColumnFamilyDescriptor, DB, IteratorMode, Options, WriteBatch};
 
 use crate::cache::{CacheConfig, ReadCache};
 
@@ -147,9 +144,17 @@ fn cf_options(cf_name: &str) -> Options {
             opts.set_block_based_table_factory(&block_opts);
         }
         CF_ADJ_OUT | CF_ADJ_IN => {
-            // Sequential prefix scans — prefix extractor enables efficient iteration.
-            // 48 bytes covers typical graph_id (36 UUID) + separator + start of node_id.
-            opts.set_prefix_extractor(SliceTransform::create_fixed_prefix(48));
+            // No fixed-prefix extractor: keys are
+            // `{graph_id}\x00{node_id}\x00{edge_type}\x00{peer_id}` and
+            // graph_id/node_id are user-supplied with no length bound.
+            // The previous `fixed_prefix(48)` assumed UUID-shaped graph
+            // ids and bled into the edge_type field on shorter ones
+            // (e.g. graph_id="g1"), which is incorrect — RocksDB would
+            // group keys by a prefix that crosses key boundaries.
+            // Without an extractor, prefix scans use plain seek + range
+            // iteration, which is correct on any key shape; SST block
+            // ordering still keeps a node's adjacency keys close on
+            // disk so seek-and-iterate cost is bounded.
         }
         CF_NODE_IDX => {
             // Prefix scans on `{graph_id}\x00{node_type}\x00{prop_name}\x00{value}\x00`.
@@ -236,7 +241,12 @@ impl BufferedOp {
 
 /// The storage engine — schema-validated graph storage.
 pub struct StorageEngine {
-    schema: Schema,
+    /// `Arc<Schema>` so the schema can be cheaply shared with consumers
+    /// (e.g. response builders) without paying a deep `Schema::clone`.
+    /// `schema()` derefs through the arc; constructors and
+    /// `replace_schema` accept `Schema` and wrap internally so the
+    /// public API doesn't expose the arc shape.
+    schema: Arc<Schema>,
     backend: Backend,
     /// LRU read cache for node lookups and adjacency scans.
     /// Mutex allows cache updates through &self (get path is immutable at API level).
@@ -251,7 +261,7 @@ impl StorageEngine {
     /// Create an in-memory storage engine (for testing).
     pub fn new_in_memory(schema: Schema) -> Self {
         Self {
-            schema,
+            schema: Arc::new(schema),
             backend: Backend::Memory {
                 nodes: HashMap::new(),
                 edges: HashMap::new(),
@@ -281,7 +291,7 @@ impl StorageEngine {
         })?;
 
         Ok(Self {
-            schema,
+            schema: Arc::new(schema),
             backend: Backend::Rocks { db },
             read_cache: Mutex::new(ReadCache::new(CacheConfig::default())),
             write_buffer: None,
@@ -291,6 +301,13 @@ impl StorageEngine {
     /// Get the schema.
     pub fn schema(&self) -> &Schema {
         &self.schema
+    }
+
+    /// Cheap clone of the schema for callers that want to hold an
+    /// owned reference past the engine's borrow (e.g. response
+    /// builders). Refcount bump, not a deep clone.
+    pub fn schema_arc(&self) -> Arc<Schema> {
+        Arc::clone(&self.schema)
     }
 
     /// Replace the in-memory schema. Caller is responsible for any
@@ -304,7 +321,7 @@ impl StorageEngine {
     /// (the property may not exist on the new schema) and tolerable
     /// garbage; cleaning them up is a future-slice concern.
     pub fn replace_schema(&mut self, new_schema: Schema) {
-        self.schema = new_schema;
+        self.schema = Arc::new(new_schema);
     }
 
     // =========================================================================
@@ -391,7 +408,7 @@ impl StorageEngine {
         let mut results = Vec::with_capacity(entries.len());
         for (key, bytes) in entries {
             let after_prefix = &key[prefix.len()..];
-            let node_id = String::from_utf8_lossy(after_prefix).to_string();
+            let node_id = decode_key_segment(after_prefix, "embedding key node_id suffix")?;
             results.push((node_id, decode_embedding(&bytes)?));
         }
         Ok(results)
@@ -435,7 +452,7 @@ impl StorageEngine {
         }
     }
 
-    fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, DynoError> {
+    fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Arc<[u8]>>, DynoError> {
         // For node lookups, use the read cache (single lock acquisition)
         if cf == CF_NODES {
             let mut cache = self.read_cache.lock().expect("read_cache lock poisoned");
@@ -449,7 +466,7 @@ impl StorageEngine {
                 self.read_cache
                     .lock()
                     .unwrap()
-                    .put(key.to_vec(), data.clone());
+                    .put(key.to_vec(), Arc::clone(data));
             }
             return Ok(result);
         }
@@ -457,14 +474,19 @@ impl StorageEngine {
         self.backend_get(cf, key)
     }
 
-    fn backend_get(&self, cf: &str, key: &[u8]) -> Result<Option<Vec<u8>>, DynoError> {
+    fn backend_get(&self, cf: &str, key: &[u8]) -> Result<Option<Arc<[u8]>>, DynoError> {
         match &self.backend {
-            Backend::Memory { .. } => Ok(self.backend.memory_store(cf)?.get(key).cloned()),
+            Backend::Memory { .. } => Ok(self
+                .backend
+                .memory_store(cf)?
+                .get(key)
+                .map(|v| Arc::from(v.clone().into_boxed_slice()))),
             Backend::Rocks { db } => {
                 let cf_handle = db
                     .cf_handle(cf)
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
                 db.get_cf(&cf_handle, key)
+                    .map(|opt| opt.map(|v| Arc::from(v.into_boxed_slice())))
                     .map_err(|e| DynoError::Storage(e.to_string()))
             }
         }
@@ -995,7 +1017,7 @@ impl StorageEngine {
             let Some(node_id_bytes) = crate::keys::node_idx_key_node_id(&key, &value_prefix) else {
                 continue;
             };
-            let node_id = String::from_utf8_lossy(node_id_bytes).to_string();
+            let node_id = decode_key_segment(node_id_bytes, "node_idx key node_id suffix")?;
             if let Some(node) = self.get_node(graph_id, node_type, &node_id)? {
                 results.push(node);
             }
@@ -1025,7 +1047,7 @@ impl StorageEngine {
             let properties: HashMap<String, Value> = rmp_serde::from_slice(&bytes)
                 .map_err(|e| DynoError::Serialization(e.to_string()))?;
             let after_prefix = &key[prefix.len()..];
-            let node_id = String::from_utf8_lossy(after_prefix).to_string();
+            let node_id = decode_key_segment(after_prefix, "node key node_id suffix")?;
             results.push(StoredNode {
                 graph_id: graph_id.to_string(),
                 node_type: node_type.to_string(),
@@ -1054,8 +1076,8 @@ impl StorageEngine {
             if parts.len() != 2 {
                 continue;
             }
-            let edge_type = String::from_utf8_lossy(parts[0]).to_string();
-            let to_id = String::from_utf8_lossy(parts[1]).to_string();
+            let edge_type = decode_key_segment(parts[0], "adj_out key edge_type")?;
+            let to_id = decode_key_segment(parts[1], "adj_out key to_id")?;
 
             if let Some(filter) = edge_type_filter
                 && edge_type != filter
@@ -1096,8 +1118,8 @@ impl StorageEngine {
             if parts.len() != 2 {
                 continue;
             }
-            let edge_type = String::from_utf8_lossy(parts[0]).to_string();
-            let from_id = String::from_utf8_lossy(parts[1]).to_string();
+            let edge_type = decode_key_segment(parts[0], "adj_in key edge_type")?;
+            let from_id = decode_key_segment(parts[1], "adj_in key from_id")?;
 
             if let Some(filter) = edge_type_filter
                 && edge_type != filter
@@ -1261,6 +1283,28 @@ impl StorageEngine {
     }
 
     // =========================================================================
+    // Graph lifecycle
+    // =========================================================================
+
+    /// Drop every key belonging to `graph_id` across all column families.
+    /// Idempotent: clearing an unknown graph is `Ok(())`, not an error,
+    /// since "the graph has no data" is the post-condition either way.
+    ///
+    /// Implementation: one prefix-delete per CF using
+    /// `keys::graph_prefix(graph_id)`. On RocksDB this is a single range
+    /// tombstone per CF; on the in-memory backend it's a `retain` over
+    /// each store. Both paths route through the existing
+    /// `prefix_delete` so write batching, cache invalidation, and
+    /// snapshot-interaction caveats all match the rest of the engine.
+    pub fn clear_graph(&mut self, graph_id: &str) -> Result<(), DynoError> {
+        let prefix = crate::keys::graph_prefix(graph_id);
+        for cf in ALL_CFS {
+            self.prefix_delete(cf, &prefix)?;
+        }
+        Ok(())
+    }
+
+    // =========================================================================
     // Cache management
     // =========================================================================
 
@@ -1279,6 +1323,24 @@ impl StorageEngine {
             .expect("read_cache lock poisoned")
             .clear();
     }
+}
+
+/// Decode a key segment as UTF-8. Every key the storage layer writes
+/// is built from `&str` arguments, so a non-UTF-8 byte sequence on
+/// readback can only mean on-disk corruption (or a key shape that was
+/// never written by this code path). Fail loud with the surrounding
+/// context — silently mangling via `from_utf8_lossy` would produce
+/// believable-looking node/edge ids that don't actually exist, which
+/// is exactly the "looks correct, isn't" anti-pattern the no-silent-
+/// fallbacks principle warns against.
+fn decode_key_segment(bytes: &[u8], context: &str) -> Result<String, DynoError> {
+    std::str::from_utf8(bytes)
+        .map(|s| s.to_string())
+        .map_err(|e| {
+            DynoError::Storage(format!(
+                "corrupt key segment ({context}): {e}; raw bytes = {bytes:?}"
+            ))
+        })
 }
 
 /// Decode raw f32-LE bytes to a `Vec<f32>`. Length must be a multiple
@@ -2470,5 +2532,162 @@ schema:
             matches!(err, DynoError::Storage(ref m) if m.contains("not a multiple of 4")),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn clear_graph_drops_every_cf_for_graph_only() {
+        // Two graphs share the schema and overlap in node/edge ids.
+        // After clear_graph("g1"), every g1 key — nodes, edges, both
+        // adjacency CFs, and embeddings — must be gone, but g2's data
+        // must survive untouched. Idempotent: a second clear is Ok.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        for graph in ["g1", "g2"] {
+            engine
+                .create_node(graph, "Character", "alice", props! { "name" => "A" })
+                .unwrap();
+            engine
+                .create_node(graph, "Character", "bob", props! { "name" => "B" })
+                .unwrap();
+            engine
+                .create_edge(
+                    graph,
+                    "KNOWS",
+                    "Character",
+                    "alice",
+                    "Character",
+                    "bob",
+                    HashMap::new(),
+                )
+                .unwrap();
+            engine
+                .set_embedding(graph, "Character", "alice", &[0.1, 0.2, 0.3])
+                .unwrap();
+        }
+
+        engine.clear_graph("g1").unwrap();
+
+        // g1 is gone everywhere.
+        assert!(
+            engine
+                .get_node("g1", "Character", "alice")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            engine
+                .get_edge("g1", "KNOWS", "alice", "bob")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            engine
+                .scan_outgoing_edges("g1", "alice", None)
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            engine.scan_incoming_edges("g1", "bob", None).unwrap().len(),
+            0
+        );
+        assert!(
+            engine
+                .get_embedding("g1", "Character", "alice")
+                .unwrap()
+                .is_none()
+        );
+
+        // g2 is untouched.
+        assert!(
+            engine
+                .get_node("g2", "Character", "alice")
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            engine
+                .get_edge("g2", "KNOWS", "alice", "bob")
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            engine
+                .get_embedding("g2", "Character", "alice")
+                .unwrap()
+                .unwrap(),
+            vec![0.1, 0.2, 0.3]
+        );
+
+        // Idempotent re-clear.
+        engine.clear_graph("g1").unwrap();
+        engine.clear_graph("never_existed").unwrap();
+    }
+
+    #[test]
+    fn clear_graph_does_not_sweep_prefix_neighbors() {
+        // Regression: a naive prefix without the trailing separator
+        // would let `clear_graph("g1")` also wipe "g10", "g1_test", etc.
+        // The graph_prefix helper appends \x00, so the boundary is exact.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "a", props! { "name" => "A" })
+            .unwrap();
+        engine
+            .create_node("g10", "Character", "a", props! { "name" => "A10" })
+            .unwrap();
+        engine
+            .create_node("g1_test", "Character", "a", props! { "name" => "AT" })
+            .unwrap();
+
+        engine.clear_graph("g1").unwrap();
+
+        assert!(engine.get_node("g1", "Character", "a").unwrap().is_none());
+        assert!(engine.get_node("g10", "Character", "a").unwrap().is_some());
+        assert!(
+            engine
+                .get_node("g1_test", "Character", "a")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn rocksdb_short_graph_id_adjacency_is_correct() {
+        // S7 regression: with `fixed_prefix(48)` on adjacency CFs, a
+        // short graph_id like "g1" let RocksDB group keys by a prefix
+        // that crossed the graph_id/node_id/edge_type boundaries —
+        // potentially returning incorrect adjacency results once the
+        // CF spilled to disk. Without the extractor, plain seek + range
+        // iteration is correct on any key shape. This test exercises
+        // the same shape with multiple graphs sharing node_ids.
+        let dir = tempfile::tempdir().unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(test_schema(), dir.path().to_str().unwrap()).unwrap();
+        for graph in ["g1", "g2"] {
+            engine
+                .create_node(graph, "Character", "alice", props! { "name" => "A" })
+                .unwrap();
+            engine
+                .create_node(graph, "Character", "bob", props! { "name" => "B" })
+                .unwrap();
+            engine
+                .create_edge(
+                    graph,
+                    "KNOWS",
+                    "Character",
+                    "alice",
+                    "Character",
+                    "bob",
+                    HashMap::new(),
+                )
+                .unwrap();
+        }
+        // Per-graph adjacency must not bleed across graphs.
+        let g1_out = engine.scan_outgoing_edges("g1", "alice", None).unwrap();
+        let g2_out = engine.scan_outgoing_edges("g2", "alice", None).unwrap();
+        assert_eq!(g1_out.len(), 1);
+        assert_eq!(g2_out.len(), 1);
+        assert_eq!(g1_out[0].to_id, "bob");
+        assert_eq!(g2_out[0].to_id, "bob");
     }
 }

@@ -94,6 +94,17 @@ pub fn adj_in_prefix(graph_id: &str, to_id: &str) -> Vec<u8> {
     key
 }
 
+/// Encode a prefix for scanning *every* key belonging to one graph.
+/// Used by `StorageEngine::clear_graph` to drop all of a graph's data
+/// in a single range tombstone per CF. Includes the trailing separator
+/// so e.g. graph "g1" doesn't sweep "g10".
+pub fn graph_prefix(graph_id: &str) -> Vec<u8> {
+    let mut key = Vec::with_capacity(graph_id.len() + 1);
+    key.extend_from_slice(graph_id.as_bytes());
+    key.push(SEP);
+    key
+}
+
 /// Canonical byte encoding of a property value for use in index keys.
 ///
 /// Returns `None` for values that cannot be equality-indexed (lists, maps,
