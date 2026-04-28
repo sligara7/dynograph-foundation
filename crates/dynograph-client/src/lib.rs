@@ -274,6 +274,10 @@ impl DynographClient {
     }
 
     /// Cascades server-side to drop the node's edges + embedding.
+    ///
+    /// To update a node's properties in place, use `replace_node` —
+    /// delete-and-recreate-with-the-same-id drops every edge
+    /// attached to the node.
     pub async fn delete_node(
         &self,
         id: &str,

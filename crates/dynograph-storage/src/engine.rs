@@ -717,6 +717,10 @@ impl StorageEngine {
     /// Delete a node and every edge attached to it, including the
     /// peer-side adjacency entries on neighbor nodes.
     ///
+    /// To update a node's properties in place, use
+    /// `replace_node_properties` — delete-and-recreate-with-the-same-id
+    /// drops every edge attached to the node.
+    ///
     /// Cleanup steps (in order, with rationale):
     /// 1. Scan `node_id`'s outgoing and incoming adjacency *before*
     ///    touching anything — once we delete this node's own adjacency
