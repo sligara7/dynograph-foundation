@@ -365,90 +365,15 @@ impl Schema {
             .get(node_type)
             .ok_or_else(|| DynoError::UnknownNodeType(node_type.to_string()))?;
 
-        let prop_def = match node_def.properties.get(property) {
-            Some(def) => def,
-            None => return Ok(()), // Extra properties are allowed (schema is additive)
+        let Some(prop_def) = node_def.properties.get(property) else {
+            return Ok(()); // Extra properties are allowed (schema is additive)
         };
 
-        // Null check
-        if value.is_null() {
-            if prop_def.required && !prop_def.nullable {
-                return Err(DynoError::Validation {
-                    node_type: node_type.to_string(),
-                    property: property.to_string(),
-                    message: "required property cannot be null".to_string(),
-                });
-            }
-            return Ok(());
-        }
-
-        // Numeric arms are strict-symmetric: `type: int` accepts only
-        // `Value::Int`, `type: float` accepts only `Value::Float`.
-        // `ListString` checks each element so a non-string element
-        // can't sneak past schema validation and surface downstream.
-        match (&prop_def.prop_type, value) {
-            (PropertyType::String, Value::String(_)) => {}
-            (PropertyType::Int, Value::Int(_)) => {}
-            (PropertyType::Float, Value::Float(_)) => {}
-            (PropertyType::Bool, Value::Bool(_)) => {}
-            (PropertyType::Enum, Value::String(s)) => {
-                if let Some(ref valid) = prop_def.values
-                    && !valid.contains(s)
-                {
-                    return Err(DynoError::Validation {
-                        node_type: node_type.to_string(),
-                        property: property.to_string(),
-                        message: format!("invalid enum value '{}', expected one of {:?}", s, valid),
-                    });
-                }
-            }
-            (PropertyType::ListString, Value::List(items)) => {
-                for (i, item) in items.iter().enumerate() {
-                    if !matches!(item, Value::String(_)) {
-                        return Err(DynoError::Validation {
-                            node_type: node_type.to_string(),
-                            property: property.to_string(),
-                            message: format!(
-                                "list:string element {i} is not a string: got {}",
-                                item.type_name()
-                            ),
-                        });
-                    }
-                }
-            }
-            // Datetime is stored as an ISO-8601 string. We accept any
-            // string here rather than parsing — consumers that need
-            // strict format validation can layer their own check on top.
-            // Without this arm a `type: datetime` property would reject
-            // every value via the catch-all below (silent failure mode
-            // until 2026-04-26).
-            (PropertyType::Datetime, Value::String(_)) => {}
-            _ => {
-                return Err(DynoError::Validation {
-                    node_type: node_type.to_string(),
-                    property: property.to_string(),
-                    message: format!(
-                        "expected type {:?}, got {}",
-                        prop_def.prop_type,
-                        value.type_name()
-                    ),
-                });
-            }
-        }
-
-        // Range check for numerics
-        if let Some((min, max)) = prop_def.range
-            && let Some(v) = value.as_f64()
-            && (v < min || v > max)
-        {
-            return Err(DynoError::Validation {
-                node_type: node_type.to_string(),
-                property: property.to_string(),
-                message: format!("value {} out of range [{}, {}]", v, min, max),
-            });
-        }
-
-        Ok(())
+        check_property_value(prop_def, value).map_err(|message| DynoError::Validation {
+            node_type: node_type.to_string(),
+            property: property.to_string(),
+            message,
+        })
     }
 
     /// Validate the schema's internal consistency. Currently checks
@@ -560,6 +485,58 @@ impl Schema {
         // Validate each property (now including any applied defaults).
         for (prop_name, value) in properties.iter() {
             self.validate_property(node_type, prop_name, value)?;
+        }
+
+        Ok(())
+    }
+
+    /// Validate all properties for an edge against its type definition.
+    /// Mirrors `validate_node`'s shape: apply schema-declared defaults
+    /// for missing properties, then enforce required-presence, then
+    /// validate each value.
+    ///
+    /// Until this method existed, edge property declarations (enum
+    /// values, required flags, types, ranges) were silently ignored at
+    /// write time — `engine::create_edge` checked only edge-type +
+    /// from/to. Anti-pattern #3 from `feedback_no_silent_fallbacks.md`
+    /// (fake success on garbage input) — surfaced 2026-04-29 by the
+    /// SUBTEXT_OF lifecycle probe in storyflow's side-B harness.
+    pub fn validate_edge_properties(
+        &self,
+        edge_type: &str,
+        properties: &mut HashMap<String, Value>,
+    ) -> Result<(), DynoError> {
+        let edge_def = self
+            .edge_types
+            .get(edge_type)
+            .ok_or_else(|| DynoError::UnknownEdgeType(edge_type.to_string()))?;
+
+        for (prop_name, prop_def) in &edge_def.properties {
+            if !properties.contains_key(prop_name)
+                && let Some(default) = &prop_def.default
+            {
+                properties.insert(prop_name.clone(), default.clone());
+            }
+            if prop_def.required && !properties.contains_key(prop_name) {
+                return Err(DynoError::EdgeValidation {
+                    edge_type: edge_type.to_string(),
+                    property: prop_name.to_string(),
+                    message: "required property is missing".to_string(),
+                });
+            }
+        }
+
+        for (prop_name, value) in properties.iter() {
+            let Some(prop_def) = edge_def.properties.get(prop_name) else {
+                continue; // Extra properties are allowed (schema is additive)
+            };
+            check_property_value(prop_def, value).map_err(|message| {
+                DynoError::EdgeValidation {
+                    edge_type: edge_type.to_string(),
+                    property: prop_name.to_string(),
+                    message,
+                }
+            })?;
         }
 
         Ok(())
@@ -736,6 +713,73 @@ impl Schema {
         out.sort_unstable();
         out
     }
+}
+
+/// Validate a single value against a property definition, entity-agnostic.
+/// Returns the message portion of a Validation error so the caller can
+/// wrap with the proper node/edge context. Shared by `validate_property`
+/// (nodes) and `validate_edge_properties` (edges).
+fn check_property_value(prop_def: &PropertyDef, value: &Value) -> Result<(), String> {
+    if value.is_null() {
+        if prop_def.required && !prop_def.nullable {
+            return Err("required property cannot be null".to_string());
+        }
+        return Ok(());
+    }
+
+    // Numeric arms are strict-symmetric: `type: int` accepts only
+    // `Value::Int`, `type: float` accepts only `Value::Float`.
+    // `ListString` checks each element so a non-string element
+    // can't sneak past schema validation and surface downstream.
+    match (&prop_def.prop_type, value) {
+        (PropertyType::String, Value::String(_)) => {}
+        (PropertyType::Int, Value::Int(_)) => {}
+        (PropertyType::Float, Value::Float(_)) => {}
+        (PropertyType::Bool, Value::Bool(_)) => {}
+        (PropertyType::Enum, Value::String(s)) => {
+            if let Some(ref valid) = prop_def.values
+                && !valid.contains(s)
+            {
+                return Err(format!(
+                    "invalid enum value '{}', expected one of {:?}",
+                    s, valid
+                ));
+            }
+        }
+        (PropertyType::ListString, Value::List(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                if !matches!(item, Value::String(_)) {
+                    return Err(format!(
+                        "list:string element {i} is not a string: got {}",
+                        item.type_name()
+                    ));
+                }
+            }
+        }
+        // Datetime is stored as an ISO-8601 string. We accept any
+        // string here rather than parsing — consumers that need
+        // strict format validation can layer their own check on top.
+        // Without this arm a `type: datetime` property would reject
+        // every value via the catch-all below (silent failure mode
+        // until 2026-04-26).
+        (PropertyType::Datetime, Value::String(_)) => {}
+        _ => {
+            return Err(format!(
+                "expected type {:?}, got {}",
+                prop_def.prop_type,
+                value.type_name()
+            ));
+        }
+    }
+
+    if let Some((min, max)) = prop_def.range
+        && let Some(v) = value.as_f64()
+        && (v < min || v > max)
+    {
+        return Err(format!("value {} out of range [{}, {}]", v, min, max));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1218,6 +1262,68 @@ schema:
             msg.contains("Charcater") && msg.contains("unknown node type"),
             "error must name the missing type: {msg}"
         );
+    }
+
+    #[test]
+    fn validate_edge_properties_enforces_required_and_enum() {
+        // Storyflow side-B 2026-04-29 surfaced the gap: engine::create_edge
+        // checked edge_type + from/to but never validated the property
+        // bag, so any caller could store edges with required fields
+        // missing or with enum values outside the declared set. Anti-
+        // pattern #3 from feedback_no_silent_fallbacks.md.
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Fragment: { properties: { name: { type: string } } }
+  edge_types:
+    SUBTEXT_OF:
+      from: Fragment
+      to: Fragment
+      properties:
+        relationship_type:
+          type: enum
+          required: true
+          values: [songwriting_origin, reframing, director_interpretation]
+        status:
+          type: enum
+          required: true
+          values: [proposed, confirmed, rejected]
+        rationale: { type: string }
+"#;
+        let schema = Schema::from_yaml(yaml).unwrap();
+
+        // Happy path: full and valid.
+        let mut ok = HashMap::new();
+        ok.insert("relationship_type".into(), Value::from("songwriting_origin"));
+        ok.insert("status".into(), Value::from("proposed"));
+        ok.insert("rationale".into(), Value::from("rationale text"));
+        assert!(schema.validate_edge_properties("SUBTEXT_OF", &mut ok).is_ok());
+
+        // Missing required.
+        let mut missing = HashMap::new();
+        missing.insert("relationship_type".into(), Value::from("songwriting_origin"));
+        let r = schema.validate_edge_properties("SUBTEXT_OF", &mut missing);
+        assert!(matches!(
+            r,
+            Err(DynoError::EdgeValidation { ref property, .. }) if property == "status"
+        ), "expected EdgeValidation on missing required `status`, got: {r:?}");
+
+        // Invalid enum value.
+        let mut bad_enum = HashMap::new();
+        bad_enum.insert("relationship_type".into(), Value::from("totally_made_up"));
+        bad_enum.insert("status".into(), Value::from("proposed"));
+        let r = schema.validate_edge_properties("SUBTEXT_OF", &mut bad_enum);
+        assert!(matches!(
+            r,
+            Err(DynoError::EdgeValidation { ref property, .. }) if property == "relationship_type"
+        ), "expected EdgeValidation on invalid enum, got: {r:?}");
+
+        // Unknown edge type.
+        let mut empty = HashMap::new();
+        let r = schema.validate_edge_properties("NOT_A_REAL_EDGE", &mut empty);
+        assert!(matches!(r, Err(DynoError::UnknownEdgeType(_))));
     }
 
     #[test]

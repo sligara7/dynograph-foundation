@@ -14,6 +14,13 @@ pub enum DynoError {
         message: String,
     },
 
+    #[error("Validation error on edge {edge_type}.{property}: {message}")]
+    EdgeValidation {
+        edge_type: String,
+        property: String,
+        message: String,
+    },
+
     #[error("Node not found: {node_type} {node_id}")]
     NodeNotFound { node_type: String, node_id: String },
 

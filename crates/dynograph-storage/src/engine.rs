@@ -868,9 +868,11 @@ impl StorageEngine {
         from_id: &str,
         to_type: &str,
         to_id: &str,
-        properties: HashMap<String, Value>,
+        mut properties: HashMap<String, Value>,
     ) -> Result<StoredEdge, DynoError> {
         self.schema.validate_edge(edge_type, from_type, to_type)?;
+        self.schema
+            .validate_edge_properties(edge_type, &mut properties)?;
 
         let edge_key = crate::keys::edge_key(graph_id, edge_type, from_id, to_id);
         let adj_out = crate::keys::adj_out_key(graph_id, from_id, edge_type, to_id);
