@@ -70,6 +70,7 @@ engine.create_node("graph1", "Person", "alice", properties)?;
 `dynograph-client` against a running service:
 
 ```toml
+[dependencies]
 dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.3.3" }
 ```
 
