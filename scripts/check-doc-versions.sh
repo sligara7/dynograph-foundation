@@ -59,6 +59,7 @@ for f in "${FILES[@]}"; do
     check_pattern "$f" '"wire_version":[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+"' "wire_version JSON"
     check_pattern "$f" 'latest tag.*\(`v[0-9]+\.[0-9]+\.[0-9]+`\)'       "latest-tag prose"
     check_pattern "$f" 'version \(e\.g\.[[:space:]]*`"[0-9]+\.[0-9]+\.[0-9]+"`\)' "wire-version stability example"
+    check_pattern "$f" 'ghcr\.io/sligara7/dynograph-foundation:[0-9]+\.[0-9]+\.[0-9]+' "docker image tag"
 done
 
 if [ "$EXIT" -eq 0 ]; then

@@ -6,17 +6,15 @@ configurable storage backend, auth provider, and operational probes.
 
 ## Quick start
 
-Native:
+Published Docker image:
 
 ```bash
-cargo run --release --bin dynograph -- --config dynograph.example.toml
+docker run --rm -p 8080:8080 -v dynograph-data:/data \
+    -e DYNOGRAPH_STORAGE_ROOT=/data \
+    ghcr.io/sligara7/dynograph-foundation:0.5.0
 ```
 
-(Or omit `--config` to run with built-in defaults: in-memory storage,
-`127.0.0.1:8080`, no auth.)
-
-Docker (no published image — `docker-compose.yml` builds from this
-repo and persists `/data` in a named volume):
+Or build from this repo:
 
 ```bash
 docker compose up                                        # build + run
@@ -25,6 +23,15 @@ curl -X POST http://localhost:8080/v1/graphs \
     -H 'content-type: application/json' \
     -d '{"id":"g1","schema":{"name":"demo","version":1,"node_types":{},"edge_types":{}}}'
 ```
+
+Or native:
+
+```bash
+cargo run --release --bin dynograph -- --config dynograph.example.toml
+```
+
+(Or omit `--config` to run with built-in defaults: in-memory storage,
+`127.0.0.1:8080`, no auth.)
 
 ## Configuration
 

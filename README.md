@@ -29,19 +29,30 @@ incremental rebuilds are sub-second.
 
 ## Run the service
 
-The `dynograph` binary lives in `dynograph-service`. There is no
-published Docker image — build locally:
+The `dynograph` binary lives in `dynograph-service`. Three ways to
+run it:
 
 ```bash
+# pull published image
+docker run --rm -p 8080:8080 -v dynograph-data:/data \
+    -e DYNOGRAPH_STORAGE_ROOT=/data \
+    ghcr.io/sligara7/dynograph-foundation:0.5.0
+
 # native
 cargo run --release --bin dynograph -- --config dynograph.example.toml
 
-# docker (builds from this repo)
+# build via docker compose (from a checkout)
 docker compose up
+
 curl http://localhost:8080/health     # ok
 curl http://localhost:8080/ready      # ready
 curl http://localhost:8080/metrics    # Prometheus text
+curl http://localhost:8080/buildinfo  # JSON: version + git SHA
 ```
+
+Published images are tagged per release (`:0.5.0`) plus `:latest`.
+The publish workflow (`.github/workflows/release.yml`) runs on every
+`v*` git tag push.
 
 CLI: `dynograph [--config <path>]`. Env-var overrides:
 `DYNOGRAPH_BIND`, `DYNOGRAPH_STORAGE_ROOT`, `RUST_LOG`. Defaults:
