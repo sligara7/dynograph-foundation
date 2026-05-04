@@ -1,0 +1,19 @@
+# typos config. Allowlists are case-sensitive. Keep entries narrow —
+# the value is exactly the lookup key, and prefer renaming/rewording
+# in source over allowlisting whenever possible.
+#
+# Local usage: `cargo install typos-cli && typos`. CI runs the same.
+
+[default.extend-words]
+
+# Intentional typo in `dynograph-core::schema` test —
+# `unknown_node_type_in_edge_to_endpoint_named_in_error` constructs a
+# schema whose edge endpoint references an undeclared `Charcater`
+# (user-typo of `Character`) and asserts the parser surfaces that name
+# in its error. The misspelling is structural to the test.
+Charcater = "Charcater"
+
+# Byte-string literal in `dynograph-storage::keys::next_prefix` tests:
+# `next_prefix(b"abc") == Some(b"abd".to_vec())`. "abd" is the byte
+# sequence one greater than "abc", not a typo of "and" or "bad".
+abd = "abd"

@@ -74,6 +74,7 @@ pub struct EdgeTypeDef {
 /// An edge endpoint — single type, list of types, or wildcard.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum EdgeEndpoint {
     Single(String),
     Multiple(Vec<String>),
@@ -132,6 +133,7 @@ pub struct PropertyDef {
 /// Supported property types.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum PropertyType {
     #[default]
     String,

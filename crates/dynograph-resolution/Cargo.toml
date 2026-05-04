@@ -2,6 +2,8 @@
 name = "dynograph-resolution"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+publish.workspace = true
 
 [dependencies]
 dynograph-core = { path = "../dynograph-core" }

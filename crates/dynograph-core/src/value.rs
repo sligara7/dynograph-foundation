@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 /// A dynamically-typed property value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
+#[non_exhaustive]
 pub enum Value {
     Null,
     Bool(bool),

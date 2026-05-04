@@ -4,6 +4,57 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.0 — 2026-05-04
+
+Automation + safety release. Locks down the drift classes that bit
+the v0.3.x line, ships build provenance so deployments are
+self-identifying, and finishes the public-enum non-exhaustive pass
+v0.4.0 started.
+
+### Breaking
+
+- **`Value`, `PropertyType`, `EdgeEndpoint` are now `#[non_exhaustive]`.**
+  Same discipline v0.4.0 applied to `DynoError`. External callers
+  doing exhaustive `match` on any of these need to add a wildcard arm
+  (`_ => …`). Internal patterns within `dynograph-core` are unaffected.
+  Future variant additions to these enums no longer require a major
+  bump.
+
+### Added
+
+- **`GET /buildinfo`** — JSON build provenance:
+  ```json
+  {"version": "0.5.0", "git_sha": "abc1234", "git_dirty": false, "uptime_seconds": 142.391}
+  ```
+  Public endpoint, sibling of `/metrics`/`/health`/`/ready`.
+- **`dynograph_build_info` gauge** gains `git_sha` and `git_dirty`
+  labels. After v0.5.0, "what code is running on this host?" is one
+  curl: `curl /metrics | grep build_info` or `curl /buildinfo`.
+- **GHCR publish workflow** (`.github/workflows/release.yml`) runs on
+  every `v*` tag push, builds the Docker image, and pushes to
+  `ghcr.io/sligara7/dynograph-foundation:${tag}` + `:latest`. README
+  and `docs/service.md` now lead with the docker-pull example.
+- **CI: doc-version-drift guard** (`scripts/check-doc-versions.sh`).
+  Mechanically catches the v0.3.x drift class — Cargo.toml advances
+  but README/docs still advertise the previous tag.
+- **CI: `cargo-deny`** — security advisories (RUSTSEC), license
+  compliance, dup-version detection, unknown-registry detection.
+  Config in `deny.toml`.
+- **CI: `typos`** — spell-checks source/docs/comments.
+- **CI: `msrv-check`** job — builds against rust 1.94 (the declared
+  `rust-version`). Catches drift where we accidentally use a feature
+  stabilized after MSRV, or a transitive dep silently raises its own.
+
+### Changed
+
+- **CI stable toolchain pinned to 1.95.0** (was `@stable`, the moving
+  pointer). The `clippy::unnecessary-sort-by` expansion in 1.95 broke
+  CI on the v0.4.0 release branch with no source change. Bump
+  `RUST_TOOLCHAIN` env var deliberately when reviewing rustc release
+  notes.
+- **`SEMVER_BASELINE_REV` bumped v0.3.1 → v0.4.0.** v0.4.0 is now the
+  most-recent compilable, properly-versioned release tag.
+
 ## v0.4.0 — 2026-05-04
 
 Cleanup release. Bumps minor (in 0.x convention) to honor a breaking

@@ -29,19 +29,30 @@ incremental rebuilds are sub-second.
 
 ## Run the service
 
-The `dynograph` binary lives in `dynograph-service`. There is no
-published Docker image — build locally:
+The `dynograph` binary lives in `dynograph-service`. Three ways to
+run it:
 
 ```bash
+# pull published image
+docker run --rm -p 8080:8080 -v dynograph-data:/data \
+    -e DYNOGRAPH_STORAGE_ROOT=/data \
+    ghcr.io/sligara7/dynograph-foundation:0.5.0
+
 # native
 cargo run --release --bin dynograph -- --config dynograph.example.toml
 
-# docker (builds from this repo)
+# build via docker compose (from a checkout)
 docker compose up
+
 curl http://localhost:8080/health     # ok
 curl http://localhost:8080/ready      # ready
 curl http://localhost:8080/metrics    # Prometheus text
+curl http://localhost:8080/buildinfo  # JSON: version + git SHA
 ```
+
+Published images are tagged per release (`:0.5.0`) plus `:latest`.
+The publish workflow (`.github/workflows/release.yml`) runs on every
+`v*` git tag push.
 
 CLI: `dynograph [--config <path>]`. Env-var overrides:
 `DYNOGRAPH_BIND`, `DYNOGRAPH_STORAGE_ROOT`, `RUST_LOG`. Defaults:
@@ -50,12 +61,12 @@ in-memory storage, `127.0.0.1:8080`, `noauth`. See
 
 ## Use as a library
 
-Git dependency on the latest tag (`v0.4.0`):
+Git dependency on the latest tag (`v0.5.0`):
 
 ```toml
 [dependencies]
-dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.4.0" }
-dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.4.0" }
+dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.0" }
+dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.0" }
 ```
 
 ```rust
@@ -71,7 +82,7 @@ engine.create_node("graph1", "Person", "alice", properties)?;
 
 ```toml
 [dependencies]
-dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.4.0" }
+dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.0" }
 ```
 
 ```rust

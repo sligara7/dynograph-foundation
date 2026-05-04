@@ -4,6 +4,7 @@
 
 mod app;
 mod auth;
+mod buildinfo_response;
 mod config;
 mod edge_response;
 mod embedding_response;
@@ -18,6 +19,7 @@ mod similar_response;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};
+pub use buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA};
 pub use config::{AuthConfig, Config, ConfigError, ServerConfig, StorageConfig};
 pub use edge_response::EdgeResponse;
 pub use embedding_response::EmbeddingResponse;

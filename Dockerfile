@@ -19,12 +19,22 @@ RUN apt-get update \
 
 WORKDIR /build
 COPY . .
+
+# Git provenance for `dynograph-service`'s build.rs. `.dockerignore`
+# excludes `.git/` from the build context, so build.rs can't shell out
+# to `git`. Inject the values from the host (typically GitHub Actions
+# in release.yml) via build args. Local `docker build` without these
+# args produces an image that reports git_sha="unknown".
+ARG GIT_SHA=unknown
+ARG GIT_DIRTY=false
+ENV DYNOGRAPH_BUILD_GIT_SHA=${GIT_SHA}
+ENV DYNOGRAPH_BUILD_GIT_DIRTY=${GIT_DIRTY}
+
 # BuildKit cache mounts: the cargo registry + target dir persist
 # across iterative rebuilds on the same host, so a source-only
 # change skips the ~12-minute RocksDB recompile. The mount goes
 # away when the layer ends, so we copy the binary out to a stable
-# path the runtime stage can read. CI/cross-host rebuilds need
-# `cache-from`/`cache-to` (deferred to slice 13's publish workflow).
+# path the runtime stage can read.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
     cargo build --release --bin dynograph \

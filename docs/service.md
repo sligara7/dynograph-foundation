@@ -6,17 +6,15 @@ configurable storage backend, auth provider, and operational probes.
 
 ## Quick start
 
-Native:
+Published Docker image:
 
 ```bash
-cargo run --release --bin dynograph -- --config dynograph.example.toml
+docker run --rm -p 8080:8080 -v dynograph-data:/data \
+    -e DYNOGRAPH_STORAGE_ROOT=/data \
+    ghcr.io/sligara7/dynograph-foundation:0.5.0
 ```
 
-(Or omit `--config` to run with built-in defaults: in-memory storage,
-`127.0.0.1:8080`, no auth.)
-
-Docker (no published image — `docker-compose.yml` builds from this
-repo and persists `/data` in a named volume):
+Or build from this repo:
 
 ```bash
 docker compose up                                        # build + run
@@ -25,6 +23,15 @@ curl -X POST http://localhost:8080/v1/graphs \
     -H 'content-type: application/json' \
     -d '{"id":"g1","schema":{"name":"demo","version":1,"node_types":{},"edge_types":{}}}'
 ```
+
+Or native:
+
+```bash
+cargo run --release --bin dynograph -- --config dynograph.example.toml
+```
+
+(Or omit `--config` to run with built-in defaults: in-memory storage,
+`127.0.0.1:8080`, no auth.)
 
 ## Configuration
 
@@ -80,14 +87,40 @@ Exactly one of `secret` or `secret_env` must be set when
 | `/health` | public | process is up | n/a — never 503 from this route |
 | `/ready` | public | startup work complete (rehydrate done on `OnDisk`) | still rehydrating |
 | `/metrics` | public | Prometheus text-format metrics | n/a |
+| `/buildinfo` | public | JSON build provenance | n/a |
 
 `/health` and `/ready` together implement the standard k8s liveness
 + readiness pattern: `/health` failures restart the pod; `/ready`
 failures keep the pod out of the load-balancer rotation.
 
-`/metrics` is intentionally public — the assumption is that the
-network / ingress layer (k8s `NetworkPolicy`, Caddy IP allowlist)
-gates Prometheus scrape access. Same model as `/health`.
+`/metrics` and `/buildinfo` are intentionally public — the assumption
+is that the network / ingress layer (k8s `NetworkPolicy`, Caddy IP
+allowlist) gates scrape access when needed. Same model as `/health`.
+
+### `GET /buildinfo`
+
+```json
+{
+  "version": "0.5.0",
+  "git_sha": "abc1234",
+  "git_dirty": false,
+  "uptime_seconds": 142.391
+}
+```
+
+`version` is `CARGO_PKG_VERSION` at build time. `git_sha` is the
+short HEAD sha at build time, or `"unknown"` when the binary was
+built outside a git checkout (e.g. from a release tarball).
+`git_dirty` is `true` if the working tree had uncommitted changes
+when the binary was built — useful for catching "what did I deploy?"
+mistakes after a hot patch.
+
+The same triple is also surfaced as labels on the
+`dynograph_build_info` Prometheus gauge:
+
+```
+dynograph_build_info{version="0.5.0",git_sha="abc1234",git_dirty="false"} 1
+```
 
 ## BearerJwt
 

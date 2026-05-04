@@ -50,7 +50,7 @@ Prometheus text format (0.0.4). Series:
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `dynograph_build_info` | gauge | `version` | Always `1`; `version` is the `CARGO_PKG_VERSION`. |
+| `dynograph_build_info` | gauge | `version`, `git_sha`, `git_dirty` | Always `1`. `version` is `CARGO_PKG_VERSION`. `git_sha` is the short HEAD sha at build time (`"unknown"` if built outside a git checkout). `git_dirty` is `"true"`/`"false"` for whether the working tree was clean when the binary was built. Same triple is also exposed as JSON at `GET /buildinfo`. |
 | `dynograph_uptime_seconds` | gauge | — | Process uptime. |
 | `dynograph_http_requests_total` | counter | `method`, `path`, `status` | Per-route request count. `path` is the matched-route pattern (`/v1/graphs/{id}`), not the literal URL — cardinality is bounded by route count. |
 | `dynograph_http_request_duration_microseconds_sum` | counter | `method`, `path`, `status` | Cumulative latency. Pair with the counter via `rate(sum) / rate(count)` for avg latency. |
@@ -72,7 +72,7 @@ Create a graph.
 Returns `201 Created` + `SchemaResponse`:
 
 ```json
-{ "id": "my_graph", "wire_version": "0.4.0", "content_hash": "<sha256-hex>", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.0", "content_hash": "<sha256-hex>", "schema": {...} }
 ```
 
 Errors: `400` invalid id; `409` duplicate.
@@ -109,7 +109,7 @@ Full schema body — same shape codegen / drift-detection consumers
 read.
 
 ```json
-{ "id": "my_graph", "wire_version": "0.4.0", "content_hash": "...", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.0", "content_hash": "...", "schema": {...} }
 ```
 
 ### `PUT /v1/graphs/{id}/schema`
@@ -315,7 +315,7 @@ honest, just no data to search. Schema-unknown type is `400`.
 
 The `wire_version` field on `SchemaResponse` and
 `GraphMetadataResponse` is the foundation crate's `Cargo.toml`
-version (e.g. `"0.4.0"`). Consumers compare it against a
+version (e.g. `"0.5.0"`). Consumers compare it against a
 compiled-in constant; mismatch should fail-fast (the consumer was
 built against a different foundation version).
 

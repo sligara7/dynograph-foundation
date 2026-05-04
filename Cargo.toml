@@ -17,7 +17,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 # `is_multiple_of` (used in dynograph-storage::engine::decode_embedding)
 # stabilized in 1.94. Bumping in lockstep with the slice-11 Dockerfile
@@ -27,6 +27,14 @@ rust-version = "1.94"
 license = "MIT"
 authors = ["Anthony Sligar <sligara7@gmail.com>"]
 repository = "https://github.com/sligara7/dynograph-foundation"
+# Foundation crates aren't published to crates.io; consumers depend
+# on them via git tag. Setting publish = false at the workspace level
+# makes cargo-deny's `allow-wildcard-paths` apply to internal path-
+# deps, and prevents accidental `cargo publish` on a crate that hasn't
+# been audited for crates.io readiness (no explicit versions on
+# internal deps, etc.). Flip to `true` (or remove) before publishing
+# any crate; will require adding `version = "..."` to each path-dep.
+publish = false
 
 [profile.release]
 # Strip debuginfo (not symbols) — keeps function names in backtraces
