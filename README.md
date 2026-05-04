@@ -34,7 +34,7 @@ published Docker image — build locally:
 
 ```bash
 # native
-cargo run --release --bin dynograph -- --config dynograph.toml
+cargo run --release --bin dynograph -- --config dynograph.example.toml
 
 # docker (builds from this repo)
 docker compose up
