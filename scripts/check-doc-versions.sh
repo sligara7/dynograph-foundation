@@ -15,6 +15,11 @@
 # CHANGELOG.md is intentionally excluded — historical version
 # references there are correct.
 #
+# Brittleness: each pattern below is anchored on a literal phrase
+# ("tag = ", "wire_version", "latest tag", "ghcr.io/..."). Reworking
+# any of those phrases in the docs disables the corresponding check
+# silently — update both sides together.
+#
 # Local usage: `./scripts/check-doc-versions.sh`. CI runs the same.
 
 set -euo pipefail

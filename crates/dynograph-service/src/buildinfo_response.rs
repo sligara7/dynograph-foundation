@@ -6,6 +6,8 @@
 
 use serde::Serialize;
 
+use crate::schema_response::WIRE_VERSION;
+
 pub const GIT_SHA: &str = env!("DYNOGRAPH_GIT_SHA");
 pub const GIT_DIRTY: &str = env!("DYNOGRAPH_GIT_DIRTY");
 
@@ -20,7 +22,7 @@ pub struct BuildInfoResponse {
 impl BuildInfoResponse {
     pub fn new(uptime_seconds: f64) -> Self {
         Self {
-            version: env!("CARGO_PKG_VERSION"),
+            version: WIRE_VERSION,
             git_sha: GIT_SHA,
             git_dirty: GIT_DIRTY == "true",
             uptime_seconds,

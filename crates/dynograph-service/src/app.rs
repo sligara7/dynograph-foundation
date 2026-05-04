@@ -28,7 +28,7 @@ use crate::{
     node_response::{NodeListResponse, NodeResponse},
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
-    schema_response::SchemaResponse,
+    schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
 };
 
@@ -196,10 +196,7 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     let _ = writeln!(out, "# TYPE dynograph_build_info gauge");
     let _ = writeln!(
         out,
-        "dynograph_build_info{{version=\"{}\",git_sha=\"{}\",git_dirty=\"{}\"}} 1",
-        env!("CARGO_PKG_VERSION"),
-        GIT_SHA,
-        GIT_DIRTY,
+        "dynograph_build_info{{version=\"{WIRE_VERSION}\",git_sha=\"{GIT_SHA}\",git_dirty=\"{GIT_DIRTY}\"}} 1",
     );
 
     let _ = writeln!(
@@ -516,12 +513,10 @@ fn coerce_query_value(
         PropertyType::Bool => value.parse::<bool>().map(Value::Bool).map_err(|e| {
             RegistryError::BadRequest(format!("value {value:?} is not a valid bool: {e}"))
         }),
-        PropertyType::Float | PropertyType::ListString => Err(RegistryError::BadRequest(format!(
-            "filtering by {node_type}.{prop} is not supported (property type {:?} is not indexed)",
-            pd.prop_type
-        ))),
+        // Float / ListString aren't equality-indexed; future PropertyType
+        // variants without explicit coercion above also fall through here.
         _ => Err(RegistryError::BadRequest(format!(
-            "filtering by {node_type}.{prop} is not supported (property type {:?} has no coercion handler)",
+            "filtering by {node_type}.{prop} is not supported (property type {:?} is not indexed)",
             pd.prop_type
         ))),
     }

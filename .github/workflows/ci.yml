@@ -7,11 +7,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Pin the stable toolchain so a clippy-lint expansion in a new rustc
-  # release can't break CI overnight without a code change. Bump
-  # deliberately when reviewing the new rustc release notes; coordinate
-  # with the MSRV in Cargo.toml's `rust-version` field (currently 1.94)
-  # which is exercised by the msrv-check job below.
+  # Pinned so a clippy-lint expansion can't break CI without a code
+  # change. Bump deliberately; keep `rust-version` (MSRV) in Cargo.toml.
   RUST_TOOLCHAIN: "1.95.0"
 
 jobs:
