@@ -117,6 +117,9 @@ pub fn value_to_index_bytes(value: &Value) -> Option<Vec<u8>> {
         Value::Int(n) => Some(n.to_string().into_bytes()),
         Value::Bool(b) => Some(if *b { b"1".to_vec() } else { b"0".to_vec() }),
         Value::Null | Value::Float(_) | Value::List(_) | Value::Map(_) => None,
+        // Value is #[non_exhaustive]; new variants are non-indexable until
+        // someone adds explicit handling here.
+        _ => None,
     }
 }
 

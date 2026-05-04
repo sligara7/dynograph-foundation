@@ -50,12 +50,12 @@ in-memory storage, `127.0.0.1:8080`, `noauth`. See
 
 ## Use as a library
 
-Git dependency on the latest tag (`v0.4.0`):
+Git dependency on the latest tag (`v0.5.0`):
 
 ```toml
 [dependencies]
-dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.4.0" }
-dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.4.0" }
+dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.0" }
+dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.0" }
 ```
 
 ```rust
@@ -71,7 +71,7 @@ engine.create_node("graph1", "Person", "alice", properties)?;
 
 ```toml
 [dependencies]
-dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.4.0" }
+dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.0" }
 ```
 
 ```rust

@@ -507,6 +507,10 @@ fn coerce_query_value(
             "filtering by {node_type}.{prop} is not supported (property type {:?} is not indexed)",
             pd.prop_type
         ))),
+        _ => Err(RegistryError::BadRequest(format!(
+            "filtering by {node_type}.{prop} is not supported (property type {:?} has no coercion handler)",
+            pd.prop_type
+        ))),
     }
 }
 

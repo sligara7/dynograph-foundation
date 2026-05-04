@@ -272,6 +272,9 @@ fn endpoint_widened_or_same(old: &EdgeEndpoint, new: &EdgeEndpoint) -> bool {
     let old_types: Vec<&str> = match old {
         EdgeEndpoint::Single(t) => vec![t.as_str()],
         EdgeEndpoint::Multiple(ts) => ts.iter().map(String::as_str).collect(),
+        // Silent fallback would corrupt schema-evolution validation. Any new
+        // EdgeEndpoint variant must be classified explicitly.
+        _ => unreachable!("EdgeEndpoint variant added without updating endpoint_widened_or_same"),
     };
     for t in &old_types {
         if *t == "*" {
@@ -288,6 +291,7 @@ fn endpoint_is_wildcard(ep: &EdgeEndpoint) -> bool {
     match ep {
         EdgeEndpoint::Single(t) => t == "*",
         EdgeEndpoint::Multiple(ts) => ts.iter().any(|t| t == "*"),
+        _ => unreachable!("EdgeEndpoint variant added without updating endpoint_is_wildcard"),
     }
 }
 
