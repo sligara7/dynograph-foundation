@@ -4,6 +4,85 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.4.0 — 2026-05-04
+
+Cleanup release. Bumps minor (in 0.x convention) to honor a breaking
+change shipped under v0.3.2's patch tag.
+
+### Breaking
+
+- **`DynoError` is now `#[non_exhaustive]`.** Callers doing exhaustive
+  match on `DynoError` must add a wildcard arm (`_ => …`). This formalizes
+  the v0.3.2 addition of `DynoError::EdgeValidation` (which itself was a
+  breaking change shipped under a patch bump) and prevents future variant
+  additions from repeating the same semver mistake.
+
+### Fixed
+
+- **Workspace compiles again.** v0.3.2 added `DynoError::EdgeValidation`
+  but did not extend the exhaustive match in
+  `dynograph-service::registry::status_for_dyno_error`, so the v0.3.2
+  tag did not build. `EdgeValidation` is now mapped to `400 Bad Request`
+  alongside the other client-validation variants.
+- **`cargo fmt --check` passes again.** Edge-validation code in
+  `dynograph-core/src/schema.rs` shipped unformatted in v0.3.2.
+  Reformatted.
+- **CI `semver-checks` job actually runs.** The previous setup invoked
+  `cargo-semver-checks-action@v2` with no baseline configuration, which
+  defaults to crates.io — but no foundation crate is published there,
+  so the job failed on every PR with `not found in registry`. Replaced
+  with a manual `cargo semver-checks --baseline-rev v0.3.1` invocation
+  (v0.3.1 = most recent compilable tag).
+
+### Changed
+
+- **Workspace `version` advances `0.3.0` → `0.4.0`.** `Cargo.toml` was
+  frozen at `"0.3.0"` across v0.3.0/0.3.1/0.3.2, so binaries from any
+  of those tags self-reported `wire_version` as `"0.3.0"` regardless of
+  the commit. The `Cargo.toml` version is now the single source of
+  truth and tracks each release tag.
+- **README + `docs/*` rewritten** for accuracy. Removed references to a
+  published GHCR image (no such image exists; consumers build locally
+  from this repo's `Dockerfile`).
+
+## v0.3.2 — 2026-04-30
+
+### Fixed
+
+- **`engine::create_edge` now validates the property bag** against the
+  edge type's declared properties. Until v0.3.2, edge endpoint validation
+  ran but property validation was skipped — required properties could be
+  missing, enum values could fall outside the declared set, and the
+  handler still returned `200`. Surfaced by storyflow's `SUBTEXT_OF`
+  lifecycle probe returning HTTP 200 on `relationship_type="totally_made_up"`.
+- New `DynoError::EdgeValidation { edge_type, property, message }`
+  variant so edge-property failures name the offending edge instead of
+  overloading the node-scoped `Validation`.
+- `Schema::validate_edge_properties(edge_type, &mut HashMap)` mirrors
+  `validate_node`'s shape — applies declared defaults, enforces
+  required-presence, validates each value.
+
+> **Note:** the v0.3.2 tag does not compile in `dynograph-service`
+> (missing match arm; fixed in v0.3.3). Library-only consumers of
+> `dynograph-core` / `dynograph-storage` are unaffected.
+
+## v0.3.1 — 2026-04-27
+
+### Fixed
+
+- **`PropertyDef`, `NodeTypeDef`, `EdgeTypeDef` are now externally
+  constructible** via `..Default::default()` syntax. v0.3.0's
+  `#[non_exhaustive]` annotation prevented external struct-literal
+  construction; discoverable only on consumer attempt. Drops
+  `#[non_exhaustive]` from those three structs and adds `Default`
+  derives. `Schema` and `ResolutionConfig` keep `#[non_exhaustive]`
+  (they enter via deserialization, not struct literals).
+- `PropertyType` gains `#[derive(Default)]` with `String` as the
+  default (dominant type in real schemas). `EdgeEndpoint::default()`
+  returns `Single("*")`.
+- Strictly additive on the wire: serde shape unchanged,
+  `content_hash` unchanged.
+
 ## v0.3.0 — 2026-04-27
 
 The "embedded → service" release. Foundation gains an HTTP service,
@@ -24,7 +103,7 @@ index landed at the end of the cycle (TD-1/2/3).
 - **Sidecar embedding store** + **HNSW similarity search**
   exposed as `POST /v1/graphs/{id}/similar`. Embeddings cascade
   with their owning node on delete.
-- **Docker image** + release artifacts (`ghcr.io/sligara7/dynograph-foundation:0.3.0`).
+- **Docker image** built from the in-tree `Dockerfile` / `docker-compose.yml`. No published image; build locally.
 - **`docs/migration.md`** — embedded → service playbook.
 
 ### Changed (behavioral)

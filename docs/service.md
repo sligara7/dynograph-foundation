@@ -4,7 +4,19 @@ The `dynograph` binary is the deployable form of `dynograph-service`.
 One process serves all `/v1/*` REST endpoints over HTTP, with
 configurable storage backend, auth provider, and operational probes.
 
-## Quick start (Docker)
+## Quick start
+
+Native:
+
+```bash
+cargo run --release --bin dynograph -- --config dynograph.example.toml
+```
+
+(Or omit `--config` to run with built-in defaults: in-memory storage,
+`127.0.0.1:8080`, no auth.)
+
+Docker (no published image — `docker-compose.yml` builds from this
+repo and persists `/data` in a named volume):
 
 ```bash
 docker compose up                                        # build + run
@@ -12,15 +24,6 @@ curl http://localhost:8080/health                        # → "ok"
 curl -X POST http://localhost:8080/v1/graphs \
     -H 'content-type: application/json' \
     -d '{"id":"g1","schema":{"name":"demo","version":1,"node_types":{},"edge_types":{}}}'
-```
-
-`docker-compose.yml` builds locally + persists `/data` in a named
-volume. For published images, use:
-
-```bash
-docker run --rm -p 8080:8080 -v dynograph-data:/data \
-    -e DYNOGRAPH_STORAGE_ROOT=/data \
-    ghcr.io/sligara7/dynograph-foundation:0.3.0
 ```
 
 ## Configuration
@@ -103,7 +106,7 @@ DYNOGRAPH_JWT_SECRET=$(openssl rand -hex 32) dynograph --config dynograph.toml
 Tokens are HS256, must carry `sub` (becomes the request's
 `Identity`) and `exp` (mandatory; `jsonwebtoken`'s default 60s
 clock-skew leeway applies). `iss` / `aud` are enforced when set.
-JWKS / asymmetric algorithms (RS256, ES256) are not in 0.3.0 —
+JWKS / asymmetric algorithms (RS256, ES256) are not implemented —
 they need an async key fetcher and an HTTP-client dep that no
 consumer has asked for yet. When one does, layer a separate
 `AuthProvider` impl.
