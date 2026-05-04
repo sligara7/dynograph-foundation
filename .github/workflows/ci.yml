@@ -43,6 +43,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
 
+  cargo-deny:
+    # Supply-chain hygiene: security advisories (RUSTSEC), license
+    # compliance, duplicate-version detection. See deny.toml.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  typos:
+    # Catches typos in source, docs, comments. Uses crate-ci/typos
+    # defaults; if a project-specific term gets flagged, allowlist it
+    # via _typos.toml at repo root.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@master
+
   semver-checks:
     # PRs and direct pushes to main. Gating on PRs alone lets a
     # bypass-PR push silently break the public surface.
