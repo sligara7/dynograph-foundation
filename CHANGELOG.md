@@ -4,9 +4,18 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## v0.3.3 — 2026-05-04
+## v0.4.0 — 2026-05-04
 
-Cleanup release.
+Cleanup release. Bumps minor (in 0.x convention) to honor a breaking
+change shipped under v0.3.2's patch tag.
+
+### Breaking
+
+- **`DynoError` is now `#[non_exhaustive]`.** Callers doing exhaustive
+  match on `DynoError` must add a wildcard arm (`_ => …`). This formalizes
+  the v0.3.2 addition of `DynoError::EdgeValidation` (which itself was a
+  breaking change shipped under a patch bump) and prevents future variant
+  additions from repeating the same semver mistake.
 
 ### Fixed
 
@@ -18,13 +27,20 @@ Cleanup release.
 - **`cargo fmt --check` passes again.** Edge-validation code in
   `dynograph-core/src/schema.rs` shipped unformatted in v0.3.2.
   Reformatted.
+- **CI `semver-checks` job actually runs.** The previous setup invoked
+  `cargo-semver-checks-action@v2` with no baseline configuration, which
+  defaults to crates.io — but no foundation crate is published there,
+  so the job failed on every PR with `not found in registry`. Replaced
+  with a manual `cargo semver-checks --baseline-rev v0.3.1` invocation
+  (v0.3.1 = most recent compilable tag).
 
 ### Changed
 
-- **Workspace `version` advances `0.3.0` → `0.3.3`.** `Cargo.toml` was
+- **Workspace `version` advances `0.3.0` → `0.4.0`.** `Cargo.toml` was
   frozen at `"0.3.0"` across v0.3.0/0.3.1/0.3.2, so binaries from any
   of those tags self-reported `wire_version` as `"0.3.0"` regardless of
-  the commit. The `Cargo.toml` version is now bumped per release.
+  the commit. The `Cargo.toml` version is now the single source of
+  truth and tracks each release tag.
 - **README + `docs/*` rewritten** for accuracy. Removed references to a
   published GHCR image (no such image exists; consumers build locally
   from this repo's `Dockerfile`).

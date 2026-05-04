@@ -23,9 +23,24 @@ jobs:
   semver-checks:
     # PRs and direct pushes to main. Gating on PRs alone lets a
     # bypass-PR push silently break the public surface.
+    #
+    # Foundation crates are not published to crates.io, so the default
+    # crates.io baseline doesn't work. We compare against the most
+    # recent compilable git tag instead. Bump SEMVER_BASELINE_REV after
+    # each release that produces a green build.
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    env:
+      SEMVER_BASELINE_REV: v0.3.1
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Need full history so cargo-semver-checks can check out the
+          # baseline rev's tree.
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+      - name: cargo semver-checks
+        run: cargo semver-checks --workspace --baseline-rev "$SEMVER_BASELINE_REV"

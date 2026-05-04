@@ -130,6 +130,9 @@ fn status_for_dyno_error(e: &DynoError) -> StatusCode {
         | DynoError::Query(_)
         | DynoError::Resolution(_)
         | DynoError::Extraction(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        // DynoError is #[non_exhaustive]; fall back to 500 for any future
+        // variant until it gets an explicit classification above.
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 

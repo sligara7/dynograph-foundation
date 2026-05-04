@@ -9,8 +9,11 @@ configurable storage backend, auth provider, and operational probes.
 Native:
 
 ```bash
-cargo run --release --bin dynograph -- --config dynograph.toml
+cargo run --release --bin dynograph -- --config dynograph.example.toml
 ```
+
+(Or omit `--config` to run with built-in defaults: in-memory storage,
+`127.0.0.1:8080`, no auth.)
 
 Docker (no published image — `docker-compose.yml` builds from this
 repo and persists `/data` in a named volume):
