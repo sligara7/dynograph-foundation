@@ -523,12 +523,10 @@ impl Schema {
             let Some(prop_def) = edge_def.properties.get(prop_name) else {
                 continue; // Extra properties are allowed (schema is additive)
             };
-            check_property_value(prop_def, value).map_err(|message| {
-                DynoError::EdgeValidation {
-                    edge_type: edge_type.to_string(),
-                    property: prop_name.to_string(),
-                    message,
-                }
+            check_property_value(prop_def, value).map_err(|message| DynoError::EdgeValidation {
+                edge_type: edge_type.to_string(),
+                property: prop_name.to_string(),
+                message,
             })?;
         }
 
@@ -1289,29 +1287,45 @@ schema:
 
         // Happy path: full and valid.
         let mut ok = HashMap::new();
-        ok.insert("relationship_type".into(), Value::from("songwriting_origin"));
+        ok.insert(
+            "relationship_type".into(),
+            Value::from("songwriting_origin"),
+        );
         ok.insert("status".into(), Value::from("proposed"));
         ok.insert("rationale".into(), Value::from("rationale text"));
-        assert!(schema.validate_edge_properties("SUBTEXT_OF", &mut ok).is_ok());
+        assert!(
+            schema
+                .validate_edge_properties("SUBTEXT_OF", &mut ok)
+                .is_ok()
+        );
 
         // Missing required.
         let mut missing = HashMap::new();
-        missing.insert("relationship_type".into(), Value::from("songwriting_origin"));
+        missing.insert(
+            "relationship_type".into(),
+            Value::from("songwriting_origin"),
+        );
         let r = schema.validate_edge_properties("SUBTEXT_OF", &mut missing);
-        assert!(matches!(
-            r,
-            Err(DynoError::EdgeValidation { ref property, .. }) if property == "status"
-        ), "expected EdgeValidation on missing required `status`, got: {r:?}");
+        assert!(
+            matches!(
+                r,
+                Err(DynoError::EdgeValidation { ref property, .. }) if property == "status"
+            ),
+            "expected EdgeValidation on missing required `status`, got: {r:?}"
+        );
 
         // Invalid enum value.
         let mut bad_enum = HashMap::new();
         bad_enum.insert("relationship_type".into(), Value::from("totally_made_up"));
         bad_enum.insert("status".into(), Value::from("proposed"));
         let r = schema.validate_edge_properties("SUBTEXT_OF", &mut bad_enum);
-        assert!(matches!(
-            r,
-            Err(DynoError::EdgeValidation { ref property, .. }) if property == "relationship_type"
-        ), "expected EdgeValidation on invalid enum, got: {r:?}");
+        assert!(
+            matches!(
+                r,
+                Err(DynoError::EdgeValidation { ref property, .. }) if property == "relationship_type"
+            ),
+            "expected EdgeValidation on invalid enum, got: {r:?}"
+        );
 
         // Unknown edge type.
         let mut empty = HashMap::new();
@@ -1346,7 +1360,10 @@ schema:
         let mut ok = HashMap::new();
         ok.insert("weight".into(), Value::Float(0.5));
         ok.insert("count".into(), Value::Int(3));
-        ok.insert("tags".into(), Value::List(vec![Value::from("a"), Value::from("b")]));
+        ok.insert(
+            "tags".into(),
+            Value::List(vec![Value::from("a"), Value::from("b")]),
+        );
         ok.insert("required_label".into(), Value::from("ok"));
         assert!(schema.validate_edge_properties("REL", &mut ok).is_ok());
 
@@ -1355,18 +1372,24 @@ schema:
         bad_type.insert("weight".into(), Value::Int(1));
         bad_type.insert("required_label".into(), Value::from("x"));
         let r = schema.validate_edge_properties("REL", &mut bad_type);
-        assert!(matches!(
-            r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "weight"
-        ), "expected EdgeValidation on type mismatch, got: {r:?}");
+        assert!(
+            matches!(
+                r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "weight"
+            ),
+            "expected EdgeValidation on type mismatch, got: {r:?}"
+        );
 
         // Range violation.
         let mut bad_range = HashMap::new();
         bad_range.insert("weight".into(), Value::Float(2.5));
         bad_range.insert("required_label".into(), Value::from("x"));
         let r = schema.validate_edge_properties("REL", &mut bad_range);
-        assert!(matches!(
-            r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "weight"
-        ), "expected EdgeValidation on range violation, got: {r:?}");
+        assert!(
+            matches!(
+                r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "weight"
+            ),
+            "expected EdgeValidation on range violation, got: {r:?}"
+        );
 
         // List element type — non-string in list:string.
         let mut bad_list = HashMap::new();
@@ -1376,23 +1399,33 @@ schema:
         );
         bad_list.insert("required_label".into(), Value::from("x"));
         let r = schema.validate_edge_properties("REL", &mut bad_list);
-        assert!(matches!(
-            r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "tags"
-        ), "expected EdgeValidation on list element type, got: {r:?}");
+        assert!(
+            matches!(
+                r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "tags"
+            ),
+            "expected EdgeValidation on list element type, got: {r:?}"
+        );
 
         // Null on a nullable property is allowed; null on a required
         // non-nullable property is rejected.
         let mut nullable_ok = HashMap::new();
         nullable_ok.insert("comment".into(), Value::Null);
         nullable_ok.insert("required_label".into(), Value::from("x"));
-        assert!(schema.validate_edge_properties("REL", &mut nullable_ok).is_ok());
+        assert!(
+            schema
+                .validate_edge_properties("REL", &mut nullable_ok)
+                .is_ok()
+        );
 
         let mut null_required = HashMap::new();
         null_required.insert("required_label".into(), Value::Null);
         let r = schema.validate_edge_properties("REL", &mut null_required);
-        assert!(matches!(
-            r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "required_label"
-        ), "expected EdgeValidation on null in required non-nullable, got: {r:?}");
+        assert!(
+            matches!(
+                r, Err(DynoError::EdgeValidation { ref property, .. }) if property == "required_label"
+            ),
+            "expected EdgeValidation on null in required non-nullable, got: {r:?}"
+        );
 
         // Extra property (not declared) is allowed — schema is additive.
         let mut extra = HashMap::new();

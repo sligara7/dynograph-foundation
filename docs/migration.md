@@ -10,7 +10,7 @@ but the pattern generalizes.
 
 | Before | After |
 |---|---|
-| `cargo` dep on `dynograph-storage = "0.2.x"` | `cargo` dep on `dynograph-client = "0.3"` (Rust consumers), or any HTTP client (other languages) |
+| `cargo` git dep on `dynograph-storage` (v0.2 tag) | `cargo` git dep on `dynograph-client` (v0.3 tag) for Rust consumers, or any HTTP client (other languages) |
 | `StorageEngine::new_rocksdb(schema, path)` in-process | `dynograph` binary running as a sidecar/service |
 | Direct method calls (`engine.create_node(…)`) | HTTP requests (`POST /v1/graphs/{id}/nodes`) |
 | Single-graph state per process | Multi-graph `GraphRegistry`, addressed by `id` in URLs |
@@ -22,8 +22,8 @@ but the pattern generalizes.
 
 - The storage layer (`dynograph-storage`) is unchanged. The
   embedded path remains supported for short-lived workers, tests,
-  and dev. Foundation v0.3.0 is strictly additive — embedded
-  consumers can stay on `dynograph-storage` indefinitely.
+  and dev. Foundation v0.3 is strictly additive over v0.2 —
+  embedded consumers can stay on `dynograph-storage` indefinitely.
 - The `Schema` / `Value` / `DynoError` types from `dynograph-core`
   are reused on both sides of the migration.
 - `wire_version` + `content_hash` drift detection contract is
@@ -39,11 +39,14 @@ Add `dynograph` to docker-compose pointing at a fresh RocksDB root
 (or use the in-memory mode for early integration). Initially it
 serves no traffic — you're just verifying it boots.
 
+There is no published image; build locally from a checkout of this
+repo:
+
 ```yaml
-# docker-compose.yml addition
+# docker-compose.yml addition (build context = local foundation checkout)
 services:
   dynograph:
-    image: ghcr.io/sligara7/dynograph-foundation:0.3.0
+    build: ../dynograph-foundation
     ports: [ "8080:8080" ]
     volumes: [ "dynograph-data:/data" ]
     environment:
@@ -126,8 +129,8 @@ worse than forcing the explicit destroy + recreate.
 
 ### 6. Auth
 
-Foundation v0.3.0 provides authentication (`NoAuth` or
-`BearerJwt`) but never authorization. A typical consumer layout:
+Foundation provides authentication (`NoAuth` or `BearerJwt`) but
+never authorization. A typical consumer layout:
 
 - `[auth].provider = "bearer_jwt"` on the foundation service.
 - Consumers run their own gateway (Caddy, an nginx wrapper, or a

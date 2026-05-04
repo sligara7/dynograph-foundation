@@ -119,6 +119,7 @@ pub fn validate_graph_id(id: &str) -> Result<(), RegistryError> {
 fn status_for_dyno_error(e: &DynoError) -> StatusCode {
     match e {
         DynoError::Validation { .. }
+        | DynoError::EdgeValidation { .. }
         | DynoError::InvalidEdge { .. }
         | DynoError::UnknownNodeType(_)
         | DynoError::UnknownEdgeType(_)
