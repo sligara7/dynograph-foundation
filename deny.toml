@@ -45,8 +45,15 @@ exceptions = []
 [bans]
 # `wildcards = "deny"` blocks `version = "*"` deps in Cargo.toml —
 # they pin to nothing and cause reproducibility drift. Ours don't use
-# them today; this prevents future regressions.
+# them for crates.io deps; this prevents future regressions.
 wildcards = "deny"
+# Internal `{ path = "..." }` workspace deps carry no `version =` and
+# are treated by cargo as wildcard versions. The path takes precedence,
+# so the wildcard is harmless for in-tree builds. Revisit when/if any
+# foundation crate ships to crates.io — at that point each internal
+# path-dep needs an explicit `version = "..."` to be safely consumable
+# without the path override.
+allow-wildcard-paths = true
 # `multiple-versions = "warn"` lets us see when two versions of the
 # same crate ship in the binary (cause: a transitive dep specifies an
 # incompatible range). Warn rather than deny — sometimes unavoidable
