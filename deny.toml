@@ -38,6 +38,11 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Zlib",
+    # webpki-roots ships under CDLA-Permissive-2.0 (Linux Foundation
+    # Community Data License — commercial use, modification, and
+    # redistribution explicitly permitted). Pulled in transitively via
+    # reqwest's rustls-tls feature for hyper-rustls TLS roots.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 exceptions = []
