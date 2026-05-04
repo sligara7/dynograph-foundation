@@ -43,6 +43,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace
 
+  doc-version-drift:
+    # Asserts hardcoded version strings in README + docs match
+    # Cargo.toml's workspace version. Catches the v0.3.x drift class
+    # mechanically — bump Cargo.toml without bumping the docs and CI
+    # rejects the PR.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-doc-versions.sh
+
   cargo-deny:
     # Supply-chain hygiene: security advisories (RUSTSEC), license
     # compliance, duplicate-version detection. See deny.toml.
