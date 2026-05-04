@@ -90,7 +90,7 @@ impl EntityResolver {
             .collect();
 
         // Sort by fuzzy score descending
-        candidates.sort_by(|a, b| b.fuzzy_score.cmp(&a.fuzzy_score));
+        candidates.sort_by_key(|c| std::cmp::Reverse(c.fuzzy_score));
 
         // Check top candidate
         if let Some(best) = candidates.first() {
