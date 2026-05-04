@@ -493,7 +493,7 @@ async fn replace_node_on_missing_node_returns_404_with_node_attribution() {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let body = std::str::from_utf8(&bytes).unwrap();
     // The graph exists; the node is missing. The body must say so —
-    // mis-attributing this as "graph not found" would mask the real
+    // misattributing this as "graph not found" would mask the real
     // cause and send debuggers chasing the wrong thing.
     assert!(body.contains("node not found"), "body was: {body}");
     assert!(body.contains("Item/missing"), "body was: {body}");
@@ -1044,7 +1044,7 @@ async fn list_nodes_unknown_property_returns_400() {
 }
 
 #[tokio::test]
-async fn list_nodes_int_value_unparseable_returns_400() {
+async fn list_nodes_int_value_unparsable_returns_400() {
     let app = build_app_with_indexed_graph().await;
     let (status, _) = get_node_list(&app, "type=Item&prop=level&value=notanint").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
