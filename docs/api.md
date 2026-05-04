@@ -50,7 +50,7 @@ Prometheus text format (0.0.4). Series:
 
 | Metric | Type | Labels | Description |
 |---|---|---|---|
-| `dynograph_build_info` | gauge | `version` | Always `1`; `version` is the `CARGO_PKG_VERSION`. |
+| `dynograph_build_info` | gauge | `version`, `git_sha`, `git_dirty` | Always `1`. `version` is `CARGO_PKG_VERSION`. `git_sha` is the short HEAD sha at build time (`"unknown"` if built outside a git checkout). `git_dirty` is `"true"`/`"false"` for whether the working tree was clean when the binary was built. Same triple is also exposed as JSON at `GET /buildinfo`. |
 | `dynograph_uptime_seconds` | gauge | — | Process uptime. |
 | `dynograph_http_requests_total` | counter | `method`, `path`, `status` | Per-route request count. `path` is the matched-route pattern (`/v1/graphs/{id}`), not the literal URL — cardinality is bounded by route count. |
 | `dynograph_http_request_duration_microseconds_sum` | counter | `method`, `path`, `status` | Cumulative latency. Pair with the counter via `rate(sum) / rate(count)` for avg latency. |

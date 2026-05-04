@@ -20,6 +20,7 @@ use dynograph_vector::HnswIndex;
 
 use crate::{
     auth::{AuthProvider, NoAuth},
+    buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     edge_response::EdgeResponse,
     embedding_response::EmbeddingResponse,
     metadata_response::GraphMetadataResponse,
@@ -120,6 +121,7 @@ pub fn app(state: AppState) -> Router {
 
     Router::new()
         .route("/metrics", get(metrics_handler))
+        .route("/buildinfo", get(buildinfo_handler))
         .merge(observed_public)
         .with_state(state)
 }
@@ -169,6 +171,15 @@ async fn metrics_middleware(State(state): State<AppState>, req: Request, next: N
     response
 }
 
+/// JSON build provenance: `version` + `git_sha` + `git_dirty` +
+/// `uptime_seconds`. Same provenance triple the `dynograph_build_info`
+/// gauge surfaces in `/metrics`, JSON-shaped for callers that don't
+/// want to parse Prometheus text format. Public; same auth/middleware
+/// posture as `/metrics`.
+async fn buildinfo_handler(State(state): State<AppState>) -> impl IntoResponse {
+    Json(BuildInfoResponse::new(state.metrics.uptime_secs()))
+}
+
 /// Prometheus text-format scrape endpoint. Public — sit alongside
 /// `/health` and `/ready`; the assumption is that the network/
 /// ingress layer gates Prometheus scrape access to the metrics
@@ -185,8 +196,10 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     let _ = writeln!(out, "# TYPE dynograph_build_info gauge");
     let _ = writeln!(
         out,
-        "dynograph_build_info{{version=\"{}\"}} 1",
-        env!("CARGO_PKG_VERSION")
+        "dynograph_build_info{{version=\"{}\",git_sha=\"{}\",git_dirty=\"{}\"}} 1",
+        env!("CARGO_PKG_VERSION"),
+        GIT_SHA,
+        GIT_DIRTY,
     );
 
     let _ = writeln!(
