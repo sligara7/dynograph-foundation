@@ -7,18 +7,41 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Pin the stable toolchain so a clippy-lint expansion in a new rustc
+  # release can't break CI overnight without a code change. Bump
+  # deliberately when reviewing the new rustc release notes; coordinate
+  # with the MSRV in Cargo.toml's `rust-version` field (currently 1.94)
+  # which is exercised by the msrv-check job below.
+  RUST_TOOLCHAIN: "1.95.0"
 
 jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  msrv-check:
+    # Builds against the declared MSRV (Cargo.toml's `rust-version`).
+    # Catches "we accidentally used a feature stabilized after MSRV"
+    # and "a transitive dep silently raised its MSRV". Build only —
+    # tests and clippy may pull in dev-deps with higher MSRVs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.94.0"
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace
 
   semver-checks:
     # PRs and direct pushes to main. Gating on PRs alone lets a
@@ -31,14 +54,16 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     env:
-      SEMVER_BASELINE_REV: v0.3.1
+      SEMVER_BASELINE_REV: v0.4.0
     steps:
       - uses: actions/checkout@v4
         with:
           # Need full history so cargo-semver-checks can check out the
           # baseline rev's tree.
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
