@@ -72,7 +72,7 @@ Create a graph.
 Returns `201 Created` + `SchemaResponse`:
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.2", "content_hash": "<sha256-hex>", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.3", "content_hash": "<sha256-hex>", "schema": {...} }
 ```
 
 Errors: `400` invalid id; `409` duplicate.
@@ -109,7 +109,7 @@ Full schema body — same shape codegen / drift-detection consumers
 read.
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.2", "content_hash": "...", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.3", "content_hash": "...", "schema": {...} }
 ```
 
 ### `PUT /v1/graphs/{id}/schema`
@@ -390,6 +390,114 @@ and orchestrating them at the HTTP layer would re-implement the
 threshold logic. Extend the resolver crate properly if a real
 workload needs them.
 
+## Edges (fan-out collection)
+
+### `POST /v1/graphs/{id}/edges:collect`
+
+Walk a typed source set + collect their outgoing edges of selected
+types in one call. Replaces the per-node `outgoing_edges`
+round-trip pattern that consumers (e.g. storyflow's
+`collect_story_edges`) use to project a graph slice for relationship
+listings, hierarchy queries, and algorithm input. Read-only — single
+`with_engine_read` lock for the whole scan.
+
+```json
+{
+    "source": {
+        "type": "*" | "Character" | ["Character", "Event"],
+        "filter": {"prop": "story_id", "value": "X"}
+    },
+    "edge_types": ["MENTIONS", "EXPLORES"],
+    "format": "edges" | "adjacency",
+    "resolve_target": false,
+    "limit": 200
+}
+```
+
+`source.type` is required and accepts a single name, an array of
+names, or `"*"` (every type in the schema). `source.filter` is
+optional; if present, `prop` must be declared `indexed: true` on
+every covered source type. `edge_types` is required and non-empty;
+each entry must be in the schema. `limit` is required, in
+`1..=10_000`. `format` and `resolve_target` are optional; defaults
+shown.
+
+**Returns 200, shape `{edges: [...], truncated: bool}` for `format = "edges"`:**
+
+```json
+{
+    "edges": [
+        {
+            "edge_type": "MENTIONS",
+            "from_type": "Character",
+            "from_id": "char-1",
+            "to_id":   "char-2",
+            "properties": {"weight": 0.5},
+            "target": {                              // present iff resolve_target=true
+                "node_type": "Character",
+                "node_id": "char-2",
+                "properties": {"name": "Bob", ...}
+            }
+        }
+    ],
+    "truncated": false
+}
+```
+
+**Returns 200, shape `{adjacency: {from_id: [...]}, truncated: bool}` for `format = "adjacency"`:**
+
+```json
+{
+    "adjacency": {
+        "char-1": [
+            {"edge_type": "MENTIONS", "to_id": "char-2", "properties": {...}}
+        ]
+    },
+    "truncated": false
+}
+```
+
+Adjacency entries omit `from_id` (it's the key) and `from_type`
+(uniform across a source-typed scan). Use this format for client-
+side projections (pagerank/louvain/shortest-path).
+
+`truncated` is `true` when the scan stopped early because `limit`
+was reached. Iteration order is unspecified — depends on schema
+HashMap iter order across types and storage scan order within each
+type. Algorithm consumers don't care about order; "show me a few
+sample edges" callers shouldn't either with a `limit` cap.
+
+**400 on any of these (pre-flight, no scans on failure):**
+
+- `edge_types` empty
+- `edge_types` references an unknown edge type
+- `source.type` references an unknown node type (single, list, or
+  post-wildcard expansion)
+- `limit` outside `1..=10_000`
+- `source.filter.prop` not declared as `indexed: true` on every
+  covered source type
+
+**Two cost notes worth knowing:**
+
+- **No edge-type-prefix scan in storage.** Adjacency CFs are keyed
+  `(graph_id, node_id, edge_type, peer_id)` — by node, not edge
+  type. Wildcard `source.type` without filter walks O(N) prefix
+  scans (one per node). Filter-narrowed sources use the indexed
+  fast scan. A future CF
+  `(graph_id, edge_type, from_id, to_id)` could enable true
+  edge-type scans; out of scope until profiling shows a real
+  bottleneck.
+- **`StoredEdge` carries no `to_type`.** With `resolve_target=true`,
+  foundation discovers each target's type by walking the schema's
+  `EdgeTypeDef.to` candidates (`Single` → 1 lookup; `Multiple` →
+  try each; `Wildcard` → try every node type). Bounded by the
+  schema; wildcard endpoints pay full per-edge fanout.
+
+When the candidate walk finds nothing for a given edge,
+`target` is omitted from the response — the edge is an orphan
+(referential-integrity gap), and absence is the caller-visible
+signal.
+
 ## Embeddings (sidecar)
 
 Embeddings are managed via dedicated routes rather than riding on
@@ -460,7 +568,7 @@ honest, just no data to search. Schema-unknown type is `400`.
 
 The `wire_version` field on `SchemaResponse` and
 `GraphMetadataResponse` is the foundation crate's `Cargo.toml`
-version (e.g. `"0.5.2"`). Consumers compare it against a
+version (e.g. `"0.5.3"`). Consumers compare it against a
 compiled-in constant; mismatch should fail-fast (the consumer was
 built against a different foundation version).
 

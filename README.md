@@ -36,7 +36,7 @@ run it:
 # pull published image
 docker run --rm -p 8080:8080 -v dynograph-data:/data \
     -e DYNOGRAPH_STORAGE_ROOT=/data \
-    ghcr.io/sligara7/dynograph-foundation:0.5.2
+    ghcr.io/sligara7/dynograph-foundation:0.5.3
 
 # native
 cargo run --release --bin dynograph -- --config dynograph.example.toml
@@ -50,7 +50,7 @@ curl http://localhost:8080/metrics    # Prometheus text
 curl http://localhost:8080/buildinfo  # JSON: version + git SHA
 ```
 
-Published images are tagged per release (`:0.5.2`) plus `:latest`.
+Published images are tagged per release (`:0.5.3`) plus `:latest`.
 The publish workflow (`.github/workflows/release.yml`) runs on every
 `v*` git tag push.
 
@@ -61,12 +61,12 @@ in-memory storage, `127.0.0.1:8080`, `noauth`. See
 
 ## Use as a library
 
-Git dependency on the latest tag (`v0.5.2`):
+Git dependency on the latest tag (`v0.5.3`):
 
 ```toml
 [dependencies]
-dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.2" }
-dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.2" }
+dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.3" }
+dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.3" }
 ```
 
 ```rust
@@ -82,7 +82,7 @@ engine.create_node("graph1", "Person", "alice", properties)?;
 
 ```toml
 [dependencies]
-dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.2" }
+dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.5.3" }
 ```
 
 ```rust
