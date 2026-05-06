@@ -14,6 +14,7 @@ mod metrics_state;
 mod node_response;
 mod readiness;
 mod registry;
+mod resolve_or_create;
 mod schema_evolution;
 mod schema_response;
 mod similar_response;

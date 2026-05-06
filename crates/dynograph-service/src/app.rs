@@ -29,6 +29,7 @@ use crate::{
     node_response::{NodeListResponse, NodeResponse},
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
+    resolve_or_create::{ResolveOrCreateRequest, run as run_resolve_or_create},
     schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
 };
@@ -100,6 +101,7 @@ pub fn app(state: AppState) -> Router {
             get(get_edge).patch(merge_edge).delete(delete_edge),
         )
         .route("/v1/graphs/{id}/batch", post(batch))
+        .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -736,6 +738,22 @@ async fn batch(
         Outcome::OpFailed(err) => Ok((StatusCode::BAD_REQUEST, Json(err)).into_response()),
         Outcome::CommitFailed(e) => Err(RegistryError::Storage(e)),
     }
+}
+
+/// Fuzzy/vector entity resolution with create-on-miss. See
+/// `crate::resolve_or_create` for wire shape, validation order, and
+/// atomicity model. Whole call runs under one `with_state_write`
+/// lock so candidate scan + resolve + (create + set_embedding +
+/// HNSW insert) compose atomically.
+async fn resolve_or_create(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ResolveOrCreateRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_state_write(|engine, indexes| run_resolve_or_create(engine, indexes, &id, req))?;
+    Ok(Json(response).into_response())
 }
 
 #[derive(Debug, Deserialize)]

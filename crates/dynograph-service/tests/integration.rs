@@ -2594,3 +2594,405 @@ async fn batch_on_unknown_graph_returns_404() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+// =========================================================================
+// /v1/graphs/{id}/resolve-or-create — fuzzy/vector resolution + create
+// =========================================================================
+
+/// Schema with a resolvable Character type:
+/// - `name`: required string (the resolution query lives here)
+/// - `story_id`: indexed string (so `scope: {prop: story_id, value: X}` works)
+/// - `resolution` config with `fuzzy_then_vector` strategy + audit-cited
+///   thresholds (95 auto-merge / 70 fuzzy floor / 0.85 vector cutoff)
+fn character_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "demo",
+            "version": 1,
+            "node_types": {
+                "Character": {
+                    "properties": {
+                        "name":     {"type": "string", "required": true},
+                        "story_id": {"type": "string", "indexed": true}
+                    },
+                    "resolution": {
+                        "strategy": "fuzzy_then_vector",
+                        "fuzzy_threshold": 70,
+                        "vector_threshold": 0.85,
+                        // High auto-merge so the fuzzy-zone tests have
+                        // a wide [70, 99) window without near-misses
+                        // bypassing into auto_merge. Tests behavior of
+                        // the route, not realistic threshold tuning.
+                        "auto_merge_threshold": 99
+                    }
+                },
+                // No `resolution` block — used for the "type without
+                // resolution config" rejection test.
+                "Tag": {
+                    "properties": {
+                        "name": {"type": "string", "required": true}
+                    }
+                }
+            },
+            "edge_types": {}
+        }
+    })
+}
+
+async fn build_app_with_character_graph() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(character_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+async fn create_character(app: &axum::Router, node_id: &str, name: &str, story_id: &str) {
+    let body = json!({
+        "node_type": "Character",
+        "node_id": node_id,
+        "properties": {"name": name, "story_id": story_id}
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "create_character({node_id})"
+    );
+}
+
+async fn post_resolve(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/resolve-or-create")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+#[tokio::test]
+async fn resolve_or_create_auto_merge_on_exact_name() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Mira Sandgrove", "story-A").await;
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Sandgrove", "story_id": "story-A"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["id"], "char-1");
+    assert_eq!(resp["was_created"], false);
+    assert_eq!(resp["match_kind"], "auto_merge");
+}
+
+#[tokio::test]
+async fn resolve_or_create_creates_new_when_no_candidate_matches() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Mira Sandgrove", "story-A").await;
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Wholly Different Person", "story_id": "story-A"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["was_created"], true);
+    assert_eq!(resp["match_kind"], "created_new");
+    let new_id = resp["id"].as_str().unwrap();
+    assert_ne!(new_id, "char-1");
+    // UUIDv4 has 36 chars (8-4-4-4-12 + 4 dashes).
+    assert_eq!(new_id.len(), 36, "id should be UUIDv4: {new_id}");
+
+    // Verify the new node's properties landed.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/graphs/g1/nodes/Character/{new_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let node: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(node["properties"]["name"], "Wholly Different Person");
+    assert_eq!(node["properties"]["story_id"], "story-A");
+}
+
+#[tokio::test]
+async fn resolve_or_create_scoped_ignores_other_scopes() {
+    // Same name in two different stories — scope must keep them apart.
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-A", "Mira Sandgrove", "story-A").await;
+    create_character(&app, "char-B", "Mira Sandgrove", "story-B").await;
+
+    // Resolve in story-A: should auto-merge to char-A, not char-B.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Sandgrove", "story_id": "story-A"},
+            "scope": {"prop": "story_id", "value": "story-A"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["id"], "char-A");
+    assert_eq!(resp["was_created"], false);
+
+    // Resolve in story-C (which has no characters yet) under scope —
+    // creates new even though "Mira Sandgrove" exists elsewhere.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Sandgrove", "story_id": "story-C"},
+            "scope": {"prop": "story_id", "value": "story-C"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["was_created"], true);
+}
+
+#[tokio::test]
+async fn resolve_or_create_vector_merge_in_fuzzy_zone() {
+    // Existing node's name lands in the fuzzy zone vs the query AND
+    // its embedding is near-identical → vector tiebreaker should
+    // resolve to it instead of creating new. The
+    // "Edwin Whitfield"/"Professor Edwin Whitfield" pair is the same
+    // pair the resolver crate's own tests use to demonstrate the
+    // tiebreaker zone (resolver.rs:tiebreaker_zone_with_vector_match).
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Professor Edwin Whitfield", "story-A").await;
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Edwin Whitfield", "story_id": "story-A"},
+            "embedding": [1.0, 0.0, 0.0]   // identical → cosine 1.0 ≥ 0.85
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["id"], "char-1");
+    assert_eq!(resp["was_created"], false);
+    assert_eq!(resp["match_kind"], "vector_merge");
+}
+
+#[tokio::test]
+async fn resolve_or_create_create_new_with_embedding_indexes_for_future_lookups() {
+    // CreateNew path with embedding: confirm the embedding lands
+    // in storage AND the HNSW index (so subsequent resolves can hit it).
+    let app = build_app_with_character_graph().await;
+
+    let (status, resp1) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Professor Edwin Whitfield"},
+            "embedding": [1.0, 0.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp1}");
+    assert_eq!(resp1["was_created"], true);
+    let new_id = resp1["id"].as_str().unwrap().to_string();
+
+    // Confirm embedding was persisted.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/graphs/g1/nodes/Character/{new_id}/embedding"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Second resolve with a fuzzy-zone name + similar embedding should
+    // vector-merge to the just-created node — proves HNSW was populated.
+    let (status, resp2) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Edwin Whitfield"},  // fuzzy zone vs above
+            "embedding": [1.0, 0.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp2}");
+    assert_eq!(resp2["id"], new_id);
+    assert_eq!(resp2["match_kind"], "vector_merge");
+}
+
+#[tokio::test]
+async fn resolve_or_create_missing_name_returns_400() {
+    let app = build_app_with_character_graph().await;
+    let (status, resp) = post_resolve(
+        &app,
+        json!({"node_type": "Character", "properties": {"story_id": "story-A"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("properties.name"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_or_create_non_string_name_returns_400() {
+    let app = build_app_with_character_graph().await;
+    let (status, resp) = post_resolve(
+        &app,
+        json!({"node_type": "Character", "properties": {"name": 42}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("must be a string"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_or_create_node_type_without_resolution_config_returns_400() {
+    let app = build_app_with_character_graph().await;
+    // Tag has no `resolution` block — should reject loudly, not fall
+    // back to defaults silently.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({"node_type": "Tag", "properties": {"name": "spicy"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("no entity resolution"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_or_create_unknown_node_type_returns_400() {
+    let app = build_app_with_character_graph().await;
+    let (status, _) = post_resolve(
+        &app,
+        json!({"node_type": "Bogus", "properties": {"name": "x"}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn resolve_or_create_scope_prop_not_indexed_returns_400() {
+    // Scoping by a non-indexed prop would silently produce zero
+    // candidates → always-CreateNew → masked misconfiguration. Reject.
+    let app = build_app_with_character_graph().await;
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira"},
+            "scope": {"prop": "name", "value": "Mira"}  // name isn't indexed
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("not indexed"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_or_create_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/resolve-or-create")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"node_type": "Character", "properties": {"name": "x"}}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn resolve_or_create_embedding_dim_mismatch_returns_400() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Anchor", "story-A").await;
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
+
+    // Index dim is now 3; query with a 4-dim embedding → 400.
+    let (status, _resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Wholly Different Person"},
+            "embedding": [1.0, 0.0, 0.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
