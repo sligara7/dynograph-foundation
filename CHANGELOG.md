@@ -4,6 +4,73 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.3 — 2026-05-05
+
+Third of four primitives identified by the storyflow→foundation
+audit (2026-05-04). Closes the read-side fan-out gap.
+
+### Added
+
+- **`POST /v1/graphs/{id}/edges:collect`** — fan-out edge
+  collection across a typed source set. Replaces storyflow's
+  `collect_story_edges` master pattern (today walks N entity
+  types × M nodes × K edge types via per-node `outgoing_edges` —
+  hundreds of round-trips per call); one HTTP call after
+  migration. Used by 13+ knowledge-graph routes plus the
+  projection step in pagerank/louvain/shortest-path.
+
+  Request: `source.type` accepts `"*"` (all node types) or a
+  single name or an array; optional `source.filter: {prop, value}`
+  scope (prop must be `indexed: true`); required `edge_types`
+  (non-empty); required `limit` in `1..=10_000`; optional
+  `format: "edges" | "adjacency"` (default `"edges"`); optional
+  `resolve_target: bool` (default false).
+
+  Response shape varies by format. `"edges"` returns
+  `{edges: [...], truncated: bool}` with each edge carrying
+  `edge_type`, `from_type` (known from the source-type scan),
+  `from_id`, `to_id`, `properties`, plus `target` when
+  `resolve_target=true`. `"adjacency"` returns
+  `{adjacency: {from_id: [...]}, truncated: bool}` for
+  client-side algorithms (pagerank/louvain/shortest-path
+  projection).
+
+  Whole call runs under one `with_engine_read` lock —
+  candidate scan + per-source-node `scan_outgoing_edges` +
+  optional target resolution all see a consistent snapshot.
+
+  Pre-flight validation (all 400, no scans on failure): empty
+  `edge_types`; unknown `edge_type`; unknown `source.type` name
+  (single, list, or post-wildcard); `limit` out of range;
+  `source.filter.prop` not `indexed: true` on every covered
+  source type (otherwise `scan_nodes_by_property` silently
+  returns empty per-type, masking misconfiguration — same
+  rejection rule `/resolve-or-create` uses).
+
+  PR: [#7](https://github.com/sligara7/dynograph-foundation/pull/7).
+
+### Two design notes worth knowing
+
+- **No edge-type-prefix scan exists in storage.** Adjacency CFs
+  are keyed `(graph_id, node_id, edge_type, peer_id)` — by node,
+  not edge type. So wildcard `source.type` without filter walks
+  O(N) prefix scans (one per node). A future CF
+  `(graph_id, edge_type, from_id, to_id)` would enable true
+  edge-type scans; out of scope until profiling proves per-node
+  walk is the bottleneck.
+- **`StoredEdge` carries no `to_type`.** When `resolve_target=true`,
+  foundation discovers each target's type by walking the schema's
+  `EdgeTypeDef.to` declaration and trying `get_node` for each
+  candidate. Bounded by the schema (typically 1-3 candidates per
+  edge type); wildcard endpoints with `resolve_target=true` pay
+  full per-edge fanout cost.
+
+### Internal
+
+- New `crate::validation` module with `validate_indexed_property`
+  helper, shared between `/resolve-or-create` and `/edges:collect`
+  (was duplicated). Net cleanup; no external behavior change.
+
 ## v0.5.2 — 2026-05-05
 
 Second of four primitives identified by the storyflow→foundation
