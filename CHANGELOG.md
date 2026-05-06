@@ -4,6 +4,82 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.4 — 2026-05-06
+
+Fourth and final primitive identified by the storyflow→foundation
+audit (2026-05-04). With this release all four enumerated
+primitives (`/batch`, `/resolve-or-create`, `/edges:collect`,
+`/traverse`) are in main.
+
+### Added
+
+- **`POST /v1/graphs/{id}/traverse`** — typed BFS over one or more
+  edge-type steps from a single start node. Backs storyflow's
+  `compute_predecessors` shape: transitive walk along a single
+  edge type from a start node, scoped by a node property. Used
+  today by `state_at_epoch`, `events_between_epochs`, and the
+  `add_precedes` cycle check — one HTTP call after migration vs.
+  one round-trip per edge plus client-side BFS today.
+
+  Request: required `start: {type, id}`; required `traverse` array
+  (max 10 steps), each `{edge_type, direction, transitive?}`;
+  optional `scope: {prop, value}` (prop must be `indexed: true` on
+  the start type and every per-step candidate type); optional
+  `return: "ids" | "nodes"` (default `"ids"`); required `limit` in
+  `1..=10_000`.
+
+  `direction` is `"outgoing"` / `"incoming"` / `"both"`.
+  `transitive: true` BFS-walks the step's edges to exhaustion
+  before advancing; `transitive: false` is one hop per visited
+  node.
+
+  Response: `{nodes: [{node_type, node_id, properties?}], truncated}`.
+  `properties` is omitted in `return: "ids"` mode via
+  `skip_serializing_if`.
+
+  Whole BFS runs under one `with_engine_read` lock — candidate
+  scans, edge walks, and node lookups see one consistent snapshot.
+
+  Pre-flight validation (all 400, no scans on failure): unknown
+  `start.type`; empty `start.id`; empty `traverse`; chain length
+  > 10; unknown `edge_type`; `limit` out of range; un-indexed
+  `scope.prop` on any candidate type. Same masked-misconfiguration
+  rejection rule used by `/edges:collect` and `/resolve-or-create`.
+
+  PR: [#9](https://github.com/sligara7/dynograph-foundation/pull/9).
+
+### Two semantic decisions worth knowing
+
+- **Start is never in the result.** Mirrors
+  `compute_predecessors`'s "predecessors of X (not including X)"
+  shape; caller already has the start id. Visited set still holds
+  start so a cycle back through it short-circuits.
+- **Start not found in storage → 404** (loud failure per the
+  no-silent-fallback principle). Start exists but fails the scope
+  filter → `200` with empty `nodes` (legitimate "no matches", not
+  a misconfiguration).
+
+### Two BFS bookkeeping notes
+
+- **`emitted` keyed by `(node_type, node_id)`** — result-set
+  dedup with UNION semantics across steps. A peer reached at step
+  0 stays in results even if step 1's edges would also visit it.
+- **`queued_steps` keyed by `(node_id, step_idx)`** — work-item
+  cycle guard. Same id at a different `step_idx` is a different
+  work item, which is how multi-step chains advance.
+
+Transitive steps fan out to BOTH `(peer, step_idx)` (continue
+transitively) AND `(peer, step_idx+1)` (advance), so a chain like
+`[transitive A, then B]` doesn't starve step B.
+
+### Internal
+
+- `peer_cache` keyed by `peer_id` collapses repeat `fetch_peer`
+  lookups across transitive iterations and across multiple sources
+  pointing at the same target. Cache hits are validated against
+  the current candidate set so `direction: "both"` with different
+  per-direction candidates stays correct.
+
 ## v0.5.3 — 2026-05-05
 
 Third of four primitives identified by the storyflow→foundation

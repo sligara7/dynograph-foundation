@@ -72,7 +72,7 @@ Create a graph.
 Returns `201 Created` + `SchemaResponse`:
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.3", "content_hash": "<sha256-hex>", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.4", "content_hash": "<sha256-hex>", "schema": {...} }
 ```
 
 Errors: `400` invalid id; `409` duplicate.
@@ -109,7 +109,7 @@ Full schema body — same shape codegen / drift-detection consumers
 read.
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.3", "content_hash": "...", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.4", "content_hash": "...", "schema": {...} }
 ```
 
 ### `PUT /v1/graphs/{id}/schema`
@@ -498,6 +498,116 @@ When the candidate walk finds nothing for a given edge,
 (referential-integrity gap), and absence is the caller-visible
 signal.
 
+## Traversal (typed BFS)
+
+### `POST /v1/graphs/{id}/traverse`
+
+Typed BFS over one or more edge-type steps from a single start
+node. Backs the `compute_predecessors` shape — transitive walk
+along a single edge type from a start node, scoped by some node
+property — and its multi-step generalization. Read-only; the whole
+BFS runs under one `with_engine_read` lock.
+
+```json
+{
+    "start": {"type": "NarrativeEpoch", "id": "epoch-X"},
+    "traverse": [
+        {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+    ],
+    "scope":  {"prop": "story_id", "value": "Y"},
+    "return": "ids" | "nodes",
+    "limit":  1000
+}
+```
+
+`start.type` must be in the schema; `start.id` non-empty. `traverse`
+is a non-empty array (max 10 steps). Each step has:
+
+- `edge_type` — must be in the schema
+- `direction` — `"outgoing"` (walk `from→to`), `"incoming"` (walk
+  `to→from`), or `"both"` (union)
+- `transitive` (optional, default `false`) — when true, the step's
+  edges are walked BFS-style until exhausted before advancing to
+  the next step; when false, exactly one hop per visited node
+
+`scope` (optional) restricts traversal to nodes whose `prop` equals
+`value`. Same indexed-property guarantee as `/edges:collect`:
+`scope.prop` must be declared `indexed: true` on the start type AND
+on every per-step candidate type.
+
+`return` (optional, default `"ids"`) controls whether response
+nodes carry `properties`; `"nodes"` includes them, `"ids"` omits
+them via `skip_serializing_if`.
+
+`limit` is required, in `1..=10_000`.
+
+**Returns 200:**
+
+```json
+{
+    "nodes": [
+        {"node_type": "NarrativeEpoch", "node_id": "epoch-X1"},
+        {"node_type": "NarrativeEpoch", "node_id": "epoch-X2"}
+    ],
+    "truncated": false
+}
+```
+
+`truncated` is `true` when the BFS stopped early because `limit`
+was reached. Iteration order is unspecified.
+
+**Two semantic decisions worth knowing:**
+
+- **Start is never in `nodes`.** Caller already has the start id;
+  mirrors `compute_predecessors`'s "predecessors of X (not
+  including X)" shape. The visited set still holds start so a
+  cycle back through it short-circuits.
+- **Start not found in storage → 404.** Loud failure per the
+  no-silent-fallback principle. Start exists but fails the scope
+  filter → `200` with empty `nodes` (legitimate "no matches", not
+  a misconfiguration).
+
+**Two dedup sets, two purposes:**
+
+- **`emitted` keyed by `(node_type, node_id)`** — result-set dedup
+  with UNION semantics across steps (closer to SQL UNION than
+  JOIN): a peer reached at step 0 stays in results even if step
+  1's edges would also visit it.
+- **`queued_steps` keyed by `(node_id, step_idx)`** — work-item
+  cycle guard. The same id at a different `step_idx` is a
+  different work item, which is how multi-step chains advance.
+
+**Transitive fan-out semantics:** a `transitive: true` step
+re-enqueues each peer at BOTH `step_idx` (continue transitively)
+AND `step_idx + 1` (advance to the next step, if any). Without
+the latter, a chain like `[transitive A, then B]` would starve
+step B. `transitive: false` re-enqueues only at `step_idx + 1`.
+
+**400 on any of these (pre-flight, no scans on failure):**
+
+- Unknown `start.type`; empty `start.id`
+- Empty `traverse`; chain length > 10
+- Unknown `edge_type` in any step
+- `limit` outside `1..=10_000`
+- When `scope` is supplied: `scope.prop` not declared
+  `indexed: true` on the start type AND every per-step candidate
+  type
+
+**Performance notes:**
+
+- Per visit: one `scan_outgoing_edges` and/or `scan_incoming_edges`
+  (storage prefix-scans on `(graph, node)` and post-filters on
+  `edge_type` in memory — no edge-type prefix CF exists today)
+  plus one `get_node` per peer to resolve type + read properties
+  for the scope check.
+- A `peer_cache` keyed by `peer_id` collapses repeat lookups on
+  the same id across transitive iterations and across multiple
+  sources pointing at the same target. Cache hits are validated
+  against the current candidate set so `direction: "both"` with
+  different per-direction candidates stays correct.
+- Cost is `O(unique_peers × avg_candidates + visits)`, capped by
+  `limit`.
+
 ## Embeddings (sidecar)
 
 Embeddings are managed via dedicated routes rather than riding on
@@ -568,7 +678,7 @@ honest, just no data to search. Schema-unknown type is `400`.
 
 The `wire_version` field on `SchemaResponse` and
 `GraphMetadataResponse` is the foundation crate's `Cargo.toml`
-version (e.g. `"0.5.3"`). Consumers compare it against a
+version (e.g. `"0.5.4"`). Consumers compare it against a
 compiled-in constant; mismatch should fail-fast (the consumer was
 built against a different foundation version).
 
