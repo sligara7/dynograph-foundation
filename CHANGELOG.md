@@ -4,6 +4,55 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.1 — 2026-05-05
+
+First of four primitives identified by the storyflow→foundation
+audit (2026-05-04). Closes the dominant atomicity gap: every
+multi-write storyflow handler today depends on the in-process
+write lock making the sequence atomic, which doesn't survive the
+move to HTTP.
+
+### Added
+
+- **`POST /v1/graphs/{id}/batch`** — atomic multi-op transaction.
+  Body `{"ops": [...]}` accepts any combination of `create_node`,
+  `replace_node`, `delete_node`, `create_edge`, `merge_edge`,
+  `delete_edge` ops; field shapes mirror the existing
+  single-handler request bodies. Whole batch runs under one
+  engine write lock + storage `begin_batch` / `commit_batch`.
+  All-or-nothing: any per-op failure discards the batch and
+  returns `400` with a structured JSON error
+  (`{error, op_index, op_type}`) identifying the failing op —
+  the one place the service deviates from the plain-text error
+  convention, because batch callers need the index to debug a
+  partial rejection. Success returns 200 + per-kind counts +
+  `ops_applied`. Soft cap: 1000 ops/batch (audit's heaviest
+  known case is ~67). Empty `ops` and `> 1000 ops` are both 400.
+
+  Two storage-layer constraints documented in
+  `crates/dynograph-service/src/batch.rs` module doc and locked
+  in by hazard tests in `tests/integration.rs`:
+
+  1. *No read-your-own-writes within a batch.* The engine batch
+     buffer is write-only — `engine.put()` buffers but
+     `engine.get()` reads the backend. Ops whose precondition is
+     a `get()` (`merge_edge`, `replace_node`, `delete_*`) see
+     pre-batch state. `create_node X` then `replace_node X` in
+     one batch fails with "node not found" → rollback.
+  2. *Cascade-delete misses in-batch creates.* `delete_node X`
+     in the same batch as `create_edge X→Y` leaves an orphaned
+     edge — cascade reads pre-batch adjacency.
+
+  Neither blocks any audit-enumerated workload (`integrate_fragment`
+  and friends are all-creates or modifications-of-pre-existing).
+  Lifting either would require a buffer-aware `engine.get()`;
+  out of scope for this release.
+
+  PR: [#3](https://github.com/sligara7/dynograph-foundation/pull/3).
+  Storyflow side-B acceptance gate: `mutation.integrate_fragment_atomic`
+  (storyflow commit `37b34717`) — must stay green when storyflow
+  rewrites `integrate_fragment` to call `/batch`.
+
 ## v0.5.0 — 2026-05-04
 
 Automation + safety release. Locks down the drift classes that bit

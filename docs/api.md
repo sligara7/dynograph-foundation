@@ -72,7 +72,7 @@ Create a graph.
 Returns `201 Created` + `SchemaResponse`:
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.0", "content_hash": "<sha256-hex>", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.1", "content_hash": "<sha256-hex>", "schema": {...} }
 ```
 
 Errors: `400` invalid id; `409` duplicate.
@@ -109,7 +109,7 @@ Full schema body — same shape codegen / drift-detection consumers
 read.
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.0", "content_hash": "...", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.1", "content_hash": "...", "schema": {...} }
 ```
 
 ### `PUT /v1/graphs/{id}/schema`
@@ -245,6 +245,80 @@ Returns `200` + `EdgeResponse`. `404` if missing.
 
 Returns `204` / `404`.
 
+## Batch (atomic multi-op)
+
+### `POST /v1/graphs/{id}/batch`
+
+Run a list of node/edge mutations as one atomic transaction —
+all-or-nothing. Mirrors the in-process write-lock atomicity that
+single handlers can't compose across HTTP. Closes the dominant
+gap from the storyflow audit (2026-05-04).
+
+```json
+{
+    "ops": [
+        {"op": "create_node", "node_type": "Item", "node_id": "a", "properties": {"name": "a"}},
+        {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "a",
+                              "to_type": "Item", "to_id": "b", "properties": {"weight": 0.5}},
+        {"op": "merge_edge",  "edge_type": "Likes", "from_id": "x", "to_id": "y", "properties": {"weight": 0.9}},
+        {"op": "replace_node","node_type": "Item", "node_id": "x", "properties": {"name": "renamed"}},
+        {"op": "delete_edge", "edge_type": "Likes", "from_id": "x", "to_id": "y"},
+        {"op": "delete_node", "node_type": "Item", "node_id": "x"}
+    ]
+}
+```
+
+Field names per op variant match the existing single-handler
+bodies — translate single calls into batch entries with no field
+renames. `properties` is optional (defaults to `{}`).
+
+**Atomicity:** entire batch runs under one engine write lock +
+storage `begin_batch` / `commit_batch`. Any per-op failure
+discards the batch (zero state changes) and returns `400` with a
+structured JSON error identifying the failing op:
+
+```json
+{ "error": "node not found: Item/x", "op_index": 3, "op_type": "replace_node" }
+```
+
+This is the one place the service deviates from the plain-text
+error convention — batch callers need `op_index` to locate the
+failing op in their request.
+
+**Success (200):**
+
+```json
+{
+    "ops_applied": 6,
+    "nodes_created": 1, "nodes_replaced": 1, "nodes_deleted": 1,
+    "edges_created": 1, "edges_merged":   1, "edges_deleted": 1
+}
+```
+
+**Limits:**
+
+- Empty `ops` → `400 "ops must be non-empty"`.
+- `ops.len() > 1000` → `400 "ops length N exceeds maximum 1000"`.
+
+**Two known constraints — read before constructing batch payloads:**
+
+1. **No read-your-own-writes within a batch.** The engine batch
+   buffer is write-only — `engine.put()` buffers, but `engine.get()`
+   reads the backend directly. Ops whose precondition is a `get()`
+   (`merge_edge`, `replace_node`, `delete_*`) see pre-batch state.
+   So `create_node X` followed by `replace_node X` in the same
+   batch fails with "node not found" → batch rolls back. Pure-put
+   chains (`create_node` + `create_edge` referencing it) work
+   fine.
+2. **Cascade-delete misses in-batch creates.** `delete_node X` in
+   the same batch as `create_edge X→Y` leaves an orphaned edge —
+   the cascade reads pre-batch adjacency. Split the work across
+   two calls if you need delete-then-recreate atomicity.
+
+Both constraints have hazard tests in
+`crates/dynograph-service/tests/integration.rs` that lock the
+behavior in.
+
 ## Embeddings (sidecar)
 
 Embeddings are managed via dedicated routes rather than riding on
@@ -315,7 +389,7 @@ honest, just no data to search. Schema-unknown type is `400`.
 
 The `wire_version` field on `SchemaResponse` and
 `GraphMetadataResponse` is the foundation crate's `Cargo.toml`
-version (e.g. `"0.5.0"`). Consumers compare it against a
+version (e.g. `"0.5.1"`). Consumers compare it against a
 compiled-in constant; mismatch should fail-fast (the consumer was
 built against a different foundation version).
 
