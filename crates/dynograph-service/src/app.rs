@@ -708,7 +708,7 @@ async fn batch(
     let outcome = entry.with_state_write(|engine, indexes| -> Outcome {
         engine.begin_batch();
         match run_ops(engine, &id, req.ops) {
-            Ok((counts, deleted_nodes)) => match engine.commit_batch() {
+            Ok((response, deleted_nodes)) => match engine.commit_batch() {
                 Ok(_) => {
                     // HNSW maintenance for delete_node ops happens
                     // post-commit so a commit failure leaves the
@@ -718,7 +718,7 @@ async fn batch(
                             index.remove(&node_id);
                         }
                     }
-                    Outcome::Success(BatchResponse::from(counts))
+                    Outcome::Success(response)
                 }
                 Err(e) => Outcome::CommitFailed(e),
             },

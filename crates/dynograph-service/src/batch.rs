@@ -143,17 +143,7 @@ pub(crate) enum OpEffect {
     EdgeDeleted,
 }
 
-#[derive(Default)]
-pub(crate) struct EffectCounts {
-    pub nodes_created: usize,
-    pub nodes_replaced: usize,
-    pub nodes_deleted: usize,
-    pub edges_created: usize,
-    pub edges_merged: usize,
-    pub edges_deleted: usize,
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Debug, Default, Serialize)]
 pub(crate) struct BatchResponse {
     pub ops_applied: usize,
     pub nodes_created: usize,
@@ -162,25 +152,6 @@ pub(crate) struct BatchResponse {
     pub edges_created: usize,
     pub edges_merged: usize,
     pub edges_deleted: usize,
-}
-
-impl From<EffectCounts> for BatchResponse {
-    fn from(c: EffectCounts) -> Self {
-        Self {
-            ops_applied: c.nodes_created
-                + c.nodes_replaced
-                + c.nodes_deleted
-                + c.edges_created
-                + c.edges_merged
-                + c.edges_deleted,
-            nodes_created: c.nodes_created,
-            nodes_replaced: c.nodes_replaced,
-            nodes_deleted: c.nodes_deleted,
-            edges_created: c.edges_created,
-            edges_merged: c.edges_merged,
-            edges_deleted: c.edges_deleted,
-        }
-    }
 }
 
 /// Structured per-op error body. Plain-text errors (the convention for
@@ -266,16 +237,16 @@ fn apply_op(
 }
 
 /// Run every op in order against `engine` (which must already have
-/// `begin_batch()` active). Returns the counts plus the list of
-/// successfully-deleted nodes so the caller can flush their HNSW
+/// `begin_batch()` active). Returns the response counts plus the list
+/// of successfully-deleted nodes so the caller can flush their HNSW
 /// entries after commit. On the first per-op failure, returns the
 /// structured error — the caller is responsible for `discard_batch()`.
 pub(crate) fn run_ops(
     engine: &mut StorageEngine,
     graph_id: &str,
     ops: Vec<BatchOp>,
-) -> Result<(EffectCounts, Vec<(String, String)>), BatchOpError> {
-    let mut counts = EffectCounts::default();
+) -> Result<(BatchResponse, Vec<(String, String)>), BatchOpError> {
+    let mut response = BatchResponse::default();
     let mut deleted_nodes: Vec<(String, String)> = Vec::new();
 
     for (op_index, op) in ops.into_iter().enumerate() {
@@ -286,17 +257,18 @@ pub(crate) fn run_ops(
             op_type,
         })?;
         match effect {
-            OpEffect::NodeCreated => counts.nodes_created += 1,
-            OpEffect::NodeReplaced => counts.nodes_replaced += 1,
+            OpEffect::NodeCreated => response.nodes_created += 1,
+            OpEffect::NodeReplaced => response.nodes_replaced += 1,
             OpEffect::NodeDeleted { node_type, node_id } => {
-                counts.nodes_deleted += 1;
+                response.nodes_deleted += 1;
                 deleted_nodes.push((node_type, node_id));
             }
-            OpEffect::EdgeCreated => counts.edges_created += 1,
-            OpEffect::EdgeMerged => counts.edges_merged += 1,
-            OpEffect::EdgeDeleted => counts.edges_deleted += 1,
+            OpEffect::EdgeCreated => response.edges_created += 1,
+            OpEffect::EdgeMerged => response.edges_merged += 1,
+            OpEffect::EdgeDeleted => response.edges_deleted += 1,
         }
+        response.ops_applied += 1;
     }
 
-    Ok((counts, deleted_nodes))
+    Ok((response, deleted_nodes))
 }
