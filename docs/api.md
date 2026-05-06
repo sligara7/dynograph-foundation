@@ -72,7 +72,7 @@ Create a graph.
 Returns `201 Created` + `SchemaResponse`:
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.1", "content_hash": "<sha256-hex>", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.2", "content_hash": "<sha256-hex>", "schema": {...} }
 ```
 
 Errors: `400` invalid id; `409` duplicate.
@@ -109,7 +109,7 @@ Full schema body — same shape codegen / drift-detection consumers
 read.
 
 ```json
-{ "id": "my_graph", "wire_version": "0.5.1", "content_hash": "...", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.5.2", "content_hash": "...", "schema": {...} }
 ```
 
 ### `PUT /v1/graphs/{id}/schema`
@@ -319,6 +319,77 @@ Both constraints have hazard tests in
 `crates/dynograph-service/tests/integration.rs` that lock the
 behavior in.
 
+## Resolve-or-create (fuzzy/vector entity resolution)
+
+### `POST /v1/graphs/{id}/resolve-or-create`
+
+Fuzzy/vector entity resolution with create-on-miss. Composes the
+`dynograph-resolution` crate (token_sort_ratio + jaro_winkler with
+cosine-similarity tiebreaker) over candidates fetched from storage.
+Storyflow's LLM extraction funnels every Character through this
+gate; the route exists to make the same path available without
+embedding the foundation crates in-process.
+
+```json
+{
+    "node_type": "Character",
+    "properties": {"name": "Mira Sandgrove", "story_id": "X"},
+    "embedding": [0.1, 0.2, ...],
+    "scope": {"prop": "story_id", "value": "X"}
+}
+```
+
+`embedding` and `scope` are optional. The query name is
+`properties.name` (string, required) — same property the route
+extracts from candidates for fuzzy comparison, so "name" lives in
+one place.
+
+**Returns 200:**
+
+```json
+{
+    "id": "8a72...uuid",
+    "was_created": true,
+    "match_kind": "auto_merge" | "vector_merge" | "created_new"
+}
+```
+
+`match_kind` distinguishes auto-merge (fuzzy ≥ auto_merge_threshold)
+from vector-merge (fuzzy in [fuzzy_threshold, auto_merge_threshold)
++ embedding cosine ≥ vector_threshold) — useful for storyflow-side
+threshold tuning. `id` is the existing node's id on either merge,
+or a fresh UUIDv4 on create.
+
+**400 on any of these (pre-flight, no state changes):**
+
+- `node_type` unknown to schema
+- `node_type` has no `resolution` block declared in schema (no
+  silent fallback to defaults — explicit-is-better)
+- `properties.name` missing or non-string
+- `scope.prop` not declared on the node type, OR not declared with
+  `indexed: true` (otherwise the candidate scan silently returns
+  empty, which would mask a misconfiguration as "everything was a
+  new entity")
+- `embedding` empty
+- `embedding.len()` ≠ existing HNSW index dim for this type
+
+**Atomicity:** the whole call runs under one engine write lock so
+candidate scan + resolve + (create + set_embedding + HNSW insert)
+compose. The CreateNew path is sequential, NOT batched —
+`set_embedding` does a backend `get` to verify node existence,
+which can't see writes in the batch buffer (same
+read-your-own-writes constraint as `/batch`). Pre-flight handles
+every checkable failure; only a pure storage-I/O fault between the
+node-create and embedding-set can tear the pair, which is
+caller-retry-safe (a retry will auto-merge to the just-created node
+and `set_embedding` again).
+
+**Aliases** (mentioned in the audit memo) are not supported in v1 —
+the underlying resolver doesn't natively accept multi-name queries,
+and orchestrating them at the HTTP layer would re-implement the
+threshold logic. Extend the resolver crate properly if a real
+workload needs them.
+
 ## Embeddings (sidecar)
 
 Embeddings are managed via dedicated routes rather than riding on
@@ -389,7 +460,7 @@ honest, just no data to search. Schema-unknown type is `400`.
 
 The `wire_version` field on `SchemaResponse` and
 `GraphMetadataResponse` is the foundation crate's `Cargo.toml`
-version (e.g. `"0.5.1"`). Consumers compare it against a
+version (e.g. `"0.5.2"`). Consumers compare it against a
 compiled-in constant; mismatch should fail-fast (the consumer was
 built against a different foundation version).
 
