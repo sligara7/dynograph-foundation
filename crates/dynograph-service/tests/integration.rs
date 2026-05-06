@@ -3489,3 +3489,576 @@ async fn edges_collect_unknown_graph_returns_404() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+// =========================================================================
+// /v1/graphs/{id}/traverse — typed BFS over edge-type steps
+// =========================================================================
+
+/// Schema mirroring the storyflow temporal use case: NarrativeEpoch
+/// nodes joined by PRECEDES edges, scoped by `story_id`. Plus a Tag
+/// node type with a TAGS edge so the multi-step / multi-type tests
+/// have somewhere to chain to.
+fn temporal_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "temporal-demo",
+            "version": 1,
+            "node_types": {
+                "NarrativeEpoch": {
+                    "properties": {
+                        "name":     {"type": "string", "required": true},
+                        "story_id": {"type": "string", "indexed": true}
+                    }
+                },
+                "Tag": {
+                    "properties": {
+                        "name":     {"type": "string", "required": true},
+                        "story_id": {"type": "string", "indexed": true}
+                    }
+                }
+            },
+            "edge_types": {
+                "PRECEDES": {
+                    "from": "NarrativeEpoch",
+                    "to":   "NarrativeEpoch"
+                },
+                "TAGS": {
+                    "from": "NarrativeEpoch",
+                    "to":   "Tag"
+                }
+            }
+        }
+    })
+}
+
+async fn build_app_with_temporal_schema() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(temporal_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+async fn post_traverse(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/traverse")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+/// Seed three linear-chained PRECEDES epochs in story-A
+/// (e1 → e2 → e3) plus an unrelated story-B epoch (e4 → e5), and a
+/// TAGS edge from e2 → tag-A1 for the multi-step / multi-type tests.
+async fn seed_temporal_graph(app: &axum::Router) {
+    create_typed_node(app, "NarrativeEpoch", "e1", "Beginning", "story-A").await;
+    create_typed_node(app, "NarrativeEpoch", "e2", "Middle", "story-A").await;
+    create_typed_node(app, "NarrativeEpoch", "e3", "End", "story-A").await;
+    create_typed_node(app, "NarrativeEpoch", "e4", "B-Beginning", "story-B").await;
+    create_typed_node(app, "NarrativeEpoch", "e5", "B-End", "story-B").await;
+    create_typed_node(app, "Tag", "tag-A1", "important", "story-A").await;
+
+    create_typed_edge(
+        app,
+        "PRECEDES",
+        "NarrativeEpoch",
+        "e1",
+        "NarrativeEpoch",
+        "e2",
+    )
+    .await;
+    create_typed_edge(
+        app,
+        "PRECEDES",
+        "NarrativeEpoch",
+        "e2",
+        "NarrativeEpoch",
+        "e3",
+    )
+    .await;
+    create_typed_edge(
+        app,
+        "PRECEDES",
+        "NarrativeEpoch",
+        "e4",
+        "NarrativeEpoch",
+        "e5",
+    )
+    .await;
+    create_typed_edge(app, "TAGS", "NarrativeEpoch", "e2", "Tag", "tag-A1").await;
+}
+
+#[tokio::test]
+async fn traverse_single_step_transitive_collects_all_descendants() {
+    // The storyflow `compute_predecessors` shape, but applied
+    // forward: from e1, transitive PRECEDES outgoing → {e2, e3}.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "scope": {"prop": "story_id", "value": "story-A"},
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let nodes = resp["nodes"].as_array().unwrap();
+    let ids: std::collections::HashSet<&str> = nodes
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["e2", "e3"].into_iter().collect());
+    // start (e1) must NOT appear in results.
+    assert!(!ids.contains("e1"));
+    assert_eq!(resp["truncated"], false);
+    // Default return=ids: properties field must be absent.
+    for n in nodes {
+        assert!(
+            n.get("properties").is_none(),
+            "return=ids must omit properties, got: {n}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn traverse_single_step_non_transitive_one_hop_only() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    // Non-transitive: from e1 we should get only e2, NOT e3.
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": false}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let nodes = resp["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0]["node_id"], "e2");
+}
+
+#[tokio::test]
+async fn traverse_incoming_direction_walks_predecessors() {
+    // The actual storyflow compute_predecessors shape: from e3,
+    // incoming PRECEDES transitive → {e2, e1}.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e3"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "incoming", "transitive": true}
+            ],
+            "scope": {"prop": "story_id", "value": "story-A"},
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let ids: std::collections::HashSet<&str> = resp["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["e1", "e2"].into_iter().collect());
+}
+
+#[tokio::test]
+async fn traverse_scope_filter_excludes_other_stories() {
+    // story-B's e4 → e5 chain must be invisible when scoped to
+    // story-A — even if there were a cross-story PRECEDES edge.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    // Add a cross-story edge to confirm scope drops it.
+    create_typed_edge(
+        &app,
+        "PRECEDES",
+        "NarrativeEpoch",
+        "e3",
+        "NarrativeEpoch",
+        "e4",
+    )
+    .await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "scope": {"prop": "story_id", "value": "story-A"},
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let ids: std::collections::HashSet<&str> = resp["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    // e4 (story-B) must be filtered out even though e3 → e4 exists.
+    assert_eq!(ids, ["e2", "e3"].into_iter().collect());
+}
+
+#[tokio::test]
+async fn traverse_start_out_of_scope_returns_empty_not_error() {
+    // start=e4 (story-B) but scope=story-A: legitimate empty result
+    // (the caller's filter just excludes the start), 200 not 4xx.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e4"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "scope": {"prop": "story_id", "value": "story-A"},
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["nodes"].as_array().unwrap().len(), 0);
+    assert_eq!(resp["truncated"], false);
+}
+
+#[tokio::test]
+async fn traverse_direction_both_walks_outgoing_and_incoming() {
+    // From e2: outgoing PRECEDES → e3, incoming PRECEDES ← e1.
+    // direction=both should reach both.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e2"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "both", "transitive": false}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let ids: std::collections::HashSet<&str> = resp["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["e1", "e3"].into_iter().collect());
+}
+
+#[tokio::test]
+async fn traverse_cycle_handled_via_visited_set() {
+    // Construct a cycle: e3 → e1 (already had e1 → e2 → e3). BFS
+    // must terminate without revisiting any node.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+    create_typed_edge(
+        &app,
+        "PRECEDES",
+        "NarrativeEpoch",
+        "e3",
+        "NarrativeEpoch",
+        "e1",
+    )
+    .await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    // Result is {e2, e3} — start (e1) excluded even though the
+    // cycle would loop back through it.
+    let ids: std::collections::HashSet<&str> = resp["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["e2", "e3"].into_iter().collect());
+}
+
+#[tokio::test]
+async fn traverse_return_nodes_includes_properties() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "return": "nodes",
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let nodes = resp["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 2);
+    for n in nodes {
+        let props = n["properties"].as_object().unwrap();
+        assert!(props.contains_key("name"));
+        assert!(props.contains_key("story_id"));
+    }
+}
+
+#[tokio::test]
+async fn traverse_multi_step_chain_unions_intermediates() {
+    // Two-step chain: PRECEDES outgoing transitive, then TAGS
+    // outgoing non-transitive. From e1, step 0 reaches {e2, e3};
+    // step 1 from e2 reaches {tag-A1}, from e3 reaches nothing.
+    // UNION semantics: result = {e2, e3, tag-A1}.
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true},
+                {"edge_type": "TAGS",     "direction": "outgoing", "transitive": false}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let pairs: std::collections::HashSet<(String, String)> = resp["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            (
+                n["node_type"].as_str().unwrap().to_string(),
+                n["node_id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert!(pairs.contains(&("NarrativeEpoch".into(), "e2".into())));
+    assert!(pairs.contains(&("NarrativeEpoch".into(), "e3".into())));
+    assert!(pairs.contains(&("Tag".into(), "tag-A1".into())));
+    assert_eq!(pairs.len(), 3);
+}
+
+#[tokio::test]
+async fn traverse_limit_truncates_and_flags() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    // Full transitive walk would yield {e2, e3}; limit=1 truncates.
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "limit": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(resp["truncated"], true);
+}
+
+#[tokio::test]
+async fn traverse_unknown_start_node_returns_404() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+
+    let (status, _) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "no-such-id"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing", "transitive": true}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn traverse_unknown_start_type_returns_400() {
+    let app = build_app_with_temporal_schema().await;
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "Bogus", "id": "x"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing"}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(resp.as_str().unwrap_or("").contains("Bogus"), "got: {resp}");
+}
+
+#[tokio::test]
+async fn traverse_unknown_edge_type_returns_400() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "BOGUS", "direction": "outgoing"}
+            ],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(resp.as_str().unwrap_or("").contains("BOGUS"), "got: {resp}");
+}
+
+#[tokio::test]
+async fn traverse_empty_traverse_returns_400() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("non-empty"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn traverse_limit_out_of_range_returns_400() {
+    let app = build_app_with_temporal_schema().await;
+    for bad in [0usize, 10_001] {
+        let (status, _) = post_traverse(
+            &app,
+            json!({
+                "start": {"type": "NarrativeEpoch", "id": "e1"},
+                "traverse": [
+                    {"edge_type": "PRECEDES", "direction": "outgoing"}
+                ],
+                "limit": bad
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "limit={bad}");
+    }
+}
+
+#[tokio::test]
+async fn traverse_scope_on_unindexed_prop_returns_400() {
+    let app = build_app_with_temporal_schema().await;
+    seed_temporal_graph(&app).await;
+    let (status, resp) = post_traverse(
+        &app,
+        json!({
+            "start": {"type": "NarrativeEpoch", "id": "e1"},
+            "traverse": [
+                {"edge_type": "PRECEDES", "direction": "outgoing"}
+            ],
+            "scope": {"prop": "name", "value": "Beginning"},
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("not indexed"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn traverse_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/traverse")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "start": {"type": "X", "id": "y"},
+                        "traverse": [{"edge_type": "Z", "direction": "outgoing"}],
+                        "limit": 10
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}

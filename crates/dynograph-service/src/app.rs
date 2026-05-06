@@ -33,6 +33,7 @@ use crate::{
     resolve_or_create::{ResolveOrCreateRequest, run as run_resolve_or_create},
     schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
+    traverse::{TraverseRequest, run as run_traverse},
 };
 
 #[derive(Clone)]
@@ -104,6 +105,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/batch", post(batch))
         .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
         .route("/v1/graphs/{id}/edges:collect", post(edges_collect))
+        .route("/v1/graphs/{id}/traverse", post(traverse))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -768,6 +770,21 @@ async fn edges_collect(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry.with_engine_read(|engine| run_edges_collect(engine, &id, req))?;
+    Ok(Json(response).into_response())
+}
+
+/// Typed BFS traversal from a start node. See `crate::traverse` for
+/// wire shape, validation, and the multi-step / transitive
+/// semantics. Read-only — single `with_engine_read` lock for the
+/// whole BFS so the candidate scans + per-node edge walks see one
+/// consistent snapshot.
+async fn traverse(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<TraverseRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_read(|engine| run_traverse(engine, &id, req))?;
     Ok(Json(response).into_response())
 }
 
