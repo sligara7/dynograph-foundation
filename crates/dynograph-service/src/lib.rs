@@ -4,6 +4,7 @@
 
 mod app;
 mod auth;
+mod batch;
 mod buildinfo_response;
 mod config;
 mod edge_response;

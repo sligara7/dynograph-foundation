@@ -2248,3 +2248,348 @@ async fn bearer_jwt_post_creates_graph_under_auth() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 }
+
+// =========================================================================
+// /v1/graphs/{id}/batch — atomic multi-op transaction
+// =========================================================================
+
+async fn post_batch(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/batch")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    // Empty body (e.g. plain-text RegistryError) is still useful to surface
+    // for debugging — wrap as a string Value so callers can assert on it.
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+async fn node_exists(app: &axum::Router, node_type: &str, node_id: &str) -> bool {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/v1/graphs/g1/nodes/{node_type}/{node_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    res.status() == StatusCode::OK
+}
+
+async fn edge_exists(app: &axum::Router, edge_type: &str, from_id: &str, to_id: &str) -> bool {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/v1/graphs/g1/edges/{edge_type}/{from_id}/{to_id}"
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    res.status() == StatusCode::OK
+}
+
+#[tokio::test]
+async fn batch_happy_path_mixed_ops_returns_correct_counts() {
+    // Exercise all 6 op kinds in one batch with disjoint targets so
+    // the test isolates "every op kind reaches the engine and counts
+    // correctly" from the read-your-own-writes constraints (those
+    // are exercised in batch_modify_after_create_in_same_batch_fails
+    // and batch_orphan_edge_when_delete_node_in_same_batch).
+    let app = build_app_with_item_graph().await;
+    for n in ["a", "b", "d", "e"] {
+        create_item(&app, n).await;
+    }
+    // Pre-create the edges we'll merge/delete inside the batch.
+    let pre_edges = [
+        json!({"edge_type": "Likes", "from_type": "Item", "from_id": "a", "to_type": "Item", "to_id": "b", "properties": {"weight": 0.1, "source": "manual"}}),
+        json!({"edge_type": "Likes", "from_type": "Item", "from_id": "a", "to_type": "Item", "to_id": "d", "properties": {"weight": 0.2, "source": "manual"}}),
+    ];
+    for body in pre_edges {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs/g1/edges")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+
+    let body = json!({
+        "ops": [
+            // create_node — fresh standalone node
+            {"op": "create_node", "node_type": "Item", "node_id": "c", "properties": {"name": "c"}},
+            // create_edge — between two pre-existing nodes (b and d)
+            {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "b", "to_type": "Item", "to_id": "d", "properties": {"weight": 0.3}},
+            // merge_edge — pre-existing a->d
+            {"op": "merge_edge", "edge_type": "Likes", "from_id": "a", "to_id": "d", "properties": {"weight": 0.7}},
+            // replace_node — pre-existing b
+            {"op": "replace_node", "node_type": "Item", "node_id": "b", "properties": {"name": "renamed-b"}},
+            // delete_edge — pre-existing a->b
+            {"op": "delete_edge", "edge_type": "Likes", "from_id": "a", "to_id": "b"},
+            // delete_node — pre-existing standalone e (no edges to/from)
+            {"op": "delete_node", "node_type": "Item", "node_id": "e"},
+        ]
+    });
+    let (status, resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["ops_applied"], 6);
+    assert_eq!(resp["nodes_created"], 1);
+    assert_eq!(resp["nodes_replaced"], 1);
+    assert_eq!(resp["nodes_deleted"], 1);
+    assert_eq!(resp["edges_created"], 1);
+    assert_eq!(resp["edges_merged"], 1);
+    assert_eq!(resp["edges_deleted"], 1);
+
+    // State assertions
+    assert!(node_exists(&app, "Item", "a").await);
+    assert!(node_exists(&app, "Item", "b").await);
+    assert!(node_exists(&app, "Item", "c").await, "c was created");
+    assert!(node_exists(&app, "Item", "d").await);
+    assert!(!node_exists(&app, "Item", "e").await, "e was deleted");
+    assert!(!edge_exists(&app, "Likes", "a", "b").await, "a->b deleted");
+    assert!(edge_exists(&app, "Likes", "a", "d").await, "a->d still exists, weight merged");
+    assert!(edge_exists(&app, "Likes", "b", "d").await, "b->d created");
+}
+
+/// Companion to the batch_modify_after_create test: confirm the
+/// cascade-orphan hazard documented in batch.rs is real, not a
+/// theoretical edge case. If the engine ever grows buffer-aware
+/// reads, this test will start failing — at which point retract the
+/// warning in batch.rs's module doc and convert this test to assert
+/// the cascade WORKED.
+#[tokio::test]
+async fn batch_orphan_edge_when_delete_node_in_same_batch() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "a").await;
+    create_item(&app, "c").await;
+
+    let body = json!({
+        "ops": [
+            // Create a->c (pure puts, allowed) and then delete a in
+            // the same batch. delete_node a's cascade reads the
+            // pre-batch adjacency — it doesn't see the in-batch
+            // create — so it doesn't clean up a->c.
+            {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "a", "to_type": "Item", "to_id": "c", "properties": {"weight": 0.5}},
+            {"op": "delete_node", "node_type": "Item", "node_id": "a"},
+        ]
+    });
+    let (status, _resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // a is gone, but the orphaned edge a->c persists. This is the
+    // documented hazard.
+    assert!(!node_exists(&app, "Item", "a").await);
+    assert!(
+        edge_exists(&app, "Likes", "a", "c").await,
+        "orphan edge a->c survives — see read-your-own-writes note in batch.rs"
+    );
+}
+
+/// Lock in the read-your-own-writes constraint documented in
+/// batch.rs: an op that needs to read state (`merge_edge`,
+/// `replace_node`, `delete_*`) cannot see writes from earlier ops in
+/// the same batch. If this test ever starts failing because the
+/// engine grew buffer-aware reads, update batch.rs's module doc to
+/// retract the warning — don't just silence the test.
+#[tokio::test]
+async fn batch_modify_after_create_in_same_batch_fails() {
+    let app = build_app_with_item_graph().await;
+
+    let body = json!({
+        "ops": [
+            {"op": "create_node", "node_type": "Item", "node_id": "x", "properties": {"name": "x"}},
+            {"op": "replace_node", "node_type": "Item", "node_id": "x", "properties": {"name": "renamed"}},
+        ]
+    });
+    let (status, resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(resp["op_index"], 1);
+    assert_eq!(resp["op_type"], "replace_node");
+    assert!(
+        resp["error"].as_str().unwrap().contains("not found"),
+        "got: {resp}"
+    );
+    // Whole batch rolled back — the create_node from op 0 didn't land.
+    assert!(!node_exists(&app, "Item", "x").await);
+}
+
+#[tokio::test]
+async fn batch_per_op_failure_rolls_back_all_prior_writes() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "a").await;
+
+    // Op 0 creates "x" successfully; op 1 fails (replace on missing
+    // node); the whole batch must roll back so "x" never persists.
+    let body = json!({
+        "ops": [
+            {"op": "create_node", "node_type": "Item", "node_id": "x", "properties": {"name": "x"}},
+            {"op": "replace_node", "node_type": "Item", "node_id": "missing", "properties": {"name": "y"}},
+            {"op": "create_node", "node_type": "Item", "node_id": "z", "properties": {"name": "z"}},
+        ]
+    });
+    let (status, resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(resp["op_index"], 1);
+    assert_eq!(resp["op_type"], "replace_node");
+    assert!(
+        resp["error"].as_str().unwrap().contains("missing"),
+        "error should mention the missing node id, got: {resp}"
+    );
+
+    // Atomicity gate: nothing the batch attempted should have landed.
+    assert!(
+        !node_exists(&app, "Item", "x").await,
+        "op 0 (create_node x) must have rolled back"
+    );
+    assert!(
+        !node_exists(&app, "Item", "z").await,
+        "op 2 (create_node z) was past the failure but the rollback is order-independent"
+    );
+    assert!(
+        node_exists(&app, "Item", "a").await,
+        "pre-batch state must be untouched"
+    );
+}
+
+#[tokio::test]
+async fn batch_empty_ops_returns_400() {
+    let app = build_app_with_item_graph().await;
+    let body = json!({ "ops": [] });
+    let (status, resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // RegistryError::BadRequest renders as plain text, not JSON — the
+    // post_batch helper wraps non-JSON bodies as Value::String.
+    let msg = resp.as_str().unwrap_or("");
+    assert!(
+        msg.contains("non-empty"),
+        "expected 'non-empty' in error, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn batch_exceeding_cap_returns_400() {
+    let app = build_app_with_item_graph().await;
+    // 1001 trivial ops — exceeds MAX_BATCH_OPS = 1000. Use create_node
+    // ops with distinct ids so the ops themselves would all be valid;
+    // we want to confirm the cap rejects before any apply.
+    let ops: Vec<Value> = (0..1001)
+        .map(|i| {
+            json!({"op": "create_node", "node_type": "Item", "node_id": format!("n{i}"), "properties": {"name": "x"}})
+        })
+        .collect();
+    let body = json!({ "ops": ops });
+    let (status, resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let msg = resp.as_str().unwrap_or("");
+    assert!(
+        msg.contains("1001") && msg.contains("1000"),
+        "expected size + cap in error, got: {msg}"
+    );
+    // None of the create_nodes should have landed.
+    assert!(!node_exists(&app, "Item", "n0").await);
+    assert!(!node_exists(&app, "Item", "n500").await);
+}
+
+#[tokio::test]
+async fn batch_integrate_fragment_shaped_payload_succeeds() {
+    // Acceptance criterion from the storyflow audit memo: integrate_fragment
+    // sends ~67 writes per call (8 chars + 4 locs + 4 events + 4 concepts +
+    // 3 objects + 12 relationships + 1 epoch + assorted edges). We don't
+    // model storyflow's schema here — Item + Likes is enough to exercise the
+    // same shape (lots of node creates followed by lots of edge creates,
+    // all atomic) at comparable scale.
+    let app = build_app_with_item_graph().await;
+
+    let mut ops: Vec<Value> = Vec::new();
+    // 30 nodes
+    for i in 0..30 {
+        ops.push(json!({
+            "op": "create_node",
+            "node_type": "Item",
+            "node_id": format!("n{i}"),
+            "properties": {"name": format!("n{i}")}
+        }));
+    }
+    // 37 edges — fan-out from n0 to every other node, plus a chain n1->n2->...->n7
+    for i in 1..30 {
+        ops.push(json!({
+            "op": "create_edge",
+            "edge_type": "Likes",
+            "from_type": "Item",
+            "from_id": "n0",
+            "to_type": "Item",
+            "to_id": format!("n{i}"),
+            "properties": {"weight": 0.5}
+        }));
+    }
+    for i in 1..9 {
+        ops.push(json!({
+            "op": "create_edge",
+            "edge_type": "Likes",
+            "from_type": "Item",
+            "from_id": format!("n{i}"),
+            "to_type": "Item",
+            "to_id": format!("n{}", i + 1),
+            "properties": {"weight": 0.5}
+        }));
+    }
+    assert_eq!(ops.len(), 67, "test setup invariant");
+
+    let body = json!({ "ops": ops });
+    let (status, resp) = post_batch(&app, body).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["ops_applied"], 67);
+    assert_eq!(resp["nodes_created"], 30);
+    assert_eq!(resp["edges_created"], 37);
+
+    // Spot-check both ends of the payload landed.
+    assert!(node_exists(&app, "Item", "n0").await);
+    assert!(node_exists(&app, "Item", "n29").await);
+    assert!(edge_exists(&app, "Likes", "n0", "n29").await);
+    assert!(edge_exists(&app, "Likes", "n8", "n9").await);
+}
+
+#[tokio::test]
+async fn batch_on_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/batch")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"ops": [{"op": "create_node", "node_type": "Item", "node_id": "x"}]})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
