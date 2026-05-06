@@ -4,6 +4,54 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.2 — 2026-05-05
+
+Second of four primitives identified by the storyflow→foundation
+audit (2026-05-04). Closes the LLM-extraction migration gate.
+
+### Added
+
+- **`POST /v1/graphs/{id}/resolve-or-create`** — fuzzy/vector entity
+  resolution with create-on-miss semantics. Exposes the existing
+  `dynograph-resolution` crate (token_sort_ratio + jaro_winkler with
+  cosine-similarity tiebreaker) over HTTP. Storyflow's LLM
+  extraction funnels every Character through the embedded
+  `graph.create_or_resolve_node_scoped` today; after migration each
+  Character is one HTTP call to this route.
+
+  Body carries `node_type` + `properties` (including the query name
+  at `properties.name`) + optional `embedding` for vector tiebreaking
+  + optional `scope: {prop, value}` to filter candidates by an
+  indexed property (e.g. `story_id`). Returns
+  `{id, was_created, match_kind}` where `match_kind` is one of
+  `auto_merge` / `vector_merge` / `created_new` — extension over the
+  audit's `{id, was_created}` sketch, distinguishes auto-merge from
+  vector-merge for storyflow-side observability and threshold tuning.
+
+  Pre-flight validation pushes every checkable failure ahead of any
+  writes (all 400, no state changes): unknown node_type; type with
+  no `resolution` block in schema (no silent fallback to defaults —
+  explicit-is-better); missing or non-string `properties.name`;
+  scope.prop not declared as `indexed: true` (otherwise
+  `scan_nodes_by_property` silently returns empty, masking
+  misconfiguration as "everything was a new entity"); embedding
+  empty; embedding dim mismatched against existing index.
+
+  CreateNew dispatch generates a UUIDv4, writes the node, then sets
+  the embedding sidecar + inserts into HNSW. **Sequential, not
+  batched** — `set_embedding`'s existence check reads the storage
+  backend, not the batch buffer (same read-your-own-writes
+  constraint documented in `batch.rs` for v0.5.1). All checkable
+  failures are pre-flighted; only a pure storage-I/O fault between
+  the two writes can tear the pair, which is caller-retry-safe.
+
+  PR: [#5](https://github.com/sligara7/dynograph-foundation/pull/5).
+  Aliases (mentioned in the audit memo) deliberately omitted from
+  v1 — the underlying resolver doesn't natively support multi-name
+  queries; orchestrating that at the HTTP layer would re-implement
+  the threshold logic. Extend the resolver crate properly if a real
+  workload needs them.
+
 ## v0.5.1 — 2026-05-05
 
 First of four primitives identified by the storyflow→foundation
