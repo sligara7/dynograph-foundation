@@ -23,6 +23,7 @@ use crate::{
     batch::{BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     edge_response::EdgeResponse,
+    edges_collect::{EdgesCollectRequest, run as run_edges_collect},
     embedding_response::EmbeddingResponse,
     metadata_response::GraphMetadataResponse,
     metrics_state::MetricsState,
@@ -102,6 +103,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/v1/graphs/{id}/batch", post(batch))
         .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
+        .route("/v1/graphs/{id}/edges:collect", post(edges_collect))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -753,6 +755,19 @@ async fn resolve_or_create(
     let entry = graph_entry(&state, &id)?;
     let response = entry
         .with_state_write(|engine, indexes| run_resolve_or_create(engine, indexes, &id, req))?;
+    Ok(Json(response).into_response())
+}
+
+/// Fan-out edge collection. See `crate::edges_collect` for wire
+/// shape, validation, and the per-node-iteration cost model.
+/// Read-only — single `with_engine_read` lock for the whole scan.
+async fn edges_collect(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<EdgesCollectRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_read(|engine| run_edges_collect(engine, &id, req))?;
     Ok(Json(response).into_response())
 }
 

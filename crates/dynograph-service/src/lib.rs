@@ -8,6 +8,7 @@ mod batch;
 mod buildinfo_response;
 mod config;
 mod edge_response;
+mod edges_collect;
 mod embedding_response;
 mod metadata_response;
 mod metrics_state;
@@ -18,6 +19,7 @@ mod resolve_or_create;
 mod schema_evolution;
 mod schema_response;
 mod similar_response;
+mod validation;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};

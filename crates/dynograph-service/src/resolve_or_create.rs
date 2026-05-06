@@ -75,6 +75,7 @@ use dynograph_storage::StorageEngine;
 use dynograph_vector::HnswIndex;
 
 use crate::registry::RegistryError;
+use crate::validation::validate_indexed_property;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct ResolveOrCreateRequest {
@@ -160,23 +161,7 @@ pub(crate) fn run(
     // (4) If scoped, the scope prop must be indexed — otherwise
     // scan_nodes_by_property silently returns empty.
     if let Some(ref scope) = req.scope {
-        let pd = engine
-            .schema()
-            .node_types
-            .get(&req.node_type)
-            .and_then(|nt| nt.properties.get(&scope.prop))
-            .ok_or_else(|| {
-                RegistryError::BadRequest(format!(
-                    "scope.prop {:?} is not declared on node type {}",
-                    scope.prop, req.node_type
-                ))
-            })?;
-        if !pd.indexed {
-            return Err(RegistryError::BadRequest(format!(
-                "scope.prop {:?} is not indexed on node type {} — cannot scope-filter (declare `indexed: true` in schema)",
-                scope.prop, req.node_type
-            )));
-        }
+        validate_indexed_property(engine.schema(), &req.node_type, &scope.prop, "scope")?;
     }
 
     // (5) Embedding pre-flight: non-empty + dim matches existing

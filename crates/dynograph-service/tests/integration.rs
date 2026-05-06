@@ -2996,3 +2996,496 @@ async fn resolve_or_create_embedding_dim_mismatch_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+// =========================================================================
+// /v1/graphs/{id}/edges:collect — fan-out edge collection
+// =========================================================================
+
+/// Multi-type schema for edges:collect tests. Three node types
+/// (Character, Event, Location) all carry an indexed `story_id` for
+/// scope-filter tests; three edge types with varied endpoint shapes:
+/// - MENTIONS: Character → (Character | Event | Location)  (Multiple)
+/// - VISITS:   Character → Location                         (Single)
+/// - INVOLVES: Event → *                                    (wildcard)
+fn knowledge_graph_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "demo",
+            "version": 1,
+            "node_types": {
+                "Character": {
+                    "properties": {
+                        "name":     {"type": "string", "required": true},
+                        "story_id": {"type": "string", "indexed": true}
+                    }
+                },
+                "Event": {
+                    "properties": {
+                        "name":     {"type": "string", "required": true},
+                        "story_id": {"type": "string", "indexed": true}
+                    }
+                },
+                "Location": {
+                    "properties": {
+                        "name":     {"type": "string", "required": true},
+                        "story_id": {"type": "string", "indexed": true}
+                    }
+                }
+            },
+            "edge_types": {
+                "MENTIONS": {
+                    "from": "Character",
+                    "to":   ["Character", "Event", "Location"]
+                },
+                "VISITS": {
+                    "from": "Character",
+                    "to":   "Location"
+                },
+                "INVOLVES": {
+                    "from": "Event",
+                    "to":   "*"
+                }
+            }
+        }
+    })
+}
+
+async fn build_app_with_knowledge_graph() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(knowledge_graph_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+async fn create_typed_node(
+    app: &axum::Router,
+    node_type: &str,
+    node_id: &str,
+    name: &str,
+    story_id: &str,
+) {
+    let body = json!({
+        "node_type": node_type,
+        "node_id": node_id,
+        "properties": {"name": name, "story_id": story_id}
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "create_typed_node({node_type}/{node_id})"
+    );
+}
+
+async fn create_typed_edge(
+    app: &axum::Router,
+    edge_type: &str,
+    from_type: &str,
+    from_id: &str,
+    to_type: &str,
+    to_id: &str,
+) {
+    let body = json!({
+        "edge_type": edge_type,
+        "from_type": from_type, "from_id": from_id,
+        "to_type":   to_type,   "to_id":   to_id,
+        "properties": {}
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/edges")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "create_typed_edge({edge_type} {from_id}->{to_id})"
+    );
+}
+
+async fn post_collect(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/edges:collect")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+/// Build a small two-story knowledge graph used by several tests.
+/// Story A: char-A1 MENTIONS char-A2; char-A1 VISITS loc-A1; ev-A1
+/// INVOLVES char-A1. Story B: char-B1 MENTIONS char-B2.
+async fn seed_two_story_graph(app: &axum::Router) {
+    create_typed_node(app, "Character", "char-A1", "Alice", "story-A").await;
+    create_typed_node(app, "Character", "char-A2", "Bob", "story-A").await;
+    create_typed_node(app, "Location", "loc-A1", "Tower", "story-A").await;
+    create_typed_node(app, "Event", "ev-A1", "Duel", "story-A").await;
+    create_typed_node(app, "Character", "char-B1", "Carol", "story-B").await;
+    create_typed_node(app, "Character", "char-B2", "Dave", "story-B").await;
+
+    create_typed_edge(
+        app,
+        "MENTIONS",
+        "Character",
+        "char-A1",
+        "Character",
+        "char-A2",
+    )
+    .await;
+    create_typed_edge(app, "VISITS", "Character", "char-A1", "Location", "loc-A1").await;
+    create_typed_edge(app, "INVOLVES", "Event", "ev-A1", "Character", "char-A1").await;
+    create_typed_edge(
+        app,
+        "MENTIONS",
+        "Character",
+        "char-B1",
+        "Character",
+        "char-B2",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn edges_collect_filtered_source_returns_only_in_scope_edges() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {
+                "type": "Character",
+                "filter": {"prop": "story_id", "value": "story-A"}
+            },
+            "edge_types": ["MENTIONS", "VISITS"],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let edges = resp["edges"].as_array().unwrap();
+    assert_eq!(
+        edges.len(),
+        2,
+        "expected MENTIONS+VISITS from char-A1 only, got: {resp}"
+    );
+    assert_eq!(resp["truncated"], false);
+    let edge_pairs: Vec<(String, String)> = edges
+        .iter()
+        .map(|e| {
+            (
+                e["edge_type"].as_str().unwrap().to_string(),
+                e["to_id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert!(edge_pairs.contains(&("MENTIONS".into(), "char-A2".into())));
+    assert!(edge_pairs.contains(&("VISITS".into(), "loc-A1".into())));
+    // story-B's MENTIONS must not appear.
+    assert!(!edge_pairs.contains(&("MENTIONS".into(), "char-B2".into())));
+    // Every returned edge should carry from_type since we know it from the scan.
+    for e in edges {
+        assert_eq!(e["from_type"], "Character");
+    }
+}
+
+#[tokio::test]
+async fn edges_collect_wildcard_source_type_iterates_every_node_type() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "*", "filter": {"prop": "story_id", "value": "story-A"}},
+            "edge_types": ["MENTIONS", "VISITS", "INVOLVES"],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let edges = resp["edges"].as_array().unwrap();
+    // story-A has 3 outgoing edges: MENTIONS char-A2, VISITS loc-A1, INVOLVES char-A1.
+    assert_eq!(edges.len(), 3);
+    let from_types: std::collections::HashSet<&str> = edges
+        .iter()
+        .map(|e| e["from_type"].as_str().unwrap())
+        .collect();
+    // Should include both Character (mentions+visits) AND Event (involves).
+    assert!(from_types.contains("Character"));
+    assert!(from_types.contains("Event"));
+}
+
+#[tokio::test]
+async fn edges_collect_array_source_types() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Limit to Character + Event sources (skip Location, which has no
+    // outgoing edges in our seed anyway — confirms array handling).
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": ["Character", "Event"], "filter": {"prop": "story_id", "value": "story-A"}},
+            "edge_types": ["MENTIONS", "VISITS", "INVOLVES"],
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["edges"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn edges_collect_adjacency_format_groups_by_source() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Character", "filter": {"prop": "story_id", "value": "story-A"}},
+            "edge_types": ["MENTIONS", "VISITS"],
+            "format": "adjacency",
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert!(
+        resp["edges"].is_null(),
+        "adjacency response shouldn't have an `edges` key"
+    );
+    let adj = resp["adjacency"].as_object().unwrap();
+    // char-A1 has 2 outgoing edges (MENTIONS char-A2, VISITS loc-A1).
+    // char-A2 has 0 outgoing.
+    assert!(adj.contains_key("char-A1"));
+    assert!(!adj.contains_key("char-A2"), "no outgoing edges → no entry");
+    let a1_edges = adj["char-A1"].as_array().unwrap();
+    assert_eq!(a1_edges.len(), 2);
+    // Adjacency entries should NOT carry from_id (it's the key).
+    for e in a1_edges {
+        assert!(e["from_id"].is_null());
+    }
+}
+
+#[tokio::test]
+async fn edges_collect_resolve_target_single_endpoint_attaches_target_node() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // VISITS has Single("Location") endpoint — one candidate type, one lookup.
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Character", "filter": {"prop": "story_id", "value": "story-A"}},
+            "edge_types": ["VISITS"],
+            "resolve_target": true,
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let edges = resp["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    let target = &edges[0]["target"];
+    assert_eq!(target["node_type"], "Location");
+    assert_eq!(target["node_id"], "loc-A1");
+    assert_eq!(target["properties"]["name"], "Tower");
+}
+
+#[tokio::test]
+async fn edges_collect_resolve_target_list_endpoint_picks_correct_type() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // MENTIONS has Multiple(["Character", "Event", "Location"]) — must
+    // try each candidate and pick the one where the to_id resolves.
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Character", "filter": {"prop": "story_id", "value": "story-A"}},
+            "edge_types": ["MENTIONS"],
+            "resolve_target": true,
+            "limit": 100
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let edges = resp["edges"].as_array().unwrap();
+    assert_eq!(edges.len(), 1);
+    // char-A1 MENTIONS char-A2 → target should resolve as Character.
+    assert_eq!(edges[0]["target"]["node_type"], "Character");
+    assert_eq!(edges[0]["target"]["node_id"], "char-A2");
+}
+
+#[tokio::test]
+async fn edges_collect_limit_truncates_and_flags() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Story-A has 3 outgoing edges total; limit=2 should truncate.
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "*", "filter": {"prop": "story_id", "value": "story-A"}},
+            "edge_types": ["MENTIONS", "VISITS", "INVOLVES"],
+            "limit": 2
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["edges"].as_array().unwrap().len(), 2);
+    assert_eq!(resp["truncated"], true);
+}
+
+#[tokio::test]
+async fn edges_collect_empty_edge_types_returns_400() {
+    let app = build_app_with_knowledge_graph().await;
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Character"},
+            "edge_types": [],
+            "limit": 10
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("non-empty"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn edges_collect_unknown_edge_type_returns_400() {
+    let app = build_app_with_knowledge_graph().await;
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Character"},
+            "edge_types": ["MENTIONS", "BOGUS"],
+            "limit": 10
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(resp.as_str().unwrap_or("").contains("BOGUS"), "got: {resp}");
+}
+
+#[tokio::test]
+async fn edges_collect_unknown_source_type_returns_400() {
+    let app = build_app_with_knowledge_graph().await;
+    let (status, _) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Bogus"},
+            "edge_types": ["MENTIONS"],
+            "limit": 10
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn edges_collect_limit_out_of_range_returns_400() {
+    let app = build_app_with_knowledge_graph().await;
+    for bad in [0usize, 10_001] {
+        let (status, _) = post_collect(
+            &app,
+            json!({
+                "source": {"type": "Character"},
+                "edge_types": ["MENTIONS"],
+                "limit": bad
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "limit={bad}");
+    }
+}
+
+#[tokio::test]
+async fn edges_collect_filter_on_unindexed_prop_returns_400() {
+    let app = build_app_with_knowledge_graph().await;
+    let (status, resp) = post_collect(
+        &app,
+        json!({
+            "source": {"type": "Character", "filter": {"prop": "name", "value": "Alice"}},
+            "edge_types": ["MENTIONS"],
+            "limit": 10
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("not indexed"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn edges_collect_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/edges:collect")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "source": {"type": "Character"},
+                        "edge_types": ["MENTIONS"],
+                        "limit": 10
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
