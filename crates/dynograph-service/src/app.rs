@@ -690,7 +690,9 @@ async fn batch(
     let entry = graph_entry(&state, &id)?;
 
     if req.ops.is_empty() {
-        return Err(RegistryError::BadRequest("ops must be non-empty".to_string()));
+        return Err(RegistryError::BadRequest(
+            "ops must be non-empty".to_string(),
+        ));
     }
     if req.ops.len() > MAX_BATCH_OPS {
         return Err(RegistryError::BadRequest(format!(

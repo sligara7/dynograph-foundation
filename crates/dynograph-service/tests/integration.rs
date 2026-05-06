@@ -2296,9 +2296,7 @@ async fn edge_exists(app: &axum::Router, edge_type: &str, from_id: &str, to_id: 
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!(
-                    "/v1/graphs/g1/edges/{edge_type}/{from_id}/{to_id}"
-                ))
+                .uri(format!("/v1/graphs/g1/edges/{edge_type}/{from_id}/{to_id}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -2372,7 +2370,10 @@ async fn batch_happy_path_mixed_ops_returns_correct_counts() {
     assert!(node_exists(&app, "Item", "d").await);
     assert!(!node_exists(&app, "Item", "e").await, "e was deleted");
     assert!(!edge_exists(&app, "Likes", "a", "b").await, "a->b deleted");
-    assert!(edge_exists(&app, "Likes", "a", "d").await, "a->d still exists, weight merged");
+    assert!(
+        edge_exists(&app, "Likes", "a", "d").await,
+        "a->d still exists, weight merged"
+    );
     assert!(edge_exists(&app, "Likes", "b", "d").await, "b->d created");
 }
 

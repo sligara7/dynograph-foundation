@@ -170,11 +170,7 @@ pub(crate) struct BatchOpError {
 /// into per-op errors so the batch rolls back — silently treating a
 /// missing-target replace/delete as a no-op would violate the
 /// no-silent-fallbacks rule.
-fn apply_op(
-    engine: &mut StorageEngine,
-    graph_id: &str,
-    op: BatchOp,
-) -> Result<OpEffect, String> {
+fn apply_op(engine: &mut StorageEngine, graph_id: &str, op: BatchOp) -> Result<OpEffect, String> {
     match op {
         BatchOp::CreateNode {
             node_type,
