@@ -19,6 +19,7 @@ mod resolve_or_create;
 mod schema_evolution;
 mod schema_response;
 mod similar_response;
+mod validation;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};

@@ -78,6 +78,7 @@ use dynograph_core::{EdgeEndpoint, Schema, Value};
 use dynograph_storage::StorageEngine;
 
 use crate::registry::RegistryError;
+use crate::validation::validate_indexed_property;
 
 /// Hard upper bound on a single response. Above this, callers should
 /// shard via filter or pagination (not yet supported — add when a real
@@ -118,26 +119,18 @@ impl SourceTypeFilter {
     /// schema. Validates that every named type exists.
     fn resolve<'a>(&'a self, schema: &'a Schema) -> Result<Vec<&'a str>, RegistryError> {
         let names: Vec<&str> = match self {
-            SourceTypeFilter::Single(s) if s == EdgeEndpoint::WILDCARD => {
-                schema.node_types.keys().map(String::as_str).collect()
-            }
             SourceTypeFilter::Single(s) => vec![s.as_str()],
-            SourceTypeFilter::Multiple(ss) => {
-                if ss.iter().any(|s| s == EdgeEndpoint::WILDCARD) {
-                    schema.node_types.keys().map(String::as_str).collect()
-                } else {
-                    ss.iter().map(String::as_str).collect()
-                }
-            }
+            SourceTypeFilter::Multiple(ss) => ss.iter().map(String::as_str).collect(),
         };
-        for n in &names {
+        let expanded = expand_node_type_wildcards(&names, schema);
+        for n in &expanded {
             if !schema.node_types.contains_key(*n) {
                 return Err(RegistryError::BadRequest(format!(
                     "source.type references unknown node type: {n}"
                 )));
             }
         }
-        Ok(names)
+        Ok(expanded)
     }
 }
 
@@ -250,31 +243,40 @@ pub(crate) fn run(
     // failure mode `/resolve-or-create` rejects.
     if let Some(ref f) = req.source.filter {
         for st in &source_types {
-            let nt = schema
-                .node_types
-                .get(*st)
-                .expect("source_types validated above");
-            let pd = nt.properties.get(&f.prop).ok_or_else(|| {
-                RegistryError::BadRequest(format!(
-                    "source.filter.prop {:?} is not declared on node type {st}",
-                    f.prop
-                ))
-            })?;
-            if !pd.indexed {
-                return Err(RegistryError::BadRequest(format!(
-                    "source.filter.prop {:?} is not indexed on node type {st} — cannot scope-filter",
-                    f.prop
-                )));
-            }
+            validate_indexed_property(schema, st, &f.prop, "source.filter")?;
         }
     }
 
     let edge_type_set: std::collections::HashSet<&str> =
         req.edge_types.iter().map(String::as_str).collect();
 
-    // ---- Fan-out ----
+    // Pre-resolve candidate target types per requested edge_type when
+    // resolve_target is on. Without this, every matching edge would
+    // re-walk `schema.edge_types[edge_type].to` in the inner loop —
+    // O(edges) HashMap lookups for what's a fixed function of the
+    // request. Surfaces non_exhaustive EdgeEndpoint variants up-front
+    // (before any scans) too.
+    let candidates_by_edge_type: HashMap<&str, Vec<&str>> = if req.resolve_target {
+        req.edge_types
+            .iter()
+            .map(|et| {
+                let edge_def = schema
+                    .edge_types
+                    .get(et)
+                    .expect("edge_types validated above");
+                let candidates = candidate_target_types(&edge_def.to, schema, et)?;
+                Ok((et.as_str(), candidates))
+            })
+            .collect::<Result<_, RegistryError>>()?
+    } else {
+        HashMap::new()
+    };
 
-    let mut collected: Vec<(String, CollectedEdge)> = Vec::new();
+    // ---- Fan-out (single pass; branch on format inside the loop) ----
+
+    let mut edges_acc: Vec<CollectedEdge> = Vec::new();
+    let mut adj_acc: HashMap<String, Vec<AdjacencyEntry>> = HashMap::new();
+    let mut count: usize = 0;
     let mut truncated = false;
 
     'outer: for source_type in &source_types {
@@ -291,24 +293,38 @@ pub(crate) fn run(
                 }
 
                 let target = if req.resolve_target {
-                    resolve_target_node(engine, graph_id, schema, &edge.edge_type, &edge.to_id)?
+                    let candidates = candidates_by_edge_type
+                        .get(edge.edge_type.as_str())
+                        .expect("pre-cached for every requested edge_type");
+                    fetch_target(engine, graph_id, candidates, &edge.to_id)?
                 } else {
                     None
                 };
 
-                collected.push((
-                    edge.from_id.clone(),
-                    CollectedEdge {
+                match req.format {
+                    ResponseFormat::Edges => edges_acc.push(CollectedEdge {
                         edge_type: edge.edge_type,
                         from_type: (*source_type).to_string(),
                         from_id: edge.from_id,
                         to_id: edge.to_id,
                         properties: edge.properties,
                         target,
-                    },
-                ));
+                    }),
+                    ResponseFormat::Adjacency => {
+                        adj_acc
+                            .entry(edge.from_id)
+                            .or_default()
+                            .push(AdjacencyEntry {
+                                edge_type: edge.edge_type,
+                                to_id: edge.to_id,
+                                properties: edge.properties,
+                                target,
+                            });
+                    }
+                }
 
-                if collected.len() >= req.limit {
+                count += 1;
+                if count >= req.limit {
                     truncated = true;
                     break 'outer;
                 }
@@ -316,77 +332,70 @@ pub(crate) fn run(
         }
     }
 
-    // ---- Shape into requested format ----
-
     Ok(match req.format {
         ResponseFormat::Edges => EdgesCollectResponse::Edges {
-            edges: collected.into_iter().map(|(_, e)| e).collect(),
+            edges: edges_acc,
             truncated,
         },
-        ResponseFormat::Adjacency => {
-            let mut adjacency: HashMap<String, Vec<AdjacencyEntry>> = HashMap::new();
-            for (from_id, e) in collected {
-                adjacency.entry(from_id).or_default().push(AdjacencyEntry {
-                    edge_type: e.edge_type,
-                    to_id: e.to_id,
-                    properties: e.properties,
-                    target: e.target,
-                });
-            }
-            EdgesCollectResponse::Adjacency {
-                adjacency,
-                truncated,
-            }
-        }
+        ResponseFormat::Adjacency => EdgesCollectResponse::Adjacency {
+            adjacency: adj_acc,
+            truncated,
+        },
     })
 }
 
-/// Try to find the target node by walking the candidate types
-/// declared in the schema's `EdgeTypeDef.to`. First successful
-/// `get_node` wins. Returns `None` if no candidate type has the node
-/// (orphan — referential integrity gap; caller-visible).
-fn resolve_target_node(
-    engine: &StorageEngine,
-    graph_id: &str,
-    schema: &Schema,
+/// Returns the candidate node-type names that an `EdgeEndpoint` can
+/// connect to, expanding wildcards via the schema. `edge_type` is
+/// only used for the error message in the non_exhaustive arm.
+fn candidate_target_types<'a>(
+    endpoint: &'a EdgeEndpoint,
+    schema: &'a Schema,
     edge_type: &str,
-    to_id: &str,
-) -> Result<Option<TargetNode>, RegistryError> {
-    let edge_def = schema.edge_types.get(edge_type).ok_or_else(|| {
-        // Validated at the top level, but defensive — schema could in
-        // principle be replaced under a long-running call.
-        RegistryError::BadRequest(format!("edge_type vanished from schema: {edge_type}"))
-    })?;
-
-    // EdgeEndpoint is #[non_exhaustive]; the wildcard arm guards
-    // against a future variant landing in dynograph-core without
-    // updating this dispatch. Returning a 500-ish bad request beats
-    // silently widening to "try every type" (which would mask the
-    // missing handler) or panicking (which would log without the
-    // graph_id context).
-    let candidate_types: Vec<&str> = match &edge_def.to {
-        EdgeEndpoint::Single(t) if t == EdgeEndpoint::WILDCARD => {
-            schema.node_types.keys().map(String::as_str).collect()
-        }
+) -> Result<Vec<&'a str>, RegistryError> {
+    let names: Vec<&str> = match endpoint {
         EdgeEndpoint::Single(t) => vec![t.as_str()],
-        EdgeEndpoint::Multiple(ts) => {
-            if ts.iter().any(|t| t == EdgeEndpoint::WILDCARD) {
-                schema.node_types.keys().map(String::as_str).collect()
-            } else {
-                ts.iter().map(String::as_str).collect()
-            }
-        }
+        EdgeEndpoint::Multiple(ts) => ts.iter().map(String::as_str).collect(),
+        // EdgeEndpoint is #[non_exhaustive] in dynograph-core. If a
+        // variant lands without updating this dispatch, fail loudly
+        // here rather than panicking or silently widening the
+        // candidate set. Recovery is either a foundation upgrade
+        // (preferred) or rolling the schema back to a known variant.
         _ => {
             return Err(RegistryError::BadRequest(format!(
-                "edge type {edge_type} uses an EdgeEndpoint variant this foundation version doesn't recognize"
+                "edge type {edge_type}: EdgeTypeDef.to uses an EdgeEndpoint variant unknown to this foundation build (likely needs a foundation upgrade or a schema rollback) — debug repr: {endpoint:?}"
             )));
         }
     };
+    Ok(expand_node_type_wildcards(&names, schema))
+}
 
+/// If any name in `requested` is the wildcard `"*"`, returns every
+/// node type in the schema. Otherwise returns the requested names
+/// as-is. Shared between `SourceTypeFilter::resolve` and
+/// `candidate_target_types` so the wildcard-expansion semantics are
+/// defined exactly once.
+fn expand_node_type_wildcards<'a>(requested: &[&'a str], schema: &'a Schema) -> Vec<&'a str> {
+    if requested.contains(&EdgeEndpoint::WILDCARD) {
+        schema.node_types.keys().map(String::as_str).collect()
+    } else {
+        requested.to_vec()
+    }
+}
+
+/// Walk pre-resolved candidate node types until `engine.get_node`
+/// returns one. `None` means orphan (no candidate type has this id) —
+/// referential-integrity gap, caller-visible via `target.is_none()`
+/// in the response.
+fn fetch_target(
+    engine: &StorageEngine,
+    graph_id: &str,
+    candidate_types: &[&str],
+    to_id: &str,
+) -> Result<Option<TargetNode>, RegistryError> {
     for ct in candidate_types {
         if let Some(stored) = engine.get_node(graph_id, ct, to_id)? {
             return Ok(Some(TargetNode {
-                node_type: ct.to_string(),
+                node_type: (*ct).to_string(),
                 node_id: stored.node_id,
                 properties: stored.properties,
             }));
