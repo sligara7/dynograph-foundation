@@ -20,6 +20,7 @@ use dynograph_vector::HnswIndex;
 
 use crate::{
     auth::{AuthProvider, NoAuth},
+    batch::{BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     edge_response::EdgeResponse,
     embedding_response::EmbeddingResponse,
@@ -98,6 +99,7 @@ pub fn app(state: AppState) -> Router {
             "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
             get(get_edge).patch(merge_edge).delete(delete_edge),
         )
+        .route("/v1/graphs/{id}/batch", post(batch))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -672,6 +674,67 @@ async fn delete_edge(
             from_id,
             to_id,
         })
+    }
+}
+
+/// Atomic multi-op transaction. See `crate::batch` for the wire shape
+/// and design rationale. Whole batch runs under one `with_state_write`
+/// lock so (a) ops and HNSW maintenance for any `delete_node` happen
+/// in lockstep, and (b) concurrent readers either see pre-batch or
+/// post-batch state, never a torn intermediate.
+async fn batch(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<BatchRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+
+    if req.ops.is_empty() {
+        return Err(RegistryError::BadRequest(
+            "ops must be non-empty".to_string(),
+        ));
+    }
+    if req.ops.len() > MAX_BATCH_OPS {
+        return Err(RegistryError::BadRequest(format!(
+            "ops length {} exceeds maximum {MAX_BATCH_OPS}",
+            req.ops.len()
+        )));
+    }
+
+    enum Outcome {
+        Success(BatchResponse),
+        OpFailed(BatchOpError),
+        CommitFailed(dynograph_core::DynoError),
+    }
+
+    let outcome = entry.with_state_write(|engine, indexes| -> Outcome {
+        engine.begin_batch();
+        match run_ops(engine, &id, req.ops) {
+            Ok((response, deleted_nodes)) => match engine.commit_batch() {
+                Ok(_) => {
+                    // HNSW maintenance for delete_node ops happens
+                    // post-commit so a commit failure leaves the
+                    // index untouched (matches the storage rollback).
+                    for (node_type, node_id) in deleted_nodes {
+                        if let Some(index) = indexes.get_mut(&node_type) {
+                            index.remove(&node_id);
+                        }
+                    }
+                    Outcome::Success(response)
+                }
+                Err(e) => Outcome::CommitFailed(e),
+            },
+            Err(per_op_err) => {
+                engine.discard_batch();
+                Outcome::OpFailed(per_op_err)
+            }
+        }
+    });
+
+    match outcome {
+        Outcome::Success(resp) => Ok(Json(resp).into_response()),
+        Outcome::OpFailed(err) => Ok((StatusCode::BAD_REQUEST, Json(err)).into_response()),
+        Outcome::CommitFailed(e) => Err(RegistryError::Storage(e)),
     }
 }
 
