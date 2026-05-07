@@ -4,7 +4,7 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## v0.5.5 — unreleased
+## v0.5.5 — 2026-05-06
 
 Contract change: read-your-own-writes within a batch.
 
