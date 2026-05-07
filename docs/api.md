@@ -300,24 +300,25 @@ failing op in their request.
 - Empty `ops` → `400 "ops must be non-empty"`.
 - `ops.len() > 1000` → `400 "ops length N exceeds maximum 1000"`.
 
-**Two known constraints — read before constructing batch payloads:**
+**Read-your-own-writes within a batch (v0.5.5+):**
 
-1. **No read-your-own-writes within a batch.** The engine batch
-   buffer is write-only — `engine.put()` buffers, but `engine.get()`
-   reads the backend directly. Ops whose precondition is a `get()`
-   (`merge_edge`, `replace_node`, `delete_*`) see pre-batch state.
-   So `create_node X` followed by `replace_node X` in the same
-   batch fails with "node not found" → batch rolls back. Pure-put
-   chains (`create_node` + `create_edge` referencing it) work
-   fine.
-2. **Cascade-delete misses in-batch creates.** `delete_node X` in
-   the same batch as `create_edge X→Y` leaves an orphaned edge —
-   the cascade reads pre-batch adjacency. Split the work across
-   two calls if you need delete-then-recreate atomicity.
+Reads inside an active batch see the post-buffer view. Sequences
+that compose naturally:
 
-Both constraints have hazard tests in
-`crates/dynograph-service/tests/integration.rs` that lock the
-behavior in.
+- `create_node X` then `replace_node X` — the replace sees the
+  buffered create and updates it. Both apply at commit.
+- `create_edge X→Y` then `merge_edge X→Y` — the merge sees the
+  buffered create and rolls property changes on top.
+- `create_edge X→Y` then `delete_node X` — the cascade sees the
+  buffered edge and tombstones it; no orphan survives.
+
+A discarded batch (`discard_batch()`) leaves the backend untouched —
+the in-batch view never lands.
+
+Pre-v0.5.5 the buffer was write-only. Hazard tests in
+`crates/dynograph-service/tests/integration.rs` lock the new
+semantics in (replace-after-create succeeds; cascade-after-create
+cleans up).
 
 ## Resolve-or-create (fuzzy/vector entity resolution)
 
@@ -375,11 +376,11 @@ or a fresh UUIDv4 on create.
 
 **Atomicity:** the whole call runs under one engine write lock so
 candidate scan + resolve + (create + set_embedding + HNSW insert)
-compose. The CreateNew path is sequential, NOT batched —
-`set_embedding` does a backend `get` to verify node existence,
-which can't see writes in the batch buffer (same
-read-your-own-writes constraint as `/batch`). Pre-flight handles
-every checkable failure; only a pure storage-I/O fault between the
+compose. The CreateNew path is currently sequential, not batched —
+v0.5.5+ buffer-aware reads would make it safe to wrap in a batch
+(`set_embedding`'s existence check sees the buffered create), but
+that refactor is a follow-up. Today, pre-flight handles every
+checkable failure; only a pure storage-I/O fault between the
 node-create and embedding-set can tear the pair, which is
 caller-retry-safe (a retry will auto-merge to the just-created node
 and `set_embedding` again).
