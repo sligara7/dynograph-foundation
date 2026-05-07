@@ -19,29 +19,14 @@
 //! mechanically translate single calls into batch entries; we don't
 //! introduce a parallel JSON dialect to maintain.
 //!
-//! ## Read-your-own-writes within a batch (v0.5.5+)
+//! ## Read-your-own-writes within a batch
 //!
 //! Reads inside an active batch see the post-buffer view: a `Put` or
 //! `Delete` queued earlier in the same batch is visible to subsequent
-//! `get` and `prefix_scan` calls. Concretely:
-//!
-//! - `create_node X` then `replace_node X` in the same batch — the
-//!   replace sees the buffered create and updates it. Both ops apply
-//!   atomically at commit.
-//! - `create_edge X→Y` then `merge_edge X→Y` — the merge sees the
-//!   buffered create and rolls its property update on top.
-//! - `create_edge X→Y` then `delete_node X` — the cascade sees the
-//!   buffered edge and tombstones it; no orphan survives.
-//!
-//! Pre-v0.5.5 the buffer was write-only and these compositions either
-//! failed with "node not found" or left orphans. The semantic flipped
-//! in v0.5.5 to match the natural transactional intuition; see
-//! `dynograph-storage::engine::overlay_buffer_on_scan` and the
-//! buffer-walk in `get` for the implementation.
-//!
-//! Discarded batches still leave the backend untouched — the buffer
-//! drops without a flush, so the in-batch view is invisible to anyone
-//! after `discard_batch()`.
+//! `get` and `prefix_scan` calls. Compositions like `create_node X`
+//! then `replace_node X`, or `create_edge X→Y` then `delete_node X`
+//! (which cascades), apply atomically at commit. A discarded batch
+//! leaves the backend untouched — the buffer drops without a flush.
 
 use std::collections::HashMap;
 

@@ -239,13 +239,8 @@ pub(crate) fn run(
         }),
         ResolutionResult::CreateNew => {
             // Sequential: create_node, then set_embedding (if any),
-            // then HNSW insert. Could be wrapped in begin_batch /
-            // commit_batch in a follow-up — v0.5.5+ buffer-aware reads
-            // make set_embedding's existence check work against the
-            // buffered create. For now pre-flight pushes every
-            // checkable failure mode ahead of these writes, so the
-            // only torn-state window is a pure storage-I/O fault
-            // between create_node and set_embedding (caller-retry-safe).
+            // then HNSW insert. See module doc on `## Atomicity` for
+            // the torn-state window and follow-up batch-wrap plan.
             let node_id = Uuid::new_v4().to_string();
             let node_type = req.node_type.clone();
             let properties = req.properties;

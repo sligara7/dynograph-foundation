@@ -231,10 +231,39 @@ enum BufferedOp {
     },
 }
 
+/// Result of asking a buffered op "do you affect this `(cf, key)`?".
+/// `Put(value)` = key has this value buffered; `Tombstoned` = key is
+/// shadowed by a buffered `Delete` or covering `PrefixDelete`; the
+/// outer `None` (returned by `BufferedOp::affecting`) = this op doesn't
+/// match.
+enum BufferedEffect<'a> {
+    Put(&'a [u8]),
+    Tombstoned,
+}
+
 impl BufferedOp {
     fn cf(&self) -> CfId {
         match self {
             Self::Put { cf, .. } | Self::Delete { cf, .. } | Self::PrefixDelete { cf, .. } => *cf,
+        }
+    }
+
+    /// Returns `Some` if this op affects `(cf_id, key)`. Used by both
+    /// `get` (reverse-walk: first match wins) and `overlay_buffer_on_scan`
+    /// (forward-walk: each match overwrites the prior overlay state).
+    fn affecting(&self, cf_id: CfId, key: &[u8]) -> Option<BufferedEffect<'_>> {
+        if self.cf() != cf_id {
+            return None;
+        }
+        match self {
+            Self::Put { key: k, value, .. } if k.as_slice() == key => {
+                Some(BufferedEffect::Put(value.as_slice()))
+            }
+            Self::Delete { key: k, .. } if k.as_slice() == key => Some(BufferedEffect::Tombstoned),
+            Self::PrefixDelete { prefix, .. } if key.starts_with(prefix) => {
+                Some(BufferedEffect::Tombstoned)
+            }
+            _ => None,
         }
     }
 }
@@ -444,33 +473,18 @@ impl StorageEngine {
     }
 
     fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Arc<[u8]>>, DynoError> {
-        // Read-your-own-writes: when a batch is active, the latest op
-        // affecting `key` lives in the buffer, not the backend. Walk the
-        // buffer in reverse (most-recent first) so a late Put resurrects
+        // Buffer wins over backend. Reverse-walk so a late Put resurrects
         // a key tombstoned by an earlier PrefixDelete in the same batch.
-        // The cache is intentionally NOT consulted or populated for
-        // buffer-served reads — the value isn't on disk yet, so caching
-        // it would risk a stale view if the batch later discards.
-        if let Some(ref buffer) = self.write_buffer {
-            if let Some(cf_id) = CfId::from_str(cf) {
-                for op in buffer.iter().rev() {
-                    if op.cf() != cf_id {
-                        continue;
-                    }
-                    match op {
-                        BufferedOp::Put { key: k, value, .. } if k.as_slice() == key => {
-                            return Ok(Some(Arc::<[u8]>::from(value.as_slice())));
-                        }
-                        BufferedOp::Delete { key: k, .. } if k.as_slice() == key => {
-                            return Ok(None);
-                        }
-                        BufferedOp::PrefixDelete { prefix, .. } if key.starts_with(prefix) => {
-                            return Ok(None);
-                        }
-                        _ => {}
-                    }
-                }
-            }
+        // The cache is bypassed for buffer-served reads — the value isn't
+        // on disk yet, so caching it would risk a stale view on discard.
+        if let (Some(buffer), Some(cf_id)) = (self.write_buffer.as_ref(), CfId::from_str(cf))
+            && !buffer.is_empty()
+            && let Some(effect) = buffer.iter().rev().find_map(|op| op.affecting(cf_id, key))
+        {
+            return Ok(match effect {
+                BufferedEffect::Put(v) => Some(Arc::<[u8]>::from(v)),
+                BufferedEffect::Tombstoned => None,
+            });
         }
 
         // For node lookups, use the read cache (single lock acquisition)
@@ -580,43 +594,57 @@ impl StorageEngine {
             }
         };
 
-        // Read-your-own-writes for scans: when a batch is active, overlay
-        // buffered ops on top of the backend snapshot in insertion order.
-        // Puts upsert; Deletes and PrefixDeletes tombstone. Late puts can
-        // resurrect a key that an earlier PrefixDelete in the same batch
-        // tombstoned — so we need ordered application, not a single-pass
-        // overlay map.
-        if let Some(ref buffer) = self.write_buffer {
-            if let Some(cf_id) = CfId::from_str(cf) {
-                return Ok(Self::overlay_buffer_on_scan(
-                    backend_results,
-                    buffer,
-                    cf_id,
-                    prefix,
-                ));
-            }
+        // Buffer wins over backend on scans. Skip the overlay alloc
+        // entirely if no batch is active or no buffered op touches this
+        // CF + prefix range — the common case for reads outside a batch.
+        if let (Some(buffer), Some(cf_id)) = (self.write_buffer.as_ref(), CfId::from_str(cf))
+            && !buffer.is_empty()
+            && Self::buffer_touches_scan(buffer, cf_id, prefix)
+        {
+            return Ok(Self::overlay_buffer_on_scan(
+                backend_results,
+                buffer,
+                cf_id,
+                prefix,
+            ));
         }
 
         Ok(backend_results)
     }
 
-    /// Apply buffered ops to a backend scan result, in insertion order, so
-    /// that the returned set reflects what `prefix_scan` would observe if
-    /// the batch were committed at this instant. Visible only when
-    /// `write_buffer.is_some()`.
-    ///
-    /// Complexity: O(scan_size + buffer_size); the BTreeMap upsert/remove
-    /// is logarithmic in the result set. Storyflow's `integrate_fragment`
-    /// caps at ~67 buffered ops, so the overhead is microseconds.
+    /// Cheap pre-flight: does any buffered op affect this scan range?
+    /// A `PrefixDelete` matches if its prefix overlaps `prefix` in either
+    /// direction (sub-range delete OR superset clear); `Put`/`Delete`
+    /// match if their key starts with `prefix`.
+    fn buffer_touches_scan(buffer: &[BufferedOp], cf_id: CfId, prefix: &[u8]) -> bool {
+        buffer.iter().any(|op| {
+            if op.cf() != cf_id {
+                return false;
+            }
+            match op {
+                BufferedOp::Put { key, .. } | BufferedOp::Delete { key, .. } => {
+                    key.starts_with(prefix)
+                }
+                BufferedOp::PrefixDelete { prefix: p, .. } => {
+                    p.starts_with(prefix) || prefix.starts_with(p)
+                }
+            }
+        })
+    }
+
+    /// Apply buffered ops to a backend scan result in insertion order.
+    /// Late puts can resurrect a key that an earlier `PrefixDelete` in
+    /// the same batch tombstoned — ordered application required.
+    /// `HashMap` (not `BTreeMap`): callers don't depend on key order.
     fn overlay_buffer_on_scan(
         backend_results: Vec<(Vec<u8>, Vec<u8>)>,
         buffer: &[BufferedOp],
         cf_id: CfId,
         prefix: &[u8],
     ) -> Vec<(Vec<u8>, Vec<u8>)> {
-        use std::collections::BTreeMap;
+        use std::collections::HashMap;
 
-        let mut by_key: BTreeMap<Vec<u8>, Vec<u8>> = backend_results.into_iter().collect();
+        let mut by_key: HashMap<Vec<u8>, Vec<u8>> = backend_results.into_iter().collect();
 
         for op in buffer {
             if op.cf() != cf_id {
@@ -632,10 +660,9 @@ impl StorageEngine {
                 BufferedOp::PrefixDelete {
                     prefix: del_prefix, ..
                 } => {
-                    // Tombstone every result whose key starts with del_prefix.
-                    // Note: del_prefix may extend past `prefix` (deletes a
-                    // sub-range), or may BE `prefix` (clears the whole scan)
-                    // — both shapes are correct under starts_with.
+                    // del_prefix may extend past `prefix` (sub-range delete)
+                    // or may BE `prefix` (clears whole scan) — both correct
+                    // under starts_with.
                     by_key.retain(|k, _| !k.starts_with(del_prefix));
                 }
                 _ => {}
