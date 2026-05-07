@@ -629,7 +629,9 @@ impl StorageEngine {
                 BufferedOp::Delete { key, .. } if key.starts_with(prefix) => {
                     by_key.remove(key);
                 }
-                BufferedOp::PrefixDelete { prefix: del_prefix, .. } => {
+                BufferedOp::PrefixDelete {
+                    prefix: del_prefix, ..
+                } => {
                     // Tombstone every result whose key starts with del_prefix.
                     // Note: del_prefix may extend past `prefix` (deletes a
                     // sub-range), or may BE `prefix` (clears the whole scan)
