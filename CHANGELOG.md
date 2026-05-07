@@ -4,6 +4,73 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.5 — unreleased
+
+Contract change: read-your-own-writes within a batch.
+
+### Changed
+
+- **`engine.get` and `engine.prefix_scan` now consult the batch
+  buffer.** Pre-v0.5.5 the buffer was write-only — `engine.put` /
+  `engine.delete` / `engine.prefix_delete` queued ops while reads
+  bypassed the buffer and went straight to RocksDB. Reads inside an
+  active batch saw the **pre-batch** state, regardless of what
+  earlier ops in the same batch had buffered. That contract was
+  documented and tested but proved a footgun for downstream consumers
+  that naturally expected transactional read-your-own-writes
+  semantics — surfaced concretely by storyflow's `integrate_fragment`
+  handler, where a Character created early in the batch was
+  invisible to subsequent `resolve_entity` (= `scan_nodes`) calls
+  for the rest of the batch, silently dropping cross-entity edges.
+
+  v0.5.5 makes reads buffer-aware:
+
+  - `get(cf, key)` walks the buffer in reverse for the latest
+    matching op; a buffered `Put` returns its value, a `Delete` or
+    covering `PrefixDelete` returns `None`. A miss falls through to
+    the cache + backend.
+  - `prefix_scan(cf, prefix)` reads backend results, then overlays
+    the buffer in insertion order: `Put` upserts, `Delete` removes,
+    `PrefixDelete` prunes everything starting with that prefix. Late
+    puts can resurrect a key that an earlier `PrefixDelete` in the
+    same batch tombstoned — order is preserved end-to-end.
+
+  Compositions that previously failed now succeed:
+
+  - `create_node X` then `replace_node X` — the replace sees the
+    buffered create.
+  - `create_edge X→Y` then `merge_edge X→Y` — the merge composes on
+    top of the buffered create.
+  - `create_edge X→Y` then `delete_node X` — the cascade sees the
+    buffered edge and tombstones it; no orphan survives.
+
+  Discarded batches are unchanged: the buffer drops, the in-batch
+  view is invisible to anyone after `discard_batch()`.
+
+  Two integration tests in `crates/dynograph-service/tests/integration.rs`
+  flipped: `batch_modify_after_create_in_same_batch_fails` →
+  `batch_modify_after_create_in_same_batch_succeeds`, and
+  `batch_orphan_edge_when_delete_node_in_same_batch` →
+  `batch_delete_node_cascades_in_batch_edges`. Both anticipated this
+  flip in their pre-v0.5.5 doc comments.
+
+  Performance: the buffer is bounded (storyflow's heaviest case caps
+  at ~67 ops; `MAX_BATCH_OPS` is 1000). The reverse-walk in `get` is
+  O(buffer) per call; the overlay in `prefix_scan` is O(scan + buffer)
+  with logarithmic upsert/remove via BTreeMap. Microseconds in
+  practice.
+
+### Migration notes
+
+If your code relied on the pre-v0.5.5 "reads see pre-batch state"
+contract — e.g., as a way to build a delta against the snapshot at
+`begin_batch()` time — that path no longer works. Capture the
+pre-batch state explicitly before `begin_batch()` if you still need
+it. We don't expect any out-of-tree consumers to have done this; the
+contract was always fragile (a single in-batch write would break the
+delta), and storyflow's only consumer of foundation has been
+audited.
+
 ## v0.5.4 — 2026-05-06
 
 Fourth and final primitive identified by the storyflow→foundation

@@ -2377,24 +2377,22 @@ async fn batch_happy_path_mixed_ops_returns_correct_counts() {
     assert!(edge_exists(&app, "Likes", "b", "d").await, "b->d created");
 }
 
-/// Companion to the batch_modify_after_create test: confirm the
-/// cascade-orphan hazard documented in batch.rs is real, not a
-/// theoretical edge case. If the engine ever grows buffer-aware
-/// reads, this test will start failing — at which point retract the
-/// warning in batch.rs's module doc and convert this test to assert
-/// the cascade WORKED.
+/// Cascade-delete sees in-batch edges via buffer-aware reads (v0.5.5+).
+/// Pre-v0.5.5 this test asserted the opposite — that the cascade missed
+/// in-batch edges and left orphans. The engine grew buffer-aware reads
+/// so cascades now correctly clean up edges created earlier in the
+/// same batch.
 #[tokio::test]
-async fn batch_orphan_edge_when_delete_node_in_same_batch() {
+async fn batch_delete_node_cascades_in_batch_edges() {
     let app = build_app_with_item_graph().await;
     create_item(&app, "a").await;
     create_item(&app, "c").await;
 
     let body = json!({
         "ops": [
-            // Create a->c (pure puts, allowed) and then delete a in
-            // the same batch. delete_node a's cascade reads the
-            // pre-batch adjacency — it doesn't see the in-batch
-            // create — so it doesn't clean up a->c.
+            // Create a->c then delete a in the same batch. With
+            // buffer-aware adjacency reads, delete_node's cascade sees
+            // the in-batch a->c edge and tombstones it.
             {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "a", "to_type": "Item", "to_id": "c", "properties": {"weight": 0.5}},
             {"op": "delete_node", "node_type": "Item", "node_id": "a"},
         ]
@@ -2402,23 +2400,22 @@ async fn batch_orphan_edge_when_delete_node_in_same_batch() {
     let (status, _resp) = post_batch(&app, body).await;
     assert_eq!(status, StatusCode::OK);
 
-    // a is gone, but the orphaned edge a->c persists. This is the
-    // documented hazard.
+    // a is gone, AND the in-batch edge to c was cleaned up by the cascade.
+    // Pre-v0.5.5 the edge would have survived as an orphan.
     assert!(!node_exists(&app, "Item", "a").await);
     assert!(
-        edge_exists(&app, "Likes", "a", "c").await,
-        "orphan edge a->c survives — see read-your-own-writes note in batch.rs"
+        !edge_exists(&app, "Likes", "a", "c").await,
+        "cascade-delete should have removed the in-batch edge a->c (read-your-own-writes)"
     );
 }
 
-/// Lock in the read-your-own-writes constraint documented in
-/// batch.rs: an op that needs to read state (`merge_edge`,
-/// `replace_node`, `delete_*`) cannot see writes from earlier ops in
-/// the same batch. If this test ever starts failing because the
-/// engine grew buffer-aware reads, update batch.rs's module doc to
-/// retract the warning — don't just silence the test.
+/// Read-your-own-writes for ops that need state lookups: `replace_node`
+/// after `create_node` in the same batch sees the in-batch create and
+/// succeeds. Pre-v0.5.5 this asserted the opposite (the engine batch
+/// buffer was write-only). The contract flipped in v0.5.5 so consumers
+/// can build sequences like create→update→update naturally.
 #[tokio::test]
-async fn batch_modify_after_create_in_same_batch_fails() {
+async fn batch_modify_after_create_in_same_batch_succeeds() {
     let app = build_app_with_item_graph().await;
 
     let body = json!({
@@ -2428,15 +2425,13 @@ async fn batch_modify_after_create_in_same_batch_fails() {
         ]
     });
     let (status, resp) = post_batch(&app, body).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert_eq!(resp["op_index"], 1);
-    assert_eq!(resp["op_type"], "replace_node");
-    assert!(
-        resp["error"].as_str().unwrap().contains("not found"),
-        "got: {resp}"
-    );
-    // Whole batch rolled back — the create_node from op 0 didn't land.
-    assert!(!node_exists(&app, "Item", "x").await);
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["ops_applied"], 2);
+    assert_eq!(resp["nodes_created"], 1);
+    assert_eq!(resp["nodes_replaced"], 1);
+
+    // Final state reflects both ops.
+    assert!(node_exists(&app, "Item", "x").await);
 }
 
 #[tokio::test]

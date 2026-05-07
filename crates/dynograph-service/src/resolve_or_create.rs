@@ -42,18 +42,18 @@
 //! ## Atomicity on `CreateNew`
 //!
 //! `engine.create_node` + (optional) `engine.set_embedding` run
-//! sequentially under the caller's write lock. They cannot share a
-//! `begin_batch`/`commit_batch` because `set_embedding` does a
-//! backend `get` to verify node existence — the same
-//! read-your-own-writes constraint documented in `batch.rs`. So
-//! every failure mode that could leave a torn state (node created
-//! but no embedding) is pushed into pre-flight validation: empty
-//! embedding, dim mismatch, missing/non-string name, unknown type,
-//! non-indexed scope prop. If a pure storage-I/O failure (e.g. disk)
-//! still tears the pair, the caller can retry — resolution will
-//! auto-merge to the existing node and `set_embedding` again. Same
-//! contract the single-call create_node + set_embedding pair has had
-//! since v0.3.0.
+//! sequentially under the caller's write lock. They could be wrapped
+//! in `begin_batch` / `commit_batch` for atomicity (v0.5.5+ supports
+//! read-your-own-writes within a batch, so `set_embedding`'s node
+//! existence check would see the buffered create) — TODO follow-up.
+//! For now every failure mode that could leave a torn state (node
+//! created but no embedding) is pushed into pre-flight validation:
+//! empty embedding, dim mismatch, missing/non-string name, unknown
+//! type, non-indexed scope prop. If a pure storage-I/O failure (e.g.
+//! disk) still tears the pair, the caller can retry — resolution
+//! will auto-merge to the existing node and `set_embedding` again.
+//! Same contract the single-call create_node + set_embedding pair
+//! has had since v0.3.0.
 //!
 //! ## Aliases
 //!
@@ -239,13 +239,8 @@ pub(crate) fn run(
         }),
         ResolutionResult::CreateNew => {
             // Sequential: create_node, then set_embedding (if any),
-            // then HNSW insert. We can't begin_batch here because
-            // set_embedding's existence check reads the backend, not
-            // the buffer — same read-your-own-writes constraint as
-            // /batch. Pre-flight pushed every checkable failure mode
-            // ahead of these writes, so the only torn-state window is
-            // a pure storage-I/O fault between create_node and
-            // set_embedding (caller-retry-safe).
+            // then HNSW insert. See module doc on `## Atomicity` for
+            // the torn-state window and follow-up batch-wrap plan.
             let node_id = Uuid::new_v4().to_string();
             let node_type = req.node_type.clone();
             let properties = req.properties;

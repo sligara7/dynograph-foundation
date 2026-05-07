@@ -19,41 +19,14 @@
 //! mechanically translate single calls into batch entries; we don't
 //! introduce a parallel JSON dialect to maintain.
 //!
-//! ## Read-your-own-writes is NOT supported within a batch
+//! ## Read-your-own-writes within a batch
 //!
-//! The storage layer's batch buffer is write-only: `engine.put()`
-//! buffers, but `engine.get()` reads the backend directly. Any op
-//! whose precondition is checked via `get()` —
-//! `merge_edge_properties`, `replace_node_properties`, `delete_node`,
-//! `delete_edge` — sees the **pre-batch** state, not state produced
-//! by earlier ops in the same batch. So:
-//!
-//! - `create_node X` then `replace_node X` in the same batch → the
-//!   replace fails with "node not found" and the whole batch rolls
-//!   back.
-//! - `create_edge X→Y` then `merge_edge X→Y` in the same batch →
-//!   same failure mode.
-//!
-//! `create_node` + `create_edge` ops are pure puts (no get) and
-//! compose freely — including edges between nodes created earlier in
-//! the same batch. This matches the audit's heaviest case
-//! (`integrate_fragment`: ~67 writes, all creates) and every other
-//! enumerated multi-write handler — none need read-your-own-writes.
-//! If a real workload surfaces that need, the engine batch layer
-//! would have to grow a buffer-aware `get`; not in scope for v1.
-//!
-//! ## Cascade-delete in the same batch leaves orphaned edges
-//!
-//! A corollary of the above: `delete_node X` cascades by reading the
-//! adjacency CFs to find edges to clean up — so it only sees edges
-//! that existed pre-batch, not edges to/from `X` created earlier in
-//! the same batch. If a batch both `create_edge X→Y` and
-//! `delete_node X`, the create lands and the cascade misses it,
-//! leaving an orphaned edge pointing at a deleted node. None of the
-//! audit's enumerated workloads do this; if a caller needs to delete
-//! a node and create edges involving it in one atomic unit, do the
-//! delete in a prior batch (or single call) and create the edges in
-//! a follow-up batch.
+//! Reads inside an active batch see the post-buffer view: a `Put` or
+//! `Delete` queued earlier in the same batch is visible to subsequent
+//! `get` and `prefix_scan` calls. Compositions like `create_node X`
+//! then `replace_node X`, or `create_edge X→Y` then `delete_node X`
+//! (which cascades), apply atomically at commit. A discarded batch
+//! leaves the backend untouched — the buffer drops without a flush.
 
 use std::collections::HashMap;
 
