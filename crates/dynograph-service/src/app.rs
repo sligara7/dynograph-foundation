@@ -34,6 +34,7 @@ use crate::{
     schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
     traverse::{TraverseRequest, run as run_traverse},
+    welford_update::{WelfordUpdateRequest, run as run_welford_update},
 };
 
 #[derive(Clone)]
@@ -101,6 +102,10 @@ pub fn app(state: AppState) -> Router {
         .route(
             "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
             get(get_edge).patch(merge_edge).delete(delete_edge),
+        )
+        .route(
+            "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update",
+            post(welford_update),
         )
         .route("/v1/graphs/{id}/batch", post(batch))
         .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
@@ -770,6 +775,23 @@ async fn edges_collect(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry.with_engine_read(|engine| run_edges_collect(engine, &id, req))?;
+    Ok(Json(response).into_response())
+}
+
+/// Atomic Welford-style EMA update of the score property family on
+/// an existing edge. See `crate::welford_update` for the math, the
+/// six-property convention, and pre-flight validation. Whole
+/// read-modify-write runs under one `with_engine_write` lock —
+/// concurrent updates serialize.
+async fn welford_update(
+    State(state): State<AppState>,
+    Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
+    Json(req): Json<WelfordUpdateRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_write(|engine| {
+        run_welford_update(engine, &id, &edge_type, &from_id, &to_id, req)
+    })?;
     Ok(Json(response).into_response())
 }
 

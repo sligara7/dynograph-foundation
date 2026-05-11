@@ -4057,3 +4057,328 @@ async fn traverse_unknown_graph_returns_404() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+// =========================================================================
+// /v1/graphs/{id}/edges/.../welford_update — atomic EMA + Welford on edge
+// =========================================================================
+
+fn welford_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "welford-demo",
+            "version": 1,
+            "node_types": {
+                "Indicator": {
+                    "properties": {
+                        "name": {"type": "string", "required": true}
+                    }
+                }
+            },
+            "edge_types": {
+                "CAUSES": {
+                    "from": "Indicator",
+                    "to":   "Indicator"
+                }
+            }
+        }
+    })
+}
+
+async fn build_app_with_welford_schema() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(welford_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+async fn create_indicator(app: &axum::Router, id: &str, name: &str) {
+    let body = json!({
+        "node_type": "Indicator",
+        "node_id": id,
+        "properties": {"name": name}
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+}
+
+async fn create_causes_edge(app: &axum::Router, from: &str, to: &str, extra_props: Value) {
+    let body = json!({
+        "edge_type": "CAUSES",
+        "from_type": "Indicator", "from_id": from,
+        "to_type":   "Indicator", "to_id":   to,
+        "properties": extra_props
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/edges")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+}
+
+async fn post_welford(
+    app: &axum::Router,
+    edge_type: &str,
+    from: &str,
+    to: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let uri = format!("/v1/graphs/g1/edges/{edge_type}/{from}/{to}/welford_update");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+async fn get_edge_props(app: &axum::Router, edge_type: &str, from: &str, to: &str) -> Value {
+    let uri = format!("/v1/graphs/g1/edges/{edge_type}/{from}/{to}");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(uri)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+fn approx_f64(v: &Value, want: f64) {
+    let got = v
+        .as_f64()
+        .unwrap_or_else(|| panic!("expected number, got {v}"));
+    assert!((got - want).abs() < 1e-9, "approx: got {got}, want {want}");
+}
+
+#[tokio::test]
+async fn welford_first_observation_initializes_full_state() {
+    let app = build_app_with_welford_schema().await;
+    create_indicator(&app, "a", "rate").await;
+    create_indicator(&app, "b", "yield").await;
+    create_causes_edge(&app, "a", "b", json!({})).await;
+
+    let (status, resp) = post_welford(
+        &app,
+        "CAUSES",
+        "a",
+        "b",
+        json!({"observation": 0.7, "alpha": 0.05}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    approx_f64(&resp["score"], 0.7);
+    approx_f64(&resp["score_m2"], 0.0);
+    approx_f64(&resp["score_stddev"], 0.0);
+    approx_f64(&resp["score_min"], 0.7);
+    approx_f64(&resp["score_max"], 0.7);
+    assert_eq!(resp["score_count"], 1);
+}
+
+#[tokio::test]
+async fn welford_second_observation_applies_ema_and_welford_increment() {
+    let app = build_app_with_welford_schema().await;
+    create_indicator(&app, "a", "rate").await;
+    create_indicator(&app, "b", "yield").await;
+    create_causes_edge(&app, "a", "b", json!({})).await;
+
+    // Obs1 → score=0.5, count=1
+    let (s1, _) = post_welford(
+        &app,
+        "CAUSES",
+        "a",
+        "b",
+        json!({"observation": 0.5, "alpha": 0.5}),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::OK);
+
+    // Obs2 (0.7, α=0.5): expected score=0.6, m2=0.02, stddev=0.1, min=0.5, max=0.7, count=2
+    let (s2, resp) = post_welford(
+        &app,
+        "CAUSES",
+        "a",
+        "b",
+        json!({"observation": 0.7, "alpha": 0.5}),
+    )
+    .await;
+    assert_eq!(s2, StatusCode::OK);
+    approx_f64(&resp["score"], 0.6);
+    approx_f64(&resp["score_m2"], 0.02);
+    approx_f64(&resp["score_stddev"], 0.1);
+    approx_f64(&resp["score_min"], 0.5);
+    approx_f64(&resp["score_max"], 0.7);
+    assert_eq!(resp["score_count"], 2);
+}
+
+#[tokio::test]
+async fn welford_preserves_non_welford_edge_properties() {
+    let app = build_app_with_welford_schema().await;
+    create_indicator(&app, "a", "rate").await;
+    create_indicator(&app, "b", "yield").await;
+    // Edge starts with a non-Welford property the consumer cares about.
+    create_causes_edge(
+        &app,
+        "a",
+        "b",
+        json!({"evidence_url": "https://x.example/1"}),
+    )
+    .await;
+
+    let (status, _) = post_welford(
+        &app,
+        "CAUSES",
+        "a",
+        "b",
+        json!({"observation": 0.5, "alpha": 0.1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // After update, fetch the edge and confirm evidence_url is still there.
+    let edge = get_edge_props(&app, "CAUSES", "a", "b").await;
+    assert_eq!(edge["properties"]["evidence_url"], "https://x.example/1");
+    assert!(edge["properties"]["score"].is_number());
+    assert_eq!(edge["properties"]["score_count"], 1);
+}
+
+#[tokio::test]
+async fn welford_missing_edge_returns_404() {
+    let app = build_app_with_welford_schema().await;
+    create_indicator(&app, "a", "rate").await;
+    create_indicator(&app, "b", "yield").await;
+    // No edge created.
+
+    let (status, _) = post_welford(
+        &app,
+        "CAUSES",
+        "a",
+        "b",
+        json!({"observation": 0.5, "alpha": 0.1}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn welford_alpha_at_or_beyond_open_unit_interval_returns_400() {
+    let app = build_app_with_welford_schema().await;
+    create_indicator(&app, "a", "x").await;
+    create_indicator(&app, "b", "y").await;
+    create_causes_edge(&app, "a", "b", json!({})).await;
+
+    for bad_alpha in [0.0_f64, 1.0_f64, -0.1_f64, 1.5_f64] {
+        let (status, resp) = post_welford(
+            &app,
+            "CAUSES",
+            "a",
+            "b",
+            json!({"observation": 0.5, "alpha": bad_alpha}),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "alpha={bad_alpha} should reject"
+        );
+        assert!(
+            resp.as_str().unwrap_or("").contains("alpha"),
+            "alpha={bad_alpha}: {resp}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn welford_non_finite_observation_returns_400() {
+    let app = build_app_with_welford_schema().await;
+    create_indicator(&app, "a", "x").await;
+    create_indicator(&app, "b", "y").await;
+    create_causes_edge(&app, "a", "b", json!({})).await;
+
+    // JSON has no native NaN; smuggle via raw body. Reuses the
+    // request shape with a numeric-but-non-finite via 1e500 (parses
+    // to f64::INFINITY in serde_json).
+    let raw = r#"{"observation": 1e500, "alpha": 0.1}"#;
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/edges/CAUSES/a/b/welford_update")
+                .header("content-type", "application/json")
+                .body(Body::from(raw))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8_lossy(&bytes);
+    assert!(body.contains("observation"), "got: {body}");
+}
+
+#[tokio::test]
+async fn welford_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/edges/CAUSES/a/b/welford_update")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"observation": 0.5, "alpha": 0.1}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}

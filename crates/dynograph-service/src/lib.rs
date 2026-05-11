@@ -21,6 +21,7 @@ mod schema_response;
 mod similar_response;
 mod traverse;
 mod validation;
+mod welford_update;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};
