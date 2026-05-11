@@ -22,9 +22,9 @@ use serde_json::json;
 pub use error::ClientError;
 pub use wire::{
     EdgeResponse, EmbeddingResponse, GraphMetadataResponse, NodeExistence, NodeListResponse,
-    NodeResponse, NodesExistsResponse, ResolveOrCreateResponse, SchemaResponse, SimilarHit,
-    SimilarResponse, UtilRatioResponse, UtilScalarResponse, UtilVectorResponse,
-    WelfordUpdateResponse,
+    NodeResponse, NodesExistsResponse, Precision, ResolveOrCreateResponse, SchemaResponse,
+    SimilarHit, SimilarResponse, UtilRatioResponse, UtilResult, UtilScalarResponse,
+    UtilVectorResponse, WelfordUpdateResponse,
 };
 
 /// Request body for `create_edge`. Carries the same fields as the
@@ -118,6 +118,20 @@ impl DynographClient {
     async fn send_unit(&self, req: RequestBuilder) -> Result<(), ClientError> {
         self.send_raw(req).await?;
         Ok(())
+    }
+
+    /// Shorthand for `POST <path>` + JSON body + JSON response, the
+    /// shape that dominates the v0.5.6 surface (and that many
+    /// pre-existing methods would benefit from migrating to too).
+    /// Existing methods unchanged for this PR — migrate
+    /// incrementally.
+    async fn post_json<B: Serialize, T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, ClientError> {
+        self.send_json(self.request(Method::POST, path).json(body))
+            .await
     }
 
     /// For `/metrics` (Prometheus text) and `/health` / `/ready`.
@@ -459,11 +473,8 @@ impl DynographClient {
         id: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ClientError> {
-        self.send_json(
-            self.request(Method::POST, &format!("/v1/graphs/{id}/batch"))
-                .json(body),
-        )
-        .await
+        self.post_json(&format!("/v1/graphs/{id}/batch"), body)
+            .await
     }
 
     /// `POST /v1/graphs/{id}/resolve-or-create` — fuzzy/vector entity
@@ -474,11 +485,8 @@ impl DynographClient {
         id: &str,
         body: &serde_json::Value,
     ) -> Result<ResolveOrCreateResponse, ClientError> {
-        self.send_json(
-            self.request(Method::POST, &format!("/v1/graphs/{id}/resolve-or-create"))
-                .json(body),
-        )
-        .await
+        self.post_json(&format!("/v1/graphs/{id}/resolve-or-create"), body)
+            .await
     }
 
     /// `POST /v1/graphs/{id}/edges:collect` — fan-out edge collection
@@ -491,11 +499,8 @@ impl DynographClient {
         id: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ClientError> {
-        self.send_json(
-            self.request(Method::POST, &format!("/v1/graphs/{id}/edges:collect"))
-                .json(body),
-        )
-        .await
+        self.post_json(&format!("/v1/graphs/{id}/edges:collect"), body)
+            .await
     }
 
     /// `POST /v1/graphs/{id}/traverse` — typed BFS over edge-type
@@ -507,11 +512,8 @@ impl DynographClient {
         id: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ClientError> {
-        self.send_json(
-            self.request(Method::POST, &format!("/v1/graphs/{id}/traverse"))
-                .json(body),
-        )
-        .await
+        self.post_json(&format!("/v1/graphs/{id}/traverse"), body)
+            .await
     }
 
     /// `POST /v1/graphs/{id}/nodes:exists` — batch (type, name)
@@ -521,11 +523,8 @@ impl DynographClient {
         id: &str,
         body: &serde_json::Value,
     ) -> Result<NodesExistsResponse, ClientError> {
-        self.send_json(
-            self.request(Method::POST, &format!("/v1/graphs/{id}/nodes:exists"))
-                .json(body),
-        )
-        .await
+        self.post_json(&format!("/v1/graphs/{id}/nodes:exists"), body)
+            .await
     }
 
     /// `POST /v1/graphs/{id}/nodes:scan` — predicate-filtered scan.
@@ -537,11 +536,8 @@ impl DynographClient {
         id: &str,
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ClientError> {
-        self.send_json(
-            self.request(Method::POST, &format!("/v1/graphs/{id}/nodes:scan"))
-                .json(body),
-        )
-        .await
+        self.post_json(&format!("/v1/graphs/{id}/nodes:scan"), body)
+            .await
     }
 
     /// `POST /v1/graphs/{id}/edges/{type}/{from}/{to}/welford_update`
@@ -558,147 +554,149 @@ impl DynographClient {
         alpha: f64,
     ) -> Result<WelfordUpdateResponse, ClientError> {
         let body = json!({ "observation": observation, "alpha": alpha });
-        self.send_json(
-            self.request(
-                Method::POST,
-                &format!("/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update"),
-            )
-            .json(&body),
+        self.post_json(
+            &format!("/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update"),
+            &body,
         )
         .await
     }
 
     // =========================================================================
     // /v1/util/* — pure-math utility endpoints. Stateless; no graph_id.
-    // `precision` is `"f32" | "f64"` on the wire, default `"f64"`. For
-    // f64-only stats (pearson_correlation, linear_regression_slope) the
-    // field is omitted.
+    // `precision` is typed (`Precision::F32` / `Precision::F64`, default
+    // `F64`). Omitted from the request body when `None`. F64-only stats
+    // (pearson_correlation, linear_regression_slope) don't take it.
     // =========================================================================
 
+    /// `POST /v1/util/cosine_similarity` — clamped to `[-1, 1]`;
+    /// returns 0.0 when either vector has zero magnitude.
     pub async fn util_cosine_similarity(
         &self,
         a: &[f64],
         b: &[f64],
-        precision: Option<&str>,
+        precision: Option<Precision>,
     ) -> Result<UtilScalarResponse, ClientError> {
-        let body = match precision {
-            Some(p) => json!({ "a": a, "b": b, "precision": p }),
-            None => json!({ "a": a, "b": b }),
-        };
-        self.send_json(
-            self.request(Method::POST, "/v1/util/cosine_similarity")
-                .json(&body),
+        self.post_json(
+            "/v1/util/cosine_similarity",
+            &binary_vec_body(a, b, precision),
         )
         .await
     }
 
+    /// `POST /v1/util/dot_product` — inner product of two vectors.
     pub async fn util_dot_product(
         &self,
         a: &[f64],
         b: &[f64],
-        precision: Option<&str>,
+        precision: Option<Precision>,
     ) -> Result<UtilScalarResponse, ClientError> {
-        let body = match precision {
-            Some(p) => json!({ "a": a, "b": b, "precision": p }),
-            None => json!({ "a": a, "b": b }),
-        };
-        self.send_json(
-            self.request(Method::POST, "/v1/util/dot_product")
-                .json(&body),
-        )
-        .await
+        self.post_json("/v1/util/dot_product", &binary_vec_body(a, b, precision))
+            .await
     }
 
+    /// `POST /v1/util/euclidean_distance` — L2 distance between two
+    /// vectors of equal length.
     pub async fn util_euclidean_distance(
         &self,
         a: &[f64],
         b: &[f64],
-        precision: Option<&str>,
+        precision: Option<Precision>,
     ) -> Result<UtilScalarResponse, ClientError> {
-        let body = match precision {
-            Some(p) => json!({ "a": a, "b": b, "precision": p }),
-            None => json!({ "a": a, "b": b }),
-        };
-        self.send_json(
-            self.request(Method::POST, "/v1/util/euclidean_distance")
-                .json(&body),
+        self.post_json(
+            "/v1/util/euclidean_distance",
+            &binary_vec_body(a, b, precision),
         )
         .await
     }
 
+    /// `POST /v1/util/l2_norm` — magnitude (Euclidean norm) of a
+    /// vector.
     pub async fn util_l2_norm(
         &self,
         v: &[f64],
-        precision: Option<&str>,
+        precision: Option<Precision>,
     ) -> Result<UtilScalarResponse, ClientError> {
-        let body = match precision {
-            Some(p) => json!({ "v": v, "precision": p }),
-            None => json!({ "v": v }),
-        };
-        self.send_json(self.request(Method::POST, "/v1/util/l2_norm").json(&body))
+        self.post_json("/v1/util/l2_norm", &unary_vec_body(v, precision))
             .await
     }
 
+    /// `POST /v1/util/hadamard` — element-wise product. Result length
+    /// equals input length.
     pub async fn util_hadamard(
         &self,
         a: &[f64],
         b: &[f64],
-        precision: Option<&str>,
+        precision: Option<Precision>,
     ) -> Result<UtilVectorResponse, ClientError> {
-        let body = match precision {
-            Some(p) => json!({ "a": a, "b": b, "precision": p }),
-            None => json!({ "a": a, "b": b }),
-        };
-        self.send_json(self.request(Method::POST, "/v1/util/hadamard").json(&body))
+        self.post_json("/v1/util/hadamard", &binary_vec_body(a, b, precision))
             .await
     }
 
-    /// f64-only — `dynograph-vector` ships no f32 variant.
+    /// `POST /v1/util/pearson_correlation` — sample correlation
+    /// coefficient. f64-only; `dynograph-vector` ships no f32 variant.
+    /// Returns 400 for n<3 or zero-variance inputs (loud-fail).
     pub async fn util_pearson_correlation(
         &self,
         a: &[f64],
         b: &[f64],
     ) -> Result<UtilScalarResponse, ClientError> {
-        self.send_json(
-            self.request(Method::POST, "/v1/util/pearson_correlation")
-                .json(&json!({ "a": a, "b": b })),
-        )
-        .await
+        self.post_json("/v1/util/pearson_correlation", &json!({ "a": a, "b": b }))
+            .await
     }
 
+    /// `POST /v1/util/linear_regression_slope` — OLS slope of `y` on
+    /// `x`. f64-only. Returns 400 when input has fewer than 2 points
+    /// or zero variance in x.
     pub async fn util_linear_regression_slope(
         &self,
         points: &[(f64, f64)],
     ) -> Result<UtilScalarResponse, ClientError> {
-        self.send_json(
-            self.request(Method::POST, "/v1/util/linear_regression_slope")
-                .json(&json!({ "points": points })),
+        self.post_json(
+            "/v1/util/linear_regression_slope",
+            &json!({ "points": points }),
         )
         .await
     }
 
+    /// `POST /v1/util/jaro_winkler` — Jaro-Winkler ratio scaled to
+    /// `0..=100`. Strings are capped at 64 KB.
     pub async fn util_jaro_winkler(
         &self,
         a: &str,
         b: &str,
     ) -> Result<UtilRatioResponse, ClientError> {
-        self.send_json(
-            self.request(Method::POST, "/v1/util/jaro_winkler")
-                .json(&json!({ "a": a, "b": b })),
-        )
-        .await
+        self.post_json("/v1/util/jaro_winkler", &json!({ "a": a, "b": b }))
+            .await
     }
 
+    /// `POST /v1/util/token_sort_ratio` — token-aware fuzzy ratio
+    /// (permutation-invariant), scaled to `0..=100`. Strings are
+    /// capped at 64 KB.
     pub async fn util_token_sort_ratio(
         &self,
         a: &str,
         b: &str,
     ) -> Result<UtilRatioResponse, ClientError> {
-        self.send_json(
-            self.request(Method::POST, "/v1/util/token_sort_ratio")
-                .json(&json!({ "a": a, "b": b })),
-        )
-        .await
+        self.post_json("/v1/util/token_sort_ratio", &json!({ "a": a, "b": b }))
+            .await
+    }
+}
+
+/// Body builder for the binary-vector `/v1/util/*` endpoints.
+/// `precision` is omitted from the JSON object when `None` (server
+/// defaults to f64) so the wire shape matches the
+/// `#[serde(default)]` deserializer.
+fn binary_vec_body(a: &[f64], b: &[f64], precision: Option<Precision>) -> serde_json::Value {
+    match precision {
+        Some(p) => json!({ "a": a, "b": b, "precision": p }),
+        None => json!({ "a": a, "b": b }),
+    }
+}
+
+fn unary_vec_body(v: &[f64], precision: Option<Precision>) -> serde_json::Value {
+    match precision {
+        Some(p) => json!({ "v": v, "precision": p }),
+        None => json!({ "v": v }),
     }
 }
 

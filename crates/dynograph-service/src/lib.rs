@@ -39,3 +39,4 @@ pub use registry::{GraphEntry, GraphRegistry, RegistryError, StorageBackend, val
 pub use schema_evolution::{EvolutionError, validate_compatible};
 pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
 pub use similar_response::{SimilarHit, SimilarResponse};
+pub use util::Precision;

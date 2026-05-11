@@ -752,7 +752,11 @@ async fn util_f32_precision_path() {
     let (client, _server) = spawn_service().await;
     // f32 path takes a different SIMD-friendly impl; same expected value.
     let resp = client
-        .util_dot_product(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0], Some("f32"))
+        .util_dot_product(
+            &[1.0, 2.0, 3.0],
+            &[4.0, 5.0, 6.0],
+            Some(dynograph_client::Precision::F32),
+        )
         .await
         .unwrap();
     // f32 has less precision; allow looser tolerance.

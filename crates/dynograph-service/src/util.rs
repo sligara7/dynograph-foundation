@@ -67,9 +67,21 @@ use crate::registry::RegistryError;
 /// pathological client would send to wedge a worker.
 pub(crate) const MAX_VECTOR_LEN: usize = 100_000;
 
-#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+/// Hard cap on string length for fuzzy-match endpoints. `jaro_winkler`
+/// and `token_sort_ratio` are O(|a|·|b|); without this, an attacker
+/// sending two ~1MB strings (axum's default JSON body limit is ~2MB)
+/// would cost ~10^12 character comparisons per request — a CPU-DoS
+/// vector. 64 KB is well above any natural-name-class input
+/// (entity names, fragment text) and below what wedges a worker.
+pub(crate) const MAX_STRING_LEN: usize = 64 * 1024;
+
+/// Numeric precision for vector ops. Wire form is the lowercase
+/// variant name (`"f32"` / `"f64"`). Public so `dynograph-client`
+/// can re-export it and consumers can pass `Precision::F32` instead
+/// of stringly-typed `"f32"`.
+#[derive(Debug, Deserialize, Serialize, Default, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub(crate) enum Precision {
+pub enum Precision {
     F32,
     #[default]
     F64,
@@ -229,25 +241,13 @@ pub(crate) fn run_l2_norm(req: UnaryVectorRequest) -> Result<ScalarResponse<f64>
 pub(crate) fn run_pearson_correlation(
     req: TwoVectorF64Request,
 ) -> Result<ScalarResponse<f64>, RegistryError> {
-    // The underlying fn returns None on insufficient samples (n<3),
-    // mismatched lengths, or zero variance. Surface as 400 with a
-    // descriptive message rather than silently coercing to 0.
-    if req.a.len() != req.b.len() {
-        return Err(RegistryError::BadRequest(format!(
-            "a and b must have the same length, got {} vs {}",
-            req.a.len(),
-            req.b.len()
-        )));
-    }
+    // Shared length / non-empty / cap validation, then the
+    // pearson-specific n>=3 floor. Final `None` arm catches the
+    // remaining zero-variance case with a distinct message.
+    validate_binary(&req.a, &req.b)?;
     if req.a.len() < 3 {
         return Err(RegistryError::BadRequest(format!(
             "pearson_correlation requires n >= 3, got {}",
-            req.a.len()
-        )));
-    }
-    if req.a.len() > MAX_VECTOR_LEN {
-        return Err(RegistryError::BadRequest(format!(
-            "vector length {} exceeds maximum {MAX_VECTOR_LEN}",
             req.a.len()
         )));
     }
@@ -286,14 +286,31 @@ pub(crate) fn run_linear_regression_slope(
 // String fuzzy-match endpoints
 // =========================================================================
 
-pub(crate) fn run_jaro_winkler(req: BinaryStringRequest) -> ScalarResponse<u32> {
-    ScalarResponse {
+pub(crate) fn run_jaro_winkler(
+    req: BinaryStringRequest,
+) -> Result<ScalarResponse<u32>, RegistryError> {
+    validate_strings(&req.a, &req.b)?;
+    Ok(ScalarResponse {
         result: jaro_winkler(&req.a, &req.b),
-    }
+    })
 }
 
-pub(crate) fn run_token_sort_ratio(req: BinaryStringRequest) -> ScalarResponse<u32> {
-    ScalarResponse {
+pub(crate) fn run_token_sort_ratio(
+    req: BinaryStringRequest,
+) -> Result<ScalarResponse<u32>, RegistryError> {
+    validate_strings(&req.a, &req.b)?;
+    Ok(ScalarResponse {
         result: token_sort_ratio(&req.a, &req.b),
+    })
+}
+
+fn validate_strings(a: &str, b: &str) -> Result<(), RegistryError> {
+    if a.len() > MAX_STRING_LEN || b.len() > MAX_STRING_LEN {
+        return Err(RegistryError::BadRequest(format!(
+            "string length exceeds maximum {MAX_STRING_LEN} bytes, got ({}, {})",
+            a.len(),
+            b.len()
+        )));
     }
+    Ok(())
 }

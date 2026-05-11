@@ -131,23 +131,35 @@ pub struct WelfordUpdateResponse {
     pub score_count: i64,
 }
 
-/// Scalar-valued response from `POST /v1/util/*` math endpoints
-/// (cosine_similarity, dot_product, euclidean_distance, l2_norm,
-/// pearson_correlation, linear_regression_slope).
+/// Single-field `{"result": T}` envelope used by every
+/// `POST /v1/util/*` math endpoint. Aliases below pin the concrete
+/// `T` per route: scalar (f64), vector (Vec<f64>), or ratio (u32).
 #[derive(Debug, Clone, Deserialize)]
-pub struct UtilScalarResponse {
-    pub result: f64,
+pub struct UtilResult<T> {
+    pub result: T,
 }
 
-/// Vector-valued response from `POST /v1/util/hadamard`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct UtilVectorResponse {
-    pub result: Vec<f64>,
-}
+/// `T = f64` — cosine_similarity, dot_product, euclidean_distance,
+/// l2_norm, pearson_correlation, linear_regression_slope.
+pub type UtilScalarResponse = UtilResult<f64>;
 
-/// Integer-valued response from `POST /v1/util/jaro_winkler` and
-/// `/token_sort_ratio` (0..=100).
-#[derive(Debug, Clone, Deserialize)]
-pub struct UtilRatioResponse {
-    pub result: u32,
+/// `T = Vec<f64>` — hadamard.
+pub type UtilVectorResponse = UtilResult<Vec<f64>>;
+
+/// `T = u32` (0..=100) — jaro_winkler, token_sort_ratio.
+pub type UtilRatioResponse = UtilResult<u32>;
+
+/// Numeric precision for `/v1/util/*` vector ops. Wire form is the
+/// lowercase variant name (`"f32"` / `"f64"`). Duplicated rather
+/// than re-exported from `dynograph-service` for the same reason the
+/// other wire types are duplicated (preserves the lean HTTP-client
+/// dependency tree — service would drag axum/tokio/rocksdb in). The
+/// integration tests pin the two definitions against each other via
+/// round-trip serialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Precision {
+    F32,
+    #[default]
+    F64,
 }

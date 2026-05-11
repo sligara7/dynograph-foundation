@@ -1062,10 +1062,14 @@ async fn util_linear_regression_slope(
     Ok(Json(run_linear_regression_slope(req)?).into_response())
 }
 
-async fn util_jaro_winkler(Json(req): Json<BinaryStringRequest>) -> Response {
-    Json(run_jaro_winkler(req)).into_response()
+async fn util_jaro_winkler(
+    Json(req): Json<BinaryStringRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_jaro_winkler(req)?).into_response())
 }
 
-async fn util_token_sort_ratio(Json(req): Json<BinaryStringRequest>) -> Response {
-    Json(run_token_sort_ratio(req)).into_response()
+async fn util_token_sort_ratio(
+    Json(req): Json<BinaryStringRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_token_sort_ratio(req)?).into_response())
 }
