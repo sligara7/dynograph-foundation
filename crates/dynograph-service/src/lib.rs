@@ -22,6 +22,7 @@ mod schema_evolution;
 mod schema_response;
 mod similar_response;
 mod traverse;
+mod util;
 mod validation;
 mod welford_update;
 

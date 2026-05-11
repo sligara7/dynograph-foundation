@@ -23,7 +23,8 @@ pub use error::ClientError;
 pub use wire::{
     EdgeResponse, EmbeddingResponse, GraphMetadataResponse, NodeExistence, NodeListResponse,
     NodeResponse, NodesExistsResponse, ResolveOrCreateResponse, SchemaResponse, SimilarHit,
-    SimilarResponse, WelfordUpdateResponse,
+    SimilarResponse, UtilRatioResponse, UtilScalarResponse, UtilVectorResponse,
+    WelfordUpdateResponse,
 };
 
 /// Request body for `create_edge`. Carries the same fields as the
@@ -563,6 +564,139 @@ impl DynographClient {
                 &format!("/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update"),
             )
             .json(&body),
+        )
+        .await
+    }
+
+    // =========================================================================
+    // /v1/util/* — pure-math utility endpoints. Stateless; no graph_id.
+    // `precision` is `"f32" | "f64"` on the wire, default `"f64"`. For
+    // f64-only stats (pearson_correlation, linear_regression_slope) the
+    // field is omitted.
+    // =========================================================================
+
+    pub async fn util_cosine_similarity(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<&str>,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "a": a, "b": b, "precision": p }),
+            None => json!({ "a": a, "b": b }),
+        };
+        self.send_json(
+            self.request(Method::POST, "/v1/util/cosine_similarity")
+                .json(&body),
+        )
+        .await
+    }
+
+    pub async fn util_dot_product(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<&str>,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "a": a, "b": b, "precision": p }),
+            None => json!({ "a": a, "b": b }),
+        };
+        self.send_json(
+            self.request(Method::POST, "/v1/util/dot_product")
+                .json(&body),
+        )
+        .await
+    }
+
+    pub async fn util_euclidean_distance(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<&str>,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "a": a, "b": b, "precision": p }),
+            None => json!({ "a": a, "b": b }),
+        };
+        self.send_json(
+            self.request(Method::POST, "/v1/util/euclidean_distance")
+                .json(&body),
+        )
+        .await
+    }
+
+    pub async fn util_l2_norm(
+        &self,
+        v: &[f64],
+        precision: Option<&str>,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "v": v, "precision": p }),
+            None => json!({ "v": v }),
+        };
+        self.send_json(self.request(Method::POST, "/v1/util/l2_norm").json(&body))
+            .await
+    }
+
+    pub async fn util_hadamard(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<&str>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "a": a, "b": b, "precision": p }),
+            None => json!({ "a": a, "b": b }),
+        };
+        self.send_json(self.request(Method::POST, "/v1/util/hadamard").json(&body))
+            .await
+    }
+
+    /// f64-only — `dynograph-vector` ships no f32 variant.
+    pub async fn util_pearson_correlation(
+        &self,
+        a: &[f64],
+        b: &[f64],
+    ) -> Result<UtilScalarResponse, ClientError> {
+        self.send_json(
+            self.request(Method::POST, "/v1/util/pearson_correlation")
+                .json(&json!({ "a": a, "b": b })),
+        )
+        .await
+    }
+
+    pub async fn util_linear_regression_slope(
+        &self,
+        points: &[(f64, f64)],
+    ) -> Result<UtilScalarResponse, ClientError> {
+        self.send_json(
+            self.request(Method::POST, "/v1/util/linear_regression_slope")
+                .json(&json!({ "points": points })),
+        )
+        .await
+    }
+
+    pub async fn util_jaro_winkler(
+        &self,
+        a: &str,
+        b: &str,
+    ) -> Result<UtilRatioResponse, ClientError> {
+        self.send_json(
+            self.request(Method::POST, "/v1/util/jaro_winkler")
+                .json(&json!({ "a": a, "b": b })),
+        )
+        .await
+    }
+
+    pub async fn util_token_sort_ratio(
+        &self,
+        a: &str,
+        b: &str,
+    ) -> Result<UtilRatioResponse, ClientError> {
+        self.send_json(
+            self.request(Method::POST, "/v1/util/token_sort_ratio")
+                .json(&json!({ "a": a, "b": b })),
         )
         .await
     }

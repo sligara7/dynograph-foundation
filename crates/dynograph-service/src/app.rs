@@ -36,6 +36,12 @@ use crate::{
     schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
     traverse::{TraverseRequest, run as run_traverse},
+    util::{
+        BinaryStringRequest, BinaryVectorRequest, PointsRequest, TwoVectorF64Request,
+        UnaryVectorRequest, run_cosine_similarity, run_dot_product, run_euclidean_distance,
+        run_hadamard, run_jaro_winkler, run_l2_norm, run_linear_regression_slope,
+        run_pearson_correlation, run_token_sort_ratio,
+    },
     welford_update::{WelfordUpdateRequest, run as run_welford_update},
 };
 
@@ -122,6 +128,21 @@ pub fn app(state: AppState) -> Router {
                 .delete(delete_embedding),
         )
         .route("/v1/graphs/{id}/similar", post(similar))
+        .route("/v1/util/cosine_similarity", post(util_cosine_similarity))
+        .route("/v1/util/dot_product", post(util_dot_product))
+        .route("/v1/util/euclidean_distance", post(util_euclidean_distance))
+        .route("/v1/util/l2_norm", post(util_l2_norm))
+        .route("/v1/util/hadamard", post(util_hadamard))
+        .route(
+            "/v1/util/pearson_correlation",
+            post(util_pearson_correlation),
+        )
+        .route(
+            "/v1/util/linear_regression_slope",
+            post(util_linear_regression_slope),
+        )
+        .route("/v1/util/jaro_winkler", post(util_jaro_winkler))
+        .route("/v1/util/token_sort_ratio", post(util_token_sort_ratio))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -995,4 +1016,56 @@ async fn similar(
         },
     )?;
     Ok(Json(response).into_response())
+}
+
+// =========================================================================
+// /v1/util/* — pure-math utility endpoints.
+//
+// Stateless (no graph_id, no registry access). Each handler is a thin
+// adapter over `crate::util::run_*`; the math lives there and stays
+// trivially unit-testable.
+// =========================================================================
+
+async fn util_cosine_similarity(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_cosine_similarity(req)?).into_response())
+}
+
+async fn util_dot_product(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_dot_product(req)?).into_response())
+}
+
+async fn util_euclidean_distance(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_euclidean_distance(req)?).into_response())
+}
+
+async fn util_l2_norm(Json(req): Json<UnaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_l2_norm(req)?).into_response())
+}
+
+async fn util_hadamard(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_hadamard(req)?).into_response())
+}
+
+async fn util_pearson_correlation(
+    Json(req): Json<TwoVectorF64Request>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_pearson_correlation(req)?).into_response())
+}
+
+async fn util_linear_regression_slope(
+    Json(req): Json<PointsRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_linear_regression_slope(req)?).into_response())
+}
+
+async fn util_jaro_winkler(Json(req): Json<BinaryStringRequest>) -> Response {
+    Json(run_jaro_winkler(req)).into_response()
+}
+
+async fn util_token_sort_ratio(Json(req): Json<BinaryStringRequest>) -> Response {
+    Json(run_token_sort_ratio(req)).into_response()
 }

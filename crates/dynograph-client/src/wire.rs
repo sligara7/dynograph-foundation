@@ -130,3 +130,24 @@ pub struct WelfordUpdateResponse {
     pub score_max: f64,
     pub score_count: i64,
 }
+
+/// Scalar-valued response from `POST /v1/util/*` math endpoints
+/// (cosine_similarity, dot_product, euclidean_distance, l2_norm,
+/// pearson_correlation, linear_regression_slope).
+#[derive(Debug, Clone, Deserialize)]
+pub struct UtilScalarResponse {
+    pub result: f64,
+}
+
+/// Vector-valued response from `POST /v1/util/hadamard`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UtilVectorResponse {
+    pub result: Vec<f64>,
+}
+
+/// Integer-valued response from `POST /v1/util/jaro_winkler` and
+/// `/token_sort_ratio` (0..=100).
+#[derive(Debug, Clone, Deserialize)]
+pub struct UtilRatioResponse {
+    pub result: u32,
+}

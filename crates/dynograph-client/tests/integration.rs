@@ -658,3 +658,123 @@ async fn welford_update_round_trip_initializes_then_evolves_state() {
     assert!((second.score_min - 0.5).abs() < 1e-9);
     assert!((second.score_max - 0.7).abs() < 1e-9);
 }
+
+// =========================================================================
+// v0.5.6 P3 — /v1/util/* pure-math endpoints
+// =========================================================================
+
+#[tokio::test]
+async fn util_cosine_similarity_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // [1, 0, 0] · [1, 0, 0] = 1.0
+    let resp = client
+        .util_cosine_similarity(&[1.0, 0.0, 0.0], &[1.0, 0.0, 0.0], None)
+        .await
+        .unwrap();
+    assert!((resp.result - 1.0).abs() < 1e-9);
+
+    // Orthogonal → 0
+    let resp = client
+        .util_cosine_similarity(&[1.0, 0.0], &[0.0, 1.0], None)
+        .await
+        .unwrap();
+    assert!(resp.result.abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_dot_and_l2_and_euclidean_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let resp = client
+        .util_dot_product(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0], None)
+        .await
+        .unwrap();
+    assert!((resp.result - 32.0).abs() < 1e-9);
+
+    let resp = client.util_l2_norm(&[3.0, 4.0], None).await.unwrap();
+    assert!((resp.result - 5.0).abs() < 1e-9);
+
+    let resp = client
+        .util_euclidean_distance(&[0.0, 0.0], &[3.0, 4.0], None)
+        .await
+        .unwrap();
+    assert!((resp.result - 5.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_hadamard_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let resp = client
+        .util_hadamard(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0], None)
+        .await
+        .unwrap();
+    assert_eq!(resp.result.len(), 3);
+    assert!((resp.result[0] - 4.0).abs() < 1e-9);
+    assert!((resp.result[1] - 10.0).abs() < 1e-9);
+    assert!((resp.result[2] - 18.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_pearson_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // Perfect positive correlation
+    let resp = client
+        .util_pearson_correlation(&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 6.0, 8.0, 10.0])
+        .await
+        .unwrap();
+    assert!((resp.result - 1.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_linreg_slope_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // y = 2x → slope = 2
+    let pts = [(0.0, 0.0), (1.0, 2.0), (2.0, 4.0), (3.0, 6.0)];
+    let resp = client.util_linear_regression_slope(&pts).await.unwrap();
+    assert!((resp.result - 2.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_fuzzy_string_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // Identical strings → 100
+    let resp = client.util_jaro_winkler("foo", "foo").await.unwrap();
+    assert_eq!(resp.result, 100);
+    let resp = client
+        .util_token_sort_ratio("foo bar", "bar foo")
+        .await
+        .unwrap();
+    // Token sort is permutation-invariant; identical tokens in different order → 100
+    assert_eq!(resp.result, 100);
+}
+
+#[tokio::test]
+async fn util_f32_precision_path() {
+    let (client, _server) = spawn_service().await;
+    // f32 path takes a different SIMD-friendly impl; same expected value.
+    let resp = client
+        .util_dot_product(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0], Some("f32"))
+        .await
+        .unwrap();
+    // f32 has less precision; allow looser tolerance.
+    assert!((resp.result - 32.0).abs() < 1e-5);
+}
+
+#[tokio::test]
+async fn util_mismatched_lengths_returns_400() {
+    let (client, _server) = spawn_service().await;
+    let err = client
+        .util_cosine_similarity(&[1.0, 2.0], &[1.0, 2.0, 3.0], None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn util_pearson_too_few_samples_returns_400() {
+    let (client, _server) = spawn_service().await;
+    let err = client
+        .util_pearson_correlation(&[1.0, 2.0], &[3.0, 4.0])
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
