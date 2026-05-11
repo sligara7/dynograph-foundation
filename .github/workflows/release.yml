@@ -43,12 +43,24 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/sligara7/dynograph-foundation
-          # `type=ref,event=tag` produces `0.5.0` from a `v0.5.0` push tag
-          # (the `v` prefix is stripped by default). `type=raw,value=latest`
-          # always also tags `:latest` so consumers can pull the most
-          # recent release without knowing the version.
+          # Industry convention for container image tags is unprefixed
+          # semver — `nginx:1.25.3`, `redis:7.2.4`, `rust:1.74.0` —
+          # never `:v1.25.3`. Git tags carry the `v` prefix per
+          # SemVer.org's recommendation; container tags don't.
+          #
+          # `type=semver,pattern={{version}}` does the v-strip
+          # automatically: a `v0.5.6` git tag push produces `:0.5.6`.
+          # `type=raw,value=latest` always also tags `:latest` so
+          # consumers can pull the most recent release without knowing
+          # the version.
+          #
+          # (Pre-fix this workflow used `type=ref,event=tag`, whose
+          # comment claimed v-stripping behavior it doesn't have —
+          # silently published `:v0.5.6` for the v0.5.0–v0.5.5 era.
+          # Fixed 2026-05-11; future releases publish at `:X.Y.Z`. Old
+          # `:vX.Y.Z` tags on the registry are stranded but harmless.)
           tags: |
-            type=ref,event=tag
+            type=semver,pattern={{version}}
             type=raw,value=latest
 
       - name: Build and push
