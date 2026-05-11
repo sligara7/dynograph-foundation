@@ -78,12 +78,7 @@ use dynograph_core::{EdgeEndpoint, Schema, Value};
 use dynograph_storage::StorageEngine;
 
 use crate::registry::RegistryError;
-use crate::validation::validate_indexed_property;
-
-/// Hard upper bound on a single response. Above this, callers should
-/// shard via filter or pagination (not yet supported — add when a real
-/// workload pushes past).
-pub(crate) const MAX_LIMIT: usize = 10_000;
+use crate::validation::{validate_indexed_property, validate_limit};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct EdgesCollectRequest {
@@ -217,12 +212,7 @@ pub(crate) fn run(
             "edge_types must be non-empty".to_string(),
         ));
     }
-    if req.limit == 0 || req.limit > MAX_LIMIT {
-        return Err(RegistryError::BadRequest(format!(
-            "limit must be in 1..={MAX_LIMIT}, got {}",
-            req.limit
-        )));
-    }
+    validate_limit(req.limit, "limit")?;
 
     let schema = engine.schema();
 

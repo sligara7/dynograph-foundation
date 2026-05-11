@@ -82,3 +82,84 @@ pub struct SimilarHit {
 pub struct SimilarResponse {
     pub results: Vec<SimilarHit>,
 }
+
+// =========================================================================
+// Tier-2 + new-in-v0.5.6 routes. Complex routes (batch, edges:collect,
+// traverse, nodes:scan, resolve-or-create) take/return `serde_json::Value`
+// — same untyped-body pattern create_node already uses for properties.
+// Future PRs can replace any of these with typed shells per-endpoint as
+// real consumers grow IDE-autocomplete pressure.
+// =========================================================================
+
+/// Returned by `POST /v1/graphs/{id}/resolve-or-create`. `match_kind`
+/// is the wire-string form of the service-side enum
+/// (`auto_merge` / `vector_merge` / `created_new`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResolveOrCreateResponse {
+    pub id: String,
+    pub was_created: bool,
+    pub match_kind: String,
+}
+
+/// One entry in `POST /v1/graphs/{id}/nodes:exists`. `id` is `None`
+/// when `exists = false`; otherwise carries the node_id of the first
+/// match.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodeExistence {
+    #[serde(rename = "type")]
+    pub node_type: String,
+    pub name: String,
+    pub exists: bool,
+    pub id: Option<String>,
+}
+
+/// Returned by `POST /v1/graphs/{id}/nodes:exists`. Result order
+/// mirrors the request's `queries` order.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodesExistsResponse {
+    pub results: Vec<NodeExistence>,
+}
+
+/// Returned by `POST /v1/graphs/{id}/edges/.../welford_update`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WelfordUpdateResponse {
+    pub score: f64,
+    pub score_m2: f64,
+    pub score_stddev: f64,
+    pub score_min: f64,
+    pub score_max: f64,
+    pub score_count: i64,
+}
+
+/// Single-field `{"result": T}` envelope used by every
+/// `POST /v1/util/*` math endpoint. Aliases below pin the concrete
+/// `T` per route: scalar (f64), vector (Vec<f64>), or ratio (u32).
+#[derive(Debug, Clone, Deserialize)]
+pub struct UtilResult<T> {
+    pub result: T,
+}
+
+/// `T = f64` — cosine_similarity, dot_product, euclidean_distance,
+/// l2_norm, pearson_correlation, linear_regression_slope.
+pub type UtilScalarResponse = UtilResult<f64>;
+
+/// `T = Vec<f64>` — hadamard.
+pub type UtilVectorResponse = UtilResult<Vec<f64>>;
+
+/// `T = u32` (0..=100) — jaro_winkler, token_sort_ratio.
+pub type UtilRatioResponse = UtilResult<u32>;
+
+/// Numeric precision for `/v1/util/*` vector ops. Wire form is the
+/// lowercase variant name (`"f32"` / `"f64"`). Duplicated rather
+/// than re-exported from `dynograph-service` for the same reason the
+/// other wire types are duplicated (preserves the lean HTTP-client
+/// dependency tree — service would drag axum/tokio/rocksdb in). The
+/// integration tests pin the two definitions against each other via
+/// round-trip serialization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Precision {
+    F32,
+    #[default]
+    F64,
+}

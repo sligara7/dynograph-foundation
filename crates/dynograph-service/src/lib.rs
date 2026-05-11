@@ -14,6 +14,7 @@ mod metadata_response;
 mod metrics_state;
 mod node_response;
 mod nodes_exists;
+mod nodes_scan;
 mod readiness;
 mod registry;
 mod resolve_or_create;
@@ -21,7 +22,9 @@ mod schema_evolution;
 mod schema_response;
 mod similar_response;
 mod traverse;
+mod util;
 mod validation;
+mod welford_update;
 
 pub use app::{AppState, app};
 pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};
@@ -36,3 +39,4 @@ pub use registry::{GraphEntry, GraphRegistry, RegistryError, StorageBackend, val
 pub use schema_evolution::{EvolutionError, validate_compatible};
 pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
 pub use similar_response::{SimilarHit, SimilarResponse};
+pub use util::Precision;

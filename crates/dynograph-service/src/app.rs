@@ -29,12 +29,20 @@ use crate::{
     metrics_state::MetricsState,
     node_response::{NodeListResponse, NodeResponse},
     nodes_exists::{NodesExistsRequest, run as run_nodes_exists},
+    nodes_scan::{NodesScanRequest, run as run_nodes_scan},
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
     resolve_or_create::{ResolveOrCreateRequest, run as run_resolve_or_create},
     schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
     traverse::{TraverseRequest, run as run_traverse},
+    util::{
+        BinaryStringRequest, BinaryVectorRequest, PointsRequest, TwoVectorF64Request,
+        UnaryVectorRequest, run_cosine_similarity, run_dot_product, run_euclidean_distance,
+        run_hadamard, run_jaro_winkler, run_l2_norm, run_linear_regression_slope,
+        run_pearson_correlation, run_token_sort_ratio,
+    },
+    welford_update::{WelfordUpdateRequest, run as run_welford_update},
 };
 
 #[derive(Clone)]
@@ -103,10 +111,15 @@ pub fn app(state: AppState) -> Router {
             "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
             get(get_edge).patch(merge_edge).delete(delete_edge),
         )
+        .route(
+            "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update",
+            post(welford_update),
+        )
         .route("/v1/graphs/{id}/batch", post(batch))
         .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
         .route("/v1/graphs/{id}/edges:collect", post(edges_collect))
         .route("/v1/graphs/{id}/nodes:exists", post(nodes_exists))
+        .route("/v1/graphs/{id}/nodes:scan", post(nodes_scan))
         .route("/v1/graphs/{id}/traverse", post(traverse))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
@@ -115,6 +128,21 @@ pub fn app(state: AppState) -> Router {
                 .delete(delete_embedding),
         )
         .route("/v1/graphs/{id}/similar", post(similar))
+        .route("/v1/util/cosine_similarity", post(util_cosine_similarity))
+        .route("/v1/util/dot_product", post(util_dot_product))
+        .route("/v1/util/euclidean_distance", post(util_euclidean_distance))
+        .route("/v1/util/l2_norm", post(util_l2_norm))
+        .route("/v1/util/hadamard", post(util_hadamard))
+        .route(
+            "/v1/util/pearson_correlation",
+            post(util_pearson_correlation),
+        )
+        .route(
+            "/v1/util/linear_regression_slope",
+            post(util_linear_regression_slope),
+        )
+        .route("/v1/util/jaro_winkler", post(util_jaro_winkler))
+        .route("/v1/util/token_sort_ratio", post(util_token_sort_ratio))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -789,6 +817,37 @@ async fn nodes_exists(
     Ok(Json(response).into_response())
 }
 
+/// Predicate-filtered scan over a single node type. See
+/// `crate::nodes_scan` for wire shape, the seven supported ops, and
+/// the seed-strategy/in-memory-filter design. Read-only — one
+/// `with_engine_read` lock for the whole scan.
+async fn nodes_scan(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<NodesScanRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_read(|engine| run_nodes_scan(engine, &id, req))?;
+    Ok(Json(response).into_response())
+}
+
+/// Atomic Welford-style EMA update of the score property family on
+/// an existing edge. See `crate::welford_update` for the math, the
+/// six-property convention, and pre-flight validation. Whole
+/// read-modify-write runs under one `with_engine_write` lock —
+/// concurrent updates serialize.
+async fn welford_update(
+    State(state): State<AppState>,
+    Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
+    Json(req): Json<WelfordUpdateRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_write(|engine| {
+        run_welford_update(engine, &id, &edge_type, &from_id, &to_id, req)
+    })?;
+    Ok(Json(response).into_response())
+}
+
 /// Typed BFS traversal from a start node. See `crate::traverse` for
 /// wire shape, validation, and the multi-step / transitive
 /// semantics. Read-only — single `with_engine_read` lock for the
@@ -957,4 +1016,60 @@ async fn similar(
         },
     )?;
     Ok(Json(response).into_response())
+}
+
+// =========================================================================
+// /v1/util/* — pure-math utility endpoints.
+//
+// Stateless (no graph_id, no registry access). Each handler is a thin
+// adapter over `crate::util::run_*`; the math lives there and stays
+// trivially unit-testable.
+// =========================================================================
+
+async fn util_cosine_similarity(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_cosine_similarity(req)?).into_response())
+}
+
+async fn util_dot_product(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_dot_product(req)?).into_response())
+}
+
+async fn util_euclidean_distance(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_euclidean_distance(req)?).into_response())
+}
+
+async fn util_l2_norm(Json(req): Json<UnaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_l2_norm(req)?).into_response())
+}
+
+async fn util_hadamard(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_hadamard(req)?).into_response())
+}
+
+async fn util_pearson_correlation(
+    Json(req): Json<TwoVectorF64Request>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_pearson_correlation(req)?).into_response())
+}
+
+async fn util_linear_regression_slope(
+    Json(req): Json<PointsRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_linear_regression_slope(req)?).into_response())
+}
+
+async fn util_jaro_winkler(
+    Json(req): Json<BinaryStringRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_jaro_winkler(req)?).into_response())
+}
+
+async fn util_token_sort_ratio(
+    Json(req): Json<BinaryStringRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_token_sort_ratio(req)?).into_response())
 }

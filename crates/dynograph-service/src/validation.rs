@@ -7,6 +7,25 @@ use dynograph_core::Schema;
 
 use crate::registry::RegistryError;
 
+/// Shared upper bound for any route that takes a `limit` field.
+/// 10_000 is the historical ceiling — well above any realistic
+/// single-call workload, well below "I just want to list the whole
+/// graph" (that's what scan endpoints with pagination are for, when
+/// pagination ships).
+pub(crate) const MAX_LIMIT: usize = 10_000;
+
+/// Validate `limit` is in `1..=MAX_LIMIT`. `context` is the field
+/// name (e.g. `"limit"`) interpolated into the error message so
+/// callers don't each rewrite the same bounds-check.
+pub(crate) fn validate_limit(limit: usize, context: &str) -> Result<(), RegistryError> {
+    if limit == 0 || limit > MAX_LIMIT {
+        return Err(RegistryError::BadRequest(format!(
+            "{context} must be in 1..={MAX_LIMIT}, got {limit}",
+        )));
+    }
+    Ok(())
+}
+
 /// Confirm that `prop` is declared on `node_type` in `schema` AND
 /// flagged `indexed: true`. Used by routes that filter by property
 /// via `scan_nodes_by_property` — un-indexed lookups silently return

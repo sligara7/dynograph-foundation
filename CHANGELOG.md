@@ -4,6 +4,91 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.5.6 — 2026-05-10
+
+Tier-3 primitives exposed over HTTP; Tier-2 primitives wrapped in
+`dynograph-client`. Closes the "everything in foundation must be
+reachable from market_graph (Python) and a future Rust extraction
+crate" gap surfaced by the market_graph capabilities inventory.
+
+### Added (service)
+
+- **`POST /v1/graphs/{id}/nodes:exists`** — batch `(type, name)`
+  existence check. Returns per-query `{exists, id}` in request order
+  so the caller can zip queries with results. Replaces N round-trips
+  via `list_nodes` (market_graph's two-pass extraction relevance gate)
+  with a single HTTP call. Pre-flight rejects requests where `name`
+  isn't `indexed: true` — the un-indexed-rejection policy
+  `/resolve-or-create` and `/edges:collect` already use.
+
+- **`POST /v1/graphs/{id}/nodes:scan`** — predicate-filtered scan over
+  a single node type. Seven AND-combined operators (`eq` / `neq` /
+  `in` / `gt` / `lt` / `gte` / `lte`). Seed strategy: the first `eq`
+  clause drives an index-backed `scan_nodes_by_property`; without one
+  it falls back to a full per-type scan. Remaining clauses evaluated
+  in memory per row. Range ops support `Int` and lex-ordered
+  `String` (Datetime rides the String path). `Op::In` lists capped at
+  `MAX_IN_LIST_LEN` (1_000) to bound CPU.
+
+- **`POST /v1/graphs/{id}/edges/{type}/{from}/{to}/welford_update`**
+  — atomic Welford-style EMA update of the
+  `(score, score_m2, score_stddev, score_min, score_max, score_count)`
+  property family. Hybrid: fixed-α EMA for the running estimate,
+  Welford m2 accumulation for variance. Whole read-modify-write
+  serializes under one `with_engine_write` lock; preserves any
+  non-Welford properties already on the edge. Replaces client-side
+  read-modify-write that was race-safe only inside a `/batch` call.
+
+- **`POST /v1/util/*`** — nine pure-math utility endpoints exposing
+  the load-bearing Tier-3 functions:
+  - `cosine_similarity`, `dot_product`, `euclidean_distance`, `l2_norm`,
+    `hadamard` (vector ops; `precision: "f32" | "f64"`, default `f64`)
+  - `pearson_correlation`, `linear_regression_slope` (f64 only)
+  - `jaro_winkler`, `token_sort_ratio` (string fuzzy match)
+  Stateless — no `graph_id` in the path. Per-request CPU bounded by
+  `MAX_VECTOR_LEN` (100_000); chunk client-side above that. Sits
+  under `/v1/` so auth middleware still applies.
+
+### Added (client)
+
+- Typed `dynograph-client` methods for every audit-promoted primitive
+  and every v0.5.6 endpoint:
+  - `batch` / `resolve_or_create` / `edges_collect` / `traverse` (P2)
+  - `nodes_exists` / `nodes_scan` / `welford_update` (new in v0.5.6)
+  - `util_*` (nine math endpoints)
+  Complex-shaped routes (batch, edges_collect, traverse, nodes_scan)
+  take `&serde_json::Value` for the request and return
+  `serde_json::Value` for the response — same untyped-body pattern
+  `create_node` already uses for properties. Simple-shaped routes
+  return typed wire structs (`ResolveOrCreateResponse`,
+  `NodesExistsResponse`, `WelfordUpdateResponse`, `UtilScalarResponse`,
+  `UtilVectorResponse`, `UtilRatioResponse`). Future PRs can replace
+  any complex-route wrapper with a typed shell.
+
+### Changed
+
+- **`MAX_LIMIT` consolidated.** Pre-v0.5.6, three modules each
+  defined their own `pub(crate) const MAX_LIMIT: usize = 10_000;`
+  and rewrote the same `if limit == 0 || limit > MAX_LIMIT` check
+  inline. v0.5.6 hoists both to `crate::validation` —
+  `validate_limit(limit, context)` and the shared `MAX_LIMIT` const.
+  `edges_collect`, `traverse`, and `nodes_scan` now share one
+  implementation. Error wording unchanged.
+
+- **`/nodes:scan` reuses `NodeResponse`** (`{node_type, node_id,
+  properties}`) for its `Nodes` return shape. Bespoke `{type, id,
+  properties}` shape would have drifted from every other node-returning
+  endpoint; picked the existing shape so consumers can deserialize
+  into one struct.
+
+### Internal
+
+- 3 unit tests + 7 integration tests for welford; 16 integration
+  tests for nodes:scan; 6 integration tests for nodes:exists; 9
+  client integration tests for util endpoints; 7 client integration
+  tests for the audit-promoted primitives. Total workspace: 24
+  client + 155 service + 56 service-unit + 9 persistence passing.
+
 ## v0.5.5 — 2026-05-06
 
 Contract change: read-your-own-writes within a batch.

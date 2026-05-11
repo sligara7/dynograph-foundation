@@ -340,3 +340,445 @@ async fn bearer_jwt_rejected_without_token_accepted_with_token() {
     client = client.with_bearer(token);
     assert_eq!(client.list_graphs().await.unwrap(), Vec::<String>::new());
 }
+
+// =========================================================================
+// v0.5.6 — audit-promoted primitives + new endpoints
+// =========================================================================
+
+/// Schema that exercises every v0.5.6-relevant feature: indexed `name`
+/// (for nodes:exists / resolve_or_create / nodes:scan), indexed `tag`
+/// (for nodes:scan filter), and resolution config (for resolve_or_create).
+fn audit_schema() -> Schema {
+    Schema::from_yaml(
+        r#"
+schema:
+  name: audit
+  version: 1
+  node_types:
+    Item:
+      properties:
+        name: { type: string, required: true, indexed: true }
+        tag:  { type: string, indexed: true }
+      resolution:
+        strategy: fuzzy_then_vector
+        fuzzy_threshold: 70
+        vector_threshold: 0.85
+        auto_merge_threshold: 90
+  edge_types:
+    Likes:
+      from: Item
+      to: Item
+"#,
+    )
+    .unwrap()
+}
+
+async fn setup_audit_graph(client: &DynographClient) {
+    client.create_graph("g", &audit_schema()).await.unwrap();
+}
+
+#[tokio::test]
+async fn batch_round_trip_creates_node_and_edge_atomically() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    let body = json!({
+        "ops": [
+            {"op": "create_node", "node_type": "Item", "node_id": "a",
+             "properties": {"name": "Alpha", "tag": "x"}},
+            {"op": "create_node", "node_type": "Item", "node_id": "b",
+             "properties": {"name": "Beta", "tag": "y"}},
+            {"op": "create_edge", "edge_type": "Likes",
+             "from_type": "Item", "from_id": "a",
+             "to_type": "Item",   "to_id": "b",
+             "properties": {}}
+        ]
+    });
+    let resp = client.batch("g", &body).await.unwrap();
+    // BatchResponse includes effect counters; assert at least the node count.
+    assert_eq!(resp["nodes_created"], 2, "got: {resp}");
+    assert_eq!(resp["edges_created"], 1);
+
+    // Verify the writes landed by reading them back.
+    let node = client.get_node("g", "Item", "a").await.unwrap();
+    assert_eq!(node.node_id, "a");
+    let edge = client.get_edge("g", "Likes", "a", "b").await.unwrap();
+    assert_eq!(edge.from_id, "a");
+    assert_eq!(edge.to_id, "b");
+}
+
+#[tokio::test]
+async fn resolve_or_create_round_trip_creates_then_auto_merges() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    // First call: no candidates, so foundation creates a new node.
+    let first = client
+        .resolve_or_create(
+            "g",
+            &json!({
+                "node_type": "Item",
+                "properties": {"name": "Widget"}
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(first.was_created);
+    assert_eq!(first.match_kind, "created_new");
+
+    // Second call with identical name — fuzzy ratio 100 > auto_merge_threshold.
+    let second = client
+        .resolve_or_create(
+            "g",
+            &json!({
+                "node_type": "Item",
+                "properties": {"name": "Widget"}
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(!second.was_created);
+    assert_eq!(second.match_kind, "auto_merge");
+    assert_eq!(second.id, first.id);
+}
+
+#[tokio::test]
+async fn edges_collect_round_trip_returns_collected_edges() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    client
+        .create_node("g", "Item", "a", &props(&[("name", json!("A"))]))
+        .await
+        .unwrap();
+    client
+        .create_node("g", "Item", "b", &props(&[("name", json!("B"))]))
+        .await
+        .unwrap();
+    client
+        .create_edge(
+            "g",
+            &CreateEdge {
+                edge_type: "Likes",
+                from_type: "Item",
+                from_id: "a",
+                to_type: "Item",
+                to_id: "b",
+                properties: &Map::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let resp = client
+        .edges_collect(
+            "g",
+            &json!({
+                "source": {"type": "Item"},
+                "edge_types": ["Likes"],
+                "limit": 100
+            }),
+        )
+        .await
+        .unwrap();
+    let edges = resp["edges"].as_array().expect("edges array");
+    assert_eq!(edges.len(), 1, "resp: {resp}");
+    assert_eq!(edges[0]["edge_type"], "Likes");
+    assert_eq!(edges[0]["from_id"], "a");
+    assert_eq!(edges[0]["to_id"], "b");
+}
+
+#[tokio::test]
+async fn traverse_round_trip_walks_outgoing_edges_from_start() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    // Chain: a → b → c via Likes
+    for (id, name) in [("a", "A"), ("b", "B"), ("c", "C")] {
+        client
+            .create_node("g", "Item", id, &props(&[("name", json!(name))]))
+            .await
+            .unwrap();
+    }
+    for (from, to) in [("a", "b"), ("b", "c")] {
+        client
+            .create_edge(
+                "g",
+                &CreateEdge {
+                    edge_type: "Likes",
+                    from_type: "Item",
+                    from_id: from,
+                    to_type: "Item",
+                    to_id: to,
+                    properties: &Map::new(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    let resp = client
+        .traverse(
+            "g",
+            &json!({
+                "start": {"type": "Item", "id": "a"},
+                "traverse": [{"edge_type": "Likes", "direction": "outgoing", "transitive": true}],
+                "limit": 10
+            }),
+        )
+        .await
+        .unwrap();
+    let nodes = resp["nodes"].as_array().expect("nodes array");
+    let ids: std::collections::HashSet<&str> = nodes
+        .iter()
+        .map(|n| n["node_id"].as_str().unwrap())
+        .collect();
+    // Start (a) is excluded; b and c reachable transitively.
+    assert_eq!(ids, ["b", "c"].into_iter().collect());
+}
+
+#[tokio::test]
+async fn nodes_exists_round_trip_returns_mixed_present_absent() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    client
+        .create_node(
+            "g",
+            "Item",
+            "widget-1",
+            &props(&[("name", json!("Widget"))]),
+        )
+        .await
+        .unwrap();
+
+    let resp = client
+        .nodes_exists(
+            "g",
+            &json!({
+                "queries": [
+                    {"type": "Item", "name": "Widget"},
+                    {"type": "Item", "name": "Ghost"}
+                ]
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.results.len(), 2);
+    assert!(resp.results[0].exists);
+    assert_eq!(resp.results[0].id.as_deref(), Some("widget-1"));
+    assert!(!resp.results[1].exists);
+    assert!(resp.results[1].id.is_none());
+}
+
+#[tokio::test]
+async fn nodes_scan_round_trip_filters_by_indexed_eq() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    for (id, name, tag) in [
+        ("a", "Alpha", "red"),
+        ("b", "Beta", "blue"),
+        ("c", "Gamma", "red"),
+    ] {
+        client
+            .create_node(
+                "g",
+                "Item",
+                id,
+                &props(&[("name", json!(name)), ("tag", json!(tag))]),
+            )
+            .await
+            .unwrap();
+    }
+
+    let resp = client
+        .nodes_scan(
+            "g",
+            &json!({
+                "type": "Item",
+                "where": [{"property": "tag", "op": "eq", "value": "red"}],
+                "return": "ids",
+                "limit": 100
+            }),
+        )
+        .await
+        .unwrap();
+    let ids: std::collections::HashSet<&str> = resp["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["a", "c"].into_iter().collect());
+}
+
+#[tokio::test]
+async fn welford_update_round_trip_initializes_then_evolves_state() {
+    let (client, _server) = spawn_service().await;
+    setup_audit_graph(&client).await;
+
+    client
+        .create_node("g", "Item", "a", &props(&[("name", json!("A"))]))
+        .await
+        .unwrap();
+    client
+        .create_node("g", "Item", "b", &props(&[("name", json!("B"))]))
+        .await
+        .unwrap();
+    client
+        .create_edge(
+            "g",
+            &CreateEdge {
+                edge_type: "Likes",
+                from_type: "Item",
+                from_id: "a",
+                to_type: "Item",
+                to_id: "b",
+                properties: &Map::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let first = client
+        .welford_update("g", "Likes", "a", "b", 0.5, 0.5)
+        .await
+        .unwrap();
+    assert_eq!(first.score_count, 1);
+    assert!((first.score - 0.5).abs() < 1e-9);
+
+    let second = client
+        .welford_update("g", "Likes", "a", "b", 0.7, 0.5)
+        .await
+        .unwrap();
+    assert_eq!(second.score_count, 2);
+    // Expected: score = 0.5 + 0.5*(0.7-0.5) = 0.6
+    assert!((second.score - 0.6).abs() < 1e-9, "got: {second:?}");
+    assert!((second.score_min - 0.5).abs() < 1e-9);
+    assert!((second.score_max - 0.7).abs() < 1e-9);
+}
+
+// =========================================================================
+// v0.5.6 P3 — /v1/util/* pure-math endpoints
+// =========================================================================
+
+#[tokio::test]
+async fn util_cosine_similarity_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // [1, 0, 0] · [1, 0, 0] = 1.0
+    let resp = client
+        .util_cosine_similarity(&[1.0, 0.0, 0.0], &[1.0, 0.0, 0.0], None)
+        .await
+        .unwrap();
+    assert!((resp.result - 1.0).abs() < 1e-9);
+
+    // Orthogonal → 0
+    let resp = client
+        .util_cosine_similarity(&[1.0, 0.0], &[0.0, 1.0], None)
+        .await
+        .unwrap();
+    assert!(resp.result.abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_dot_and_l2_and_euclidean_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let resp = client
+        .util_dot_product(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0], None)
+        .await
+        .unwrap();
+    assert!((resp.result - 32.0).abs() < 1e-9);
+
+    let resp = client.util_l2_norm(&[3.0, 4.0], None).await.unwrap();
+    assert!((resp.result - 5.0).abs() < 1e-9);
+
+    let resp = client
+        .util_euclidean_distance(&[0.0, 0.0], &[3.0, 4.0], None)
+        .await
+        .unwrap();
+    assert!((resp.result - 5.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_hadamard_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let resp = client
+        .util_hadamard(&[1.0, 2.0, 3.0], &[4.0, 5.0, 6.0], None)
+        .await
+        .unwrap();
+    assert_eq!(resp.result.len(), 3);
+    assert!((resp.result[0] - 4.0).abs() < 1e-9);
+    assert!((resp.result[1] - 10.0).abs() < 1e-9);
+    assert!((resp.result[2] - 18.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_pearson_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // Perfect positive correlation
+    let resp = client
+        .util_pearson_correlation(&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 6.0, 8.0, 10.0])
+        .await
+        .unwrap();
+    assert!((resp.result - 1.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_linreg_slope_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // y = 2x → slope = 2
+    let pts = [(0.0, 0.0), (1.0, 2.0), (2.0, 4.0), (3.0, 6.0)];
+    let resp = client.util_linear_regression_slope(&pts).await.unwrap();
+    assert!((resp.result - 2.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_fuzzy_string_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // Identical strings → 100
+    let resp = client.util_jaro_winkler("foo", "foo").await.unwrap();
+    assert_eq!(resp.result, 100);
+    let resp = client
+        .util_token_sort_ratio("foo bar", "bar foo")
+        .await
+        .unwrap();
+    // Token sort is permutation-invariant; identical tokens in different order → 100
+    assert_eq!(resp.result, 100);
+}
+
+#[tokio::test]
+async fn util_f32_precision_path() {
+    let (client, _server) = spawn_service().await;
+    // f32 path takes a different SIMD-friendly impl; same expected value.
+    let resp = client
+        .util_dot_product(
+            &[1.0, 2.0, 3.0],
+            &[4.0, 5.0, 6.0],
+            Some(dynograph_client::Precision::F32),
+        )
+        .await
+        .unwrap();
+    // f32 has less precision; allow looser tolerance.
+    assert!((resp.result - 32.0).abs() < 1e-5);
+}
+
+#[tokio::test]
+async fn util_mismatched_lengths_returns_400() {
+    let (client, _server) = spawn_service().await;
+    let err = client
+        .util_cosine_similarity(&[1.0, 2.0], &[1.0, 2.0, 3.0], None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn util_pearson_too_few_samples_returns_400() {
+    let (client, _server) = spawn_service().await;
+    let err = client
+        .util_pearson_correlation(&[1.0, 2.0], &[3.0, 4.0])
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
