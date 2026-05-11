@@ -82,3 +82,51 @@ pub struct SimilarHit {
 pub struct SimilarResponse {
     pub results: Vec<SimilarHit>,
 }
+
+// =========================================================================
+// Tier-2 + new-in-v0.5.6 routes. Complex routes (batch, edges:collect,
+// traverse, nodes:scan, resolve-or-create) take/return `serde_json::Value`
+// — same untyped-body pattern create_node already uses for properties.
+// Future PRs can replace any of these with typed shells per-endpoint as
+// real consumers grow IDE-autocomplete pressure.
+// =========================================================================
+
+/// Returned by `POST /v1/graphs/{id}/resolve-or-create`. `match_kind`
+/// is the wire-string form of the service-side enum
+/// (`auto_merge` / `vector_merge` / `created_new`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ResolveOrCreateResponse {
+    pub id: String,
+    pub was_created: bool,
+    pub match_kind: String,
+}
+
+/// One entry in `POST /v1/graphs/{id}/nodes:exists`. `id` is `None`
+/// when `exists = false`; otherwise carries the node_id of the first
+/// match.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodeExistence {
+    #[serde(rename = "type")]
+    pub node_type: String,
+    pub name: String,
+    pub exists: bool,
+    pub id: Option<String>,
+}
+
+/// Returned by `POST /v1/graphs/{id}/nodes:exists`. Result order
+/// mirrors the request's `queries` order.
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodesExistsResponse {
+    pub results: Vec<NodeExistence>,
+}
+
+/// Returned by `POST /v1/graphs/{id}/edges/.../welford_update`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct WelfordUpdateResponse {
+    pub score: f64,
+    pub score_m2: f64,
+    pub score_stddev: f64,
+    pub score_min: f64,
+    pub score_max: f64,
+    pub score_count: i64,
+}

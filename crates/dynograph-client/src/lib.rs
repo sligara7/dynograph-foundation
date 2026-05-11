@@ -21,8 +21,9 @@ use serde_json::json;
 
 pub use error::ClientError;
 pub use wire::{
-    EdgeResponse, EmbeddingResponse, GraphMetadataResponse, NodeListResponse, NodeResponse,
-    SchemaResponse, SimilarHit, SimilarResponse,
+    EdgeResponse, EmbeddingResponse, GraphMetadataResponse, NodeExistence, NodeListResponse,
+    NodeResponse, NodesExistsResponse, ResolveOrCreateResponse, SchemaResponse, SimilarHit,
+    SimilarResponse, WelfordUpdateResponse,
 };
 
 /// Request body for `create_edge`. Carries the same fields as the
@@ -433,6 +434,135 @@ impl DynographClient {
                     top_k,
                     node_type,
                 }),
+        )
+        .await
+    }
+
+    // =========================================================================
+    // Audit-promoted primitives (v0.5.1 → v0.5.4) and v0.5.6 additions.
+    //
+    // The complex-body endpoints take `&serde_json::Value` for the
+    // request and return `serde_json::Value` for the response — same
+    // untyped pattern create_node uses for properties. See wire.rs for
+    // the rationale and the few endpoints that do carry typed
+    // responses (resolve_or_create, nodes:exists, welford_update).
+    // =========================================================================
+
+    /// `POST /v1/graphs/{id}/batch` — atomic multi-op transaction.
+    /// `body` carries `{"ops": [{"op": "create_node", ...}, ...]}`.
+    /// See service-side `crate::batch` for the wire shape and per-op
+    /// error contract; foundation responds 400 with an
+    /// `{op_index, op_type, error}` body if any op fails.
+    pub async fn batch(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.send_json(
+            self.request(Method::POST, &format!("/v1/graphs/{id}/batch"))
+                .json(body),
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/resolve-or-create` — fuzzy/vector entity
+    /// resolution with create-on-miss. `body` carries
+    /// `{node_type, properties, embedding?, scope?}`.
+    pub async fn resolve_or_create(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ResolveOrCreateResponse, ClientError> {
+        self.send_json(
+            self.request(Method::POST, &format!("/v1/graphs/{id}/resolve-or-create"))
+                .json(body),
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/edges:collect` — fan-out edge collection
+    /// across a typed source set. Response shape is untagged
+    /// (`{"edges": [...]}` vs `{"adjacency": {...}}`) so it's returned
+    /// as `serde_json::Value`; consumers branch on the field they
+    /// requested via `format`.
+    pub async fn edges_collect(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.send_json(
+            self.request(Method::POST, &format!("/v1/graphs/{id}/edges:collect"))
+                .json(body),
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/traverse` — typed BFS over edge-type
+    /// steps. Response carries `{nodes: [...], truncated: bool}` where
+    /// each node has `node_type`, `node_id`, and (when `return=nodes`)
+    /// `properties`.
+    pub async fn traverse(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.send_json(
+            self.request(Method::POST, &format!("/v1/graphs/{id}/traverse"))
+                .json(body),
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/nodes:exists` — batch (type, name)
+    /// existence check. Returns typed results in request order.
+    pub async fn nodes_exists(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<NodesExistsResponse, ClientError> {
+        self.send_json(
+            self.request(Method::POST, &format!("/v1/graphs/{id}/nodes:exists"))
+                .json(body),
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/nodes:scan` — predicate-filtered scan.
+    /// Response shape varies by `return` (`ids` vs `nodes`) so it's
+    /// returned as `serde_json::Value`; consumers branch on the
+    /// requested return shape.
+    pub async fn nodes_scan(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.send_json(
+            self.request(Method::POST, &format!("/v1/graphs/{id}/nodes:scan"))
+                .json(body),
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/edges/{type}/{from}/{to}/welford_update`
+    /// — atomic EMA + Welford increment of the score property family
+    /// on an existing edge. Returns the new (score, m2, stddev, min,
+    /// max, count) sextuple.
+    pub async fn welford_update(
+        &self,
+        id: &str,
+        edge_type: &str,
+        from_id: &str,
+        to_id: &str,
+        observation: f64,
+        alpha: f64,
+    ) -> Result<WelfordUpdateResponse, ClientError> {
+        let body = json!({ "observation": observation, "alpha": alpha });
+        self.send_json(
+            self.request(
+                Method::POST,
+                &format!("/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update"),
+            )
+            .json(&body),
         )
         .await
     }
