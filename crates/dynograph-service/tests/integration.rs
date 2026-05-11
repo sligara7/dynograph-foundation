@@ -4057,3 +4057,220 @@ async fn traverse_unknown_graph_returns_404() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+// =========================================================================
+// /v1/graphs/{id}/nodes:exists — batch (type, name) existence check
+// =========================================================================
+
+/// Schema where `name` is `indexed: true` on every type — the
+/// precondition for nodes:exists. Distinct from `knowledge_graph_schema_body`
+/// (where `name` is intentionally un-indexed to feed the
+/// rejection-path tests).
+fn indexed_name_schema_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "indexed-name-demo",
+            "version": 1,
+            "node_types": {
+                "Geography": {
+                    "properties": {
+                        "name": {"type": "string", "required": true, "indexed": true}
+                    }
+                },
+                "Commodity": {
+                    "properties": {
+                        "name": {"type": "string", "required": true, "indexed": true}
+                    }
+                }
+            },
+            "edge_types": {}
+        }
+    })
+}
+
+async fn build_app_with_indexed_name_schema() -> axum::Router {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(indexed_name_schema_body().to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    app
+}
+
+async fn post_exists(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes:exists")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+async fn create_named_node(app: &axum::Router, node_type: &str, node_id: &str, name: &str) {
+    let body = json!({
+        "node_type": node_type,
+        "node_id": node_id,
+        "properties": {"name": name}
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::CREATED,
+        "create_named_node({node_type}/{node_id})"
+    );
+}
+
+#[tokio::test]
+async fn nodes_exists_returns_present_with_id_and_absent_with_null() {
+    let app = build_app_with_indexed_name_schema().await;
+    create_named_node(&app, "Geography", "geo:iran", "Iran").await;
+    create_named_node(&app, "Commodity", "com:oil", "Oil").await;
+
+    let (status, resp) = post_exists(
+        &app,
+        json!({
+            "queries": [
+                {"type": "Geography", "name": "Iran"},
+                {"type": "Geography", "name": "Atlantis"},
+                {"type": "Commodity", "name": "Oil"}
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let results = resp["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3);
+
+    assert_eq!(results[0]["type"], "Geography");
+    assert_eq!(results[0]["name"], "Iran");
+    assert_eq!(results[0]["exists"], true);
+    assert_eq!(results[0]["id"], "geo:iran");
+
+    assert_eq!(results[1]["type"], "Geography");
+    assert_eq!(results[1]["name"], "Atlantis");
+    assert_eq!(results[1]["exists"], false);
+    assert!(results[1]["id"].is_null());
+
+    assert_eq!(results[2]["type"], "Commodity");
+    assert_eq!(results[2]["name"], "Oil");
+    assert_eq!(results[2]["exists"], true);
+    assert_eq!(results[2]["id"], "com:oil");
+}
+
+#[tokio::test]
+async fn nodes_exists_preserves_query_order() {
+    let app = build_app_with_indexed_name_schema().await;
+    create_named_node(&app, "Geography", "geo:iran", "Iran").await;
+    create_named_node(&app, "Geography", "geo:peru", "Peru").await;
+
+    let (status, resp) = post_exists(
+        &app,
+        json!({
+            "queries": [
+                {"type": "Geography", "name": "Peru"},
+                {"type": "Geography", "name": "Iran"}
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let names: Vec<&str> = resp["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["Peru", "Iran"]);
+}
+
+#[tokio::test]
+async fn nodes_exists_empty_queries_returns_400() {
+    let app = build_app_with_indexed_name_schema().await;
+    let (status, resp) = post_exists(&app, json!({"queries": []})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("non-empty"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn nodes_exists_unknown_type_returns_400() {
+    let app = build_app_with_indexed_name_schema().await;
+    let (status, resp) =
+        post_exists(&app, json!({"queries": [{"type": "Ghost", "name": "x"}]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("unknown node type"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn nodes_exists_unindexed_name_returns_400() {
+    // Reuse the knowledge_graph schema where `name` is required but
+    // NOT indexed — should reject loudly rather than silently report
+    // every entity as absent.
+    let app = build_app_with_knowledge_graph().await;
+    let (status, resp) = post_exists(
+        &app,
+        json!({"queries": [{"type": "Character", "name": "Alice"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("not indexed"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn nodes_exists_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/nodes:exists")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"queries": [{"type": "X", "name": "y"}]}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
