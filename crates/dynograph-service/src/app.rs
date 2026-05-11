@@ -29,6 +29,7 @@ use crate::{
     metrics_state::MetricsState,
     node_response::{NodeListResponse, NodeResponse},
     nodes_exists::{NodesExistsRequest, run as run_nodes_exists},
+    nodes_scan::{NodesScanRequest, run as run_nodes_scan},
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
     resolve_or_create::{ResolveOrCreateRequest, run as run_resolve_or_create},
@@ -107,6 +108,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
         .route("/v1/graphs/{id}/edges:collect", post(edges_collect))
         .route("/v1/graphs/{id}/nodes:exists", post(nodes_exists))
+        .route("/v1/graphs/{id}/nodes:scan", post(nodes_scan))
         .route("/v1/graphs/{id}/traverse", post(traverse))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
@@ -786,6 +788,20 @@ async fn nodes_exists(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry.with_engine_read(|engine| run_nodes_exists(engine, &id, req))?;
+    Ok(Json(response).into_response())
+}
+
+/// Predicate-filtered scan over a single node type. See
+/// `crate::nodes_scan` for wire shape, the seven supported ops, and
+/// the seed-strategy/in-memory-filter design. Read-only — one
+/// `with_engine_read` lock for the whole scan.
+async fn nodes_scan(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<NodesScanRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_read(|engine| run_nodes_scan(engine, &id, req))?;
     Ok(Json(response).into_response())
 }
 

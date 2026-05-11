@@ -14,6 +14,7 @@ mod metadata_response;
 mod metrics_state;
 mod node_response;
 mod nodes_exists;
+mod nodes_scan;
 mod readiness;
 mod registry;
 mod resolve_or_create;

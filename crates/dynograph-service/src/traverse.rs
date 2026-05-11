@@ -90,12 +90,7 @@ use dynograph_core::{EdgeEndpoint, Schema, Value};
 use dynograph_storage::StorageEngine;
 
 use crate::registry::RegistryError;
-use crate::validation::validate_indexed_property;
-
-/// Hard upper bound on a single response. Above this, callers should
-/// scope tighter or split. No pagination cursor yet — add when a real
-/// workload pushes past.
-pub(crate) const MAX_LIMIT: usize = 10_000;
+use crate::validation::{validate_indexed_property, validate_limit};
 
 /// Hard cap on traverse-step chain length. Longer chains are almost
 /// certainly a bug or a missing primitive (a schema-aware path query,
@@ -203,12 +198,7 @@ pub(crate) fn run(
             req.traverse.len()
         )));
     }
-    if req.limit == 0 || req.limit > MAX_LIMIT {
-        return Err(RegistryError::BadRequest(format!(
-            "limit must be in 1..={MAX_LIMIT}, got {}",
-            req.limit
-        )));
-    }
+    validate_limit(req.limit, "limit")?;
     if req.start.id.is_empty() {
         return Err(RegistryError::BadRequest(
             "start.id must be non-empty".to_string(),
