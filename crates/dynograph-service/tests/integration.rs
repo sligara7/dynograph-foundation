@@ -3486,6 +3486,151 @@ async fn edges_collect_unknown_graph_returns_404() {
 }
 
 // =========================================================================
+// /v1/graphs/{id}/edges:adjacent — single-node 1-hop adjacency
+// =========================================================================
+
+async fn post_adjacent(app: &axum::Router, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/edges:adjacent")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+/// Collect (edge_type, from_id, to_id) triples from an edges:adjacent response.
+fn adjacent_triples(resp: &Value) -> std::collections::HashSet<(String, String, String)> {
+    resp["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["edge_type"].as_str().unwrap().to_string(),
+                e["from_id"].as_str().unwrap().to_string(),
+                e["to_id"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn edges_adjacent_both_returns_outgoing_and_incoming() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // char-A1: outgoing MENTIONS→char-A2, VISITS→loc-A1; incoming INVOLVES from ev-A1.
+    let (status, resp) = post_adjacent(&app, json!({"node_id": "char-A1"})).await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    let got = adjacent_triples(&resp);
+    let want: std::collections::HashSet<_> = [
+        ("MENTIONS".to_string(), "char-A1".to_string(), "char-A2".to_string()),
+        ("VISITS".to_string(), "char-A1".to_string(), "loc-A1".to_string()),
+        ("INVOLVES".to_string(), "ev-A1".to_string(), "char-A1".to_string()),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(got, want, "default direction=both should return all 3 incident edges");
+}
+
+#[tokio::test]
+async fn edges_adjacent_outgoing_only() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) =
+        post_adjacent(&app, json!({"node_id": "char-A1", "direction": "outgoing"})).await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    let got = adjacent_triples(&resp);
+    let want: std::collections::HashSet<_> = [
+        ("MENTIONS".to_string(), "char-A1".to_string(), "char-A2".to_string()),
+        ("VISITS".to_string(), "char-A1".to_string(), "loc-A1".to_string()),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(got, want);
+}
+
+#[tokio::test]
+async fn edges_adjacent_incoming_only() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) =
+        post_adjacent(&app, json!({"node_id": "char-A1", "direction": "incoming"})).await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    let got = adjacent_triples(&resp);
+    let want: std::collections::HashSet<_> =
+        [("INVOLVES".to_string(), "ev-A1".to_string(), "char-A1".to_string())]
+            .into_iter()
+            .collect();
+    assert_eq!(got, want);
+}
+
+#[tokio::test]
+async fn edges_adjacent_edge_type_filter() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Outgoing, filtered to MENTIONS — drops the VISITS edge.
+    let (status, resp) = post_adjacent(
+        &app,
+        json!({"node_id": "char-A1", "direction": "outgoing", "edge_type": "MENTIONS"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    let got = adjacent_triples(&resp);
+    let want: std::collections::HashSet<_> = [(
+        "MENTIONS".to_string(),
+        "char-A1".to_string(),
+        "char-A2".to_string(),
+    )]
+    .into_iter()
+    .collect();
+    assert_eq!(got, want);
+}
+
+#[tokio::test]
+async fn edges_adjacent_unknown_node_returns_empty() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Adjacency is keyed by node id, not type — an unknown id is simply
+    // an isolated node, not an error.
+    let (status, resp) = post_adjacent(&app, json!({"node_id": "does-not-exist"})).await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    assert_eq!(resp["edges"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn edges_adjacent_unknown_graph_returns_404() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/missing/edges:adjacent")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({"node_id": "char-A1"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+// =========================================================================
 // /v1/graphs/{id}/traverse — typed BFS over edge-type steps
 // =========================================================================
 

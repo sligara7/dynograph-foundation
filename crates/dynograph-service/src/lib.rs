@@ -8,6 +8,7 @@ mod batch;
 mod buildinfo_response;
 mod config;
 mod edge_response;
+mod edges_adjacent;
 mod edges_collect;
 mod embedding_response;
 mod metadata_response;
