@@ -3535,13 +3535,28 @@ async fn edges_adjacent_both_returns_outgoing_and_incoming() {
     assert_eq!(status, StatusCode::OK, "got: {resp}");
     let got = adjacent_triples(&resp);
     let want: std::collections::HashSet<_> = [
-        ("MENTIONS".to_string(), "char-A1".to_string(), "char-A2".to_string()),
-        ("VISITS".to_string(), "char-A1".to_string(), "loc-A1".to_string()),
-        ("INVOLVES".to_string(), "ev-A1".to_string(), "char-A1".to_string()),
+        (
+            "MENTIONS".to_string(),
+            "char-A1".to_string(),
+            "char-A2".to_string(),
+        ),
+        (
+            "VISITS".to_string(),
+            "char-A1".to_string(),
+            "loc-A1".to_string(),
+        ),
+        (
+            "INVOLVES".to_string(),
+            "ev-A1".to_string(),
+            "char-A1".to_string(),
+        ),
     ]
     .into_iter()
     .collect();
-    assert_eq!(got, want, "default direction=both should return all 3 incident edges");
+    assert_eq!(
+        got, want,
+        "default direction=both should return all 3 incident edges"
+    );
 }
 
 #[tokio::test]
@@ -3554,8 +3569,16 @@ async fn edges_adjacent_outgoing_only() {
     assert_eq!(status, StatusCode::OK, "got: {resp}");
     let got = adjacent_triples(&resp);
     let want: std::collections::HashSet<_> = [
-        ("MENTIONS".to_string(), "char-A1".to_string(), "char-A2".to_string()),
-        ("VISITS".to_string(), "char-A1".to_string(), "loc-A1".to_string()),
+        (
+            "MENTIONS".to_string(),
+            "char-A1".to_string(),
+            "char-A2".to_string(),
+        ),
+        (
+            "VISITS".to_string(),
+            "char-A1".to_string(),
+            "loc-A1".to_string(),
+        ),
     ]
     .into_iter()
     .collect();
@@ -3571,10 +3594,13 @@ async fn edges_adjacent_incoming_only() {
         post_adjacent(&app, json!({"node_id": "char-A1", "direction": "incoming"})).await;
     assert_eq!(status, StatusCode::OK, "got: {resp}");
     let got = adjacent_triples(&resp);
-    let want: std::collections::HashSet<_> =
-        [("INVOLVES".to_string(), "ev-A1".to_string(), "char-A1".to_string())]
-            .into_iter()
-            .collect();
+    let want: std::collections::HashSet<_> = [(
+        "INVOLVES".to_string(),
+        "ev-A1".to_string(),
+        "char-A1".to_string(),
+    )]
+    .into_iter()
+    .collect();
     assert_eq!(got, want);
 }
 
