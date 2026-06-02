@@ -503,6 +503,20 @@ impl DynographClient {
             .await
     }
 
+    /// `POST /v1/graphs/{id}/edges:adjacent` — single-node 1-hop adjacency
+    /// (the per-node `outgoing_edges(id)` / `incoming_edges(id)` that
+    /// `edges:collect` does not cover). Body:
+    /// `{node_id, direction?: "outgoing"|"incoming"|"both", edge_type?}`.
+    /// Response: `{"edges": [{edge_type, from_id, to_id, properties}]}`.
+    pub async fn edges_adjacent(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/edges:adjacent"), body)
+            .await
+    }
+
     /// `POST /v1/graphs/{id}/traverse` — typed BFS over edge-type
     /// steps. Response carries `{nodes: [...], truncated: bool}` where
     /// each node has `node_type`, `node_id`, and (when `return=nodes`)

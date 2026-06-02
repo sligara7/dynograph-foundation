@@ -23,6 +23,7 @@ use crate::{
     batch::{BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     edge_response::EdgeResponse,
+    edges_adjacent::{EdgesAdjacentRequest, run as run_edges_adjacent},
     edges_collect::{EdgesCollectRequest, run as run_edges_collect},
     embedding_response::EmbeddingResponse,
     metadata_response::GraphMetadataResponse,
@@ -118,6 +119,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/batch", post(batch))
         .route("/v1/graphs/{id}/resolve-or-create", post(resolve_or_create))
         .route("/v1/graphs/{id}/edges:collect", post(edges_collect))
+        .route("/v1/graphs/{id}/edges:adjacent", post(edges_adjacent))
         .route("/v1/graphs/{id}/nodes:exists", post(nodes_exists))
         .route("/v1/graphs/{id}/nodes:scan", post(nodes_scan))
         .route("/v1/graphs/{id}/traverse", post(traverse))
@@ -800,6 +802,19 @@ async fn edges_collect(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry.with_engine_read(|engine| run_edges_collect(engine, &id, req))?;
+    Ok(Json(response).into_response())
+}
+
+/// Single-node 1-hop adjacency (the per-node `outgoing_edges(id)` /
+/// `incoming_edges(id)` that `edges:collect` — fan-out by source type — does
+/// not cover). See `crate::edges_adjacent`. Read-only.
+async fn edges_adjacent(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<EdgesAdjacentRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry.with_engine_read(|engine| run_edges_adjacent(engine, &id, req))?;
     Ok(Json(response).into_response())
 }
 
