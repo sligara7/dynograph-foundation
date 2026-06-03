@@ -27,6 +27,13 @@ pub use wire::{
     UtilVectorResponse, WelfordUpdateResponse,
 };
 
+/// The service's JSON error envelope, `{ "error": "<message>" }`,
+/// decoded to surface the message in [`ClientError::Http`].
+#[derive(Deserialize)]
+struct ErrorBody {
+    error: String,
+}
+
 /// Request body for `create_edge`. Carries the same fields as the
 /// service's `CreateEdgeBody`; promoted to a struct so the client's
 /// signature stays under the `clippy::too_many_arguments` floor and
@@ -93,15 +100,23 @@ impl DynographClient {
     }
 
     /// Fire the request and surface a `ClientError::Http { status,
-    /// body }` for any non-2xx — preserving the server's plain-text
-    /// reason. 2xx responses pass through.
+    /// body }` for any non-2xx — `body` is the server's error message.
+    /// 2xx responses pass through.
+    ///
+    /// The service returns errors as JSON `{ "error": "<message>" }`, so
+    /// we extract the `error` field for a clean message; a body that
+    /// isn't in that shape (e.g. from an upstream proxy) is passed
+    /// through verbatim.
     async fn send_raw(&self, req: RequestBuilder) -> Result<Response, ClientError> {
         let response = req.send().await?;
         if response.status().is_success() {
             return Ok(response);
         }
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        let raw = response.text().await.unwrap_or_default();
+        let body = serde_json::from_str::<ErrorBody>(&raw)
+            .map(|e| e.error)
+            .unwrap_or(raw);
         Err(ClientError::Http { status, body })
     }
 

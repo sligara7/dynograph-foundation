@@ -17,6 +17,13 @@ fn build_app() -> axum::Router {
     app(AppState::with_no_auth(registry))
 }
 
+/// The message from a parsed error body. Every error response is the
+/// JSON envelope `{ "error": "<message>" }`, so the assertions read the
+/// `error` field rather than the whole `Value`.
+fn err_msg(resp: &Value) -> &str {
+    resp["error"].as_str().unwrap_or("")
+}
+
 #[tokio::test]
 async fn create_then_get_metadata_and_schema() {
     let app = build_app();
@@ -165,6 +172,49 @@ async fn malformed_graph_id_rejected_with_400_on_read_and_write_paths() {
             res.status(),
             StatusCode::BAD_REQUEST,
             "{method} on a malformed id should be 400"
+        );
+    }
+}
+
+#[tokio::test]
+async fn error_responses_use_structured_json_envelope() {
+    // Every error — whether it originates in a handler (400) or the
+    // registry lookup (404) — carries the same JSON `{ "error": <msg> }`
+    // body with an `application/json` content type, so a client parses
+    // one shape across all routes.
+    let app = build_app();
+    for (uri, want_status) in [
+        ("/v1/graphs/missing", StatusCode::NOT_FOUND),
+        ("/v1/graphs/bad$id", StatusCode::BAD_REQUEST),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), want_status, "for {uri}");
+        let content_type = res
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        assert!(
+            content_type.starts_with("application/json"),
+            "error content-type should be JSON, got {content_type:?} for {uri}"
+        );
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let body: Value = serde_json::from_slice(&bytes).expect("error body must be valid JSON");
+        let msg = body["error"].as_str();
+        assert!(
+            msg.is_some_and(|s| !s.is_empty()),
+            "error body must be {{\"error\": <non-empty string>}}, got {body} for {uri}"
         );
     }
 }
@@ -2556,9 +2606,9 @@ async fn batch_empty_ops_returns_400() {
     let body = json!({ "ops": [] });
     let (status, resp) = post_batch(&app, body).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    // RegistryError::BadRequest renders as plain text, not JSON — the
-    // post_batch helper wraps non-JSON bodies as Value::String.
-    let msg = resp.as_str().unwrap_or("");
+    // Every error body is JSON `{ "error": "<message>" }` — read the
+    // `error` field rather than the whole body.
+    let msg = err_msg(&resp);
     assert!(
         msg.contains("non-empty"),
         "expected 'non-empty' in error, got: {msg}"
@@ -2579,7 +2629,7 @@ async fn batch_exceeding_cap_returns_400() {
     let body = json!({ "ops": ops });
     let (status, resp) = post_batch(&app, body).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    let msg = resp.as_str().unwrap_or("");
+    let msg = err_msg(&resp);
     assert!(
         msg.contains("1001") && msg.contains("1000"),
         "expected size + cap in error, got: {msg}"
@@ -2960,7 +3010,10 @@ async fn resolve_or_create_missing_name_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("properties.name"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("properties.name"),
         "got: {resp}"
     );
 }
@@ -2975,7 +3028,10 @@ async fn resolve_or_create_non_string_name_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("must be a string"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("must be a string"),
         "got: {resp}"
     );
 }
@@ -2997,7 +3053,10 @@ async fn resolve_or_create_rejects_zero_magnitude_embedding() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("invalid embedding"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("invalid embedding"),
         "got: {resp}"
     );
 }
@@ -3014,7 +3073,10 @@ async fn resolve_or_create_node_type_without_resolution_config_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("no entity resolution"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("no entity resolution"),
         "got: {resp}"
     );
 }
@@ -3045,10 +3107,7 @@ async fn resolve_or_create_scope_prop_not_indexed_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("not indexed"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("not indexed"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -3488,10 +3547,7 @@ async fn edges_collect_empty_edge_types_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("non-empty"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("non-empty"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -3507,7 +3563,7 @@ async fn edges_collect_unknown_edge_type_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp.as_str().unwrap_or("").contains("BOGUS"), "got: {resp}");
+    assert!(err_msg(&resp).contains("BOGUS"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -3555,10 +3611,7 @@ async fn edges_collect_filter_on_unindexed_prop_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("not indexed"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("not indexed"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4260,7 +4313,7 @@ async fn traverse_unknown_start_type_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp.as_str().unwrap_or("").contains("Bogus"), "got: {resp}");
+    assert!(err_msg(&resp).contains("Bogus"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4279,7 +4332,7 @@ async fn traverse_unknown_edge_type_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp.as_str().unwrap_or("").contains("BOGUS"), "got: {resp}");
+    assert!(err_msg(&resp).contains("BOGUS"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4296,10 +4349,7 @@ async fn traverse_empty_traverse_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("non-empty"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("non-empty"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4338,10 +4388,7 @@ async fn traverse_scope_on_unindexed_prop_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("not indexed"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("not indexed"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4530,10 +4577,7 @@ async fn nodes_exists_empty_queries_returns_400() {
     let app = build_app_with_indexed_name_schema().await;
     let (status, resp) = post_exists(&app, json!({"queries": []})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("non-empty"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("non-empty"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4543,7 +4587,10 @@ async fn nodes_exists_unknown_type_returns_400() {
         post_exists(&app, json!({"queries": [{"type": "Ghost", "name": "x"}]})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("unknown node type"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unknown node type"),
         "got: {resp}"
     );
 }
@@ -4560,10 +4607,7 @@ async fn nodes_exists_unindexed_name_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("not indexed"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("not indexed"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4902,10 +4946,7 @@ async fn nodes_scan_empty_where_returns_400() {
     let app = build_app_with_person_scan_schema().await;
     let (status, resp) = post_scan(&app, json!({"type": "Person", "where": [], "limit": 10})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("non-empty"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("non-empty"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4922,7 +4963,10 @@ async fn nodes_scan_unknown_type_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("unknown node type"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("unknown node type"),
         "got: {resp}"
     );
 }
@@ -4941,7 +4985,10 @@ async fn nodes_scan_unknown_property_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("not declared"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("not declared"),
         "got: {resp}"
     );
 }
@@ -4959,10 +5006,7 @@ async fn nodes_scan_unindexed_property_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("not indexed"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("not indexed"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -4979,7 +5023,10 @@ async fn nodes_scan_in_with_non_list_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("must be a list"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("must be a list"),
         "got: {resp}"
     );
 }
@@ -5002,7 +5049,10 @@ async fn nodes_scan_in_with_oversized_list_returns_400() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
-        resp.as_str().unwrap_or("").contains("maximum length"),
+        resp["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("maximum length"),
         "got: {resp}"
     );
 }
@@ -5020,10 +5070,7 @@ async fn nodes_scan_range_with_non_ordered_value_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(
-        resp.as_str().unwrap_or("").contains("range op"),
-        "got: {resp}"
-    );
+    assert!(err_msg(&resp).contains("range op"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -5039,7 +5086,7 @@ async fn nodes_scan_limit_out_of_range_returns_400() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
-    assert!(resp.as_str().unwrap_or("").contains("limit"), "got: {resp}");
+    assert!(err_msg(&resp).contains("limit"), "got: {resp}");
 }
 
 #[tokio::test]
@@ -5337,7 +5384,7 @@ async fn welford_alpha_at_or_beyond_open_unit_interval_returns_400() {
             "alpha={bad_alpha} should reject"
         );
         assert!(
-            resp.as_str().unwrap_or("").contains("alpha"),
+            err_msg(&resp).contains("alpha"),
             "alpha={bad_alpha}: {resp}"
         );
     }

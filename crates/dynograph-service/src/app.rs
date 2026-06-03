@@ -36,6 +36,7 @@ use crate::{
         TargetNode, run as run_edges_collect,
     },
     embedding_response::EmbeddingResponse,
+    error_body::error_response,
     metadata_response::GraphMetadataResponse,
     metrics_state::MetricsState,
     node_response::{NodeListResponse, NodeResponse},
@@ -420,11 +421,10 @@ pub fn app(state: AppState) -> Router {
 async fn timeout_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
     match tokio::time::timeout(state.limits.request_timeout, next.run(req)).await {
         Ok(resp) => resp,
-        Err(_) => (
+        Err(_) => error_response(
             StatusCode::REQUEST_TIMEOUT,
-            "request exceeded the server time limit\n",
-        )
-            .into_response(),
+            "request exceeded the server time limit",
+        ),
     }
 }
 
@@ -440,11 +440,10 @@ async fn concurrency_middleware(
 ) -> Response {
     match state.limiter.try_acquire() {
         Ok(_permit) => next.run(req).await,
-        Err(_) => (
+        Err(_) => error_response(
             StatusCode::SERVICE_UNAVAILABLE,
-            "server at capacity, retry later\n",
-        )
-            .into_response(),
+            "server at capacity, retry later",
+        ),
     }
 }
 
@@ -465,7 +464,7 @@ async fn auth_middleware(State(state): State<AppState>, mut req: Request, next: 
             req.extensions_mut().insert(identity);
             next.run(req).await
         }
-        Err(e) => (StatusCode::UNAUTHORIZED, e.message().to_string()).into_response(),
+        Err(e) => error_response(StatusCode::UNAUTHORIZED, e.message().to_string()),
     }
 }
 

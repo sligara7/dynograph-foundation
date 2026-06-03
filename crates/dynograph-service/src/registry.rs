@@ -77,7 +77,7 @@ impl IntoResponse for RegistryError {
             Self::Filesystem(_) | Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Storage(inner) => status_for_dyno_error(inner),
         };
-        (status, self.to_string()).into_response()
+        crate::error_body::error_response(status, self.to_string())
     }
 }
 
