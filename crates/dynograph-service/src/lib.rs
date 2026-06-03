@@ -27,7 +27,7 @@ mod util;
 mod validation;
 mod welford_update;
 
-pub use app::{AppState, app};
+pub use app::{ApiDoc, AppState, app};
 pub use auth::{AuthProvider, BearerJwt, Identity, NoAuth};
 pub use buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA};
 pub use config::{AuthConfig, Config, ConfigError, ServerConfig, ServerLimits, StorageConfig};

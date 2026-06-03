@@ -1,0 +1,3296 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "dynograph-foundation",
+    "description": "",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "version": "0.5.6"
+  },
+  "paths": {
+    "/buildinfo": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "JSON build provenance: `version` + `git_sha` + `git_dirty` +\n`uptime_seconds`. Same provenance triple the `dynograph_build_info`\ngauge surfaces in `/metrics`, JSON-shaped for callers that don't\nwant to parse Prometheus text format. Public; same auth/middleware\nposture as `/metrics`.",
+        "operationId": "buildinfo_handler",
+        "responses": {
+          "200": {
+            "description": "build provenance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildInfoResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "process is alive",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Prometheus text-format scrape endpoint. Public — sit alongside\n`/health` and `/ready`; the assumption is that the network/\ningress layer gates Prometheus scrape access to the metrics\nendpoint when needed (k8s NetworkPolicy / Caddy IP allowlist /\netc). `/metrics` itself bypasses the metrics middleware to avoid\nrecording every scrape into the request-counter series, which\nwould inflate cardinality and mostly measure Prometheus's own\nscrape interval.",
+        "operationId": "metrics_handler",
+        "responses": {
+          "200": {
+            "description": "Prometheus text-format metrics",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Readiness probe — distinct from `/health`, which only confirms\nthe process is running. `/ready` returns 200 once the service\nhas finished startup work (notably `rehydrate()` on the on-disk\nbackend); 503 before that.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "service is ready",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "still starting up"
+          }
+        }
+      }
+    },
+    "/v1/graphs": {
+      "get": {
+        "tags": [
+          "graphs"
+        ],
+        "operationId": "list_graphs",
+        "responses": {
+          "200": {
+            "description": "graph ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "graphs"
+        ],
+        "operationId": "create_graph",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGraphBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "graph created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid request"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "409": {
+            "description": "graph already exists"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}": {
+      "get": {
+        "tags": [
+          "graphs"
+        ],
+        "summary": "Metadata-only — see `GET /v1/graphs/{id}/schema` for the full schema.",
+        "operationId": "get_graph",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "graph metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphMetadataResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "graphs"
+        ],
+        "operationId": "delete_graph",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "graph deleted"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/batch": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Atomic multi-op transaction. See `crate::batch` for the wire shape\nand design rationale. Whole batch runs under one `with_state_write`\nlock so (a) ops and HNSW maintenance for any `delete_node` happen\nin lockstep, and (b) concurrent readers either see pre-batch or\npost-batch state, never a torn intermediate.",
+        "operationId": "batch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "all ops applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error or per-op failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchOpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/edges": {
+      "post": {
+        "tags": [
+          "edges"
+        ],
+        "operationId": "create_edge",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEdgeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "edge created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid request / schema violation"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}": {
+      "get": {
+        "tags": [
+          "edges"
+        ],
+        "operationId": "get_edge",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "edge_type",
+            "in": "path",
+            "description": "edge type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from_id",
+            "in": "path",
+            "description": "source node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to_id",
+            "in": "path",
+            "description": "target node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the edge",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or edge not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "edges"
+        ],
+        "operationId": "delete_edge",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "edge_type",
+            "in": "path",
+            "description": "edge type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from_id",
+            "in": "path",
+            "description": "source node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to_id",
+            "in": "path",
+            "description": "target node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "edge deleted"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or edge not found"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "edges"
+        ],
+        "summary": "PATCH semantics — partial-update of the edge's property map. The\nunderlying storage call is `merge_edge_properties`. This mirrors\nnode CRUD's PUT (REPLACE) shape but with the verb flipped to match\nthe storage primitive's asymmetry — see `replace_node_properties`\ndocs for why nodes don't have a merge primitive.",
+        "operationId": "merge_edge",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "edge_type",
+            "in": "path",
+            "description": "edge type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from_id",
+            "in": "path",
+            "description": "source node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to_id",
+            "in": "path",
+            "description": "target node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeEdgeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "edge merged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "schema violation"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or edge not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Atomic Welford-style EMA update of the score property family on\nan existing edge. See `crate::welford_update` for the math, the\nsix-property convention, and pre-flight validation. Whole\nread-modify-write runs under one `with_engine_write` lock —\nconcurrent updates serialize.",
+        "operationId": "welford_update",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "edge_type",
+            "in": "path",
+            "description": "edge type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from_id",
+            "in": "path",
+            "description": "source node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to_id",
+            "in": "path",
+            "description": "target node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WelfordUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "updated score statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WelfordUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or edge not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/edges:adjacent": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Single-node 1-hop adjacency (the per-node `outgoing_edges(id)` /\n`incoming_edges(id)` that `edges:collect` — fan-out by source type — does\nnot cover). See `crate::edges_adjacent`. Read-only.",
+        "operationId": "edges_adjacent",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EdgesAdjacentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "incident edges of one node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgesAdjacentResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/edges:collect": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Fan-out edge collection. See `crate::edges_collect` for wire\nshape, validation, and the per-node-iteration cost model.\nRead-only — single `with_engine_read` lock for the whole scan.",
+        "operationId": "edges_collect",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EdgesCollectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "collected edges (edges or adjacency form)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EdgesCollectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/nodes": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "List nodes of a given type, optionally filtered by a single\n(`prop`, `value`) pair. The pair must be supplied together — half\nof it is a 400. `value` arrives as a URL string and is coerced to\nthe schema-declared `PropertyType` for the property; coerce\nfailures are 400, not silent zero-result.",
+        "operationId": "list_nodes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "prop",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "value",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "matching nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid filter"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "create_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNodeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "node created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid request / schema violation"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/nodes/{node_type}/{node_id}": {
+      "get": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "get_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_type",
+            "in": "path",
+            "description": "node type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or node not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "nodes"
+        ],
+        "summary": "PUT semantics — full replacement of the node's property map (the\nunderlying storage call is `replace_node_properties`). PATCH is\nnot exposed because there is no merge primitive on nodes; if a\ncaller needs partial-update semantics they GET, mutate, PUT.",
+        "operationId": "replace_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_type",
+            "in": "path",
+            "description": "node type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceNodeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "node replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "schema violation"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or node not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "nodes"
+        ],
+        "operationId": "delete_node",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_type",
+            "in": "path",
+            "description": "node type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "node deleted"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or node not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding": {
+      "get": {
+        "tags": [
+          "embeddings"
+        ],
+        "operationId": "get_embedding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_type",
+            "in": "path",
+            "description": "node type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the embedding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or embedding not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "embeddings"
+        ],
+        "summary": "Set an embedding and update the per-type HNSW index in lockstep.\nPreflight order matters: dim check against any existing index\nruns *before* the storage write, so a mismatch rejects without\non-disk rollback. Per-type dim is locked at first insert.",
+        "operationId": "set_embedding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_type",
+            "in": "path",
+            "description": "node type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEmbeddingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "embedding set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmbeddingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "dimension mismatch / invalid request"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or node not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "embeddings"
+        ],
+        "operationId": "delete_embedding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_type",
+            "in": "path",
+            "description": "node type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "description": "node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "embedding deleted"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or embedding not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/nodes:exists": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Batch (type, name) existence check. See `crate::nodes_exists` for\nwire shape and the indexed-`name` requirement. Read-only — one\n`with_engine_read` lock for the whole batch so the per-query\nscans see one consistent snapshot.",
+        "operationId": "nodes_exists",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodesExistsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "per-query existence results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodesExistsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/nodes:scan": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Predicate-filtered scan over a single node type. See\n`crate::nodes_scan` for wire shape, the seven supported ops, and\nthe seed-strategy/in-memory-filter design. Read-only — one\n`with_engine_read` lock for the whole scan.",
+        "operationId": "nodes_scan",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodesScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "matching nodes or ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodesScanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/resolve-or-create": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Fuzzy/vector entity resolution with create-on-miss. See\n`crate::resolve_or_create` for wire shape, validation order, and\natomicity model. Whole call runs under one `with_state_write`\nlock so candidate scan + resolve + (create + set_embedding +\nHNSW insert) compose atomically.",
+        "operationId": "resolve_or_create",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveOrCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "resolved or created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveOrCreateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/schema": {
+      "get": {
+        "tags": [
+          "graphs"
+        ],
+        "summary": "Full schema view: same shape consumed by generation_plus codegen\n(matches storyflow's C-partial `build_schema_contract` output).",
+        "operationId": "get_schema",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "full schema",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "graphs"
+        ],
+        "summary": "Replace a graph's schema. Compat rules + atomicity guarantees\nlive on `GraphRegistry::replace_schema`; this is a thin wrapper.",
+        "operationId": "replace_schema",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "schema replaced",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "incompatible schema change"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/similar": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "HNSW vector search over the per-type index. `node_type` is\nrequired: per-type indexes can have different dimensions (set\nindependently by the first `set_embedding` for each type), so a\nmerged \"search all types\" answer is ambiguous about score\ncomparability. If a real consumer needs cross-type search later,\nadd it as an explicit second route.",
+        "description": "If no index exists for `node_type` (no embedding has ever been\nset for any node of that type), returns an empty result list —\nthe type-name is honest, just no data to search yet.",
+        "operationId": "similar",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "nearest neighbors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimilarResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "dimension mismatch / invalid request"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/traverse": {
+      "post": {
+        "tags": [
+          "primitives"
+        ],
+        "summary": "Typed BFS traversal from a start node. See `crate::traverse` for\nwire shape, validation, and the multi-step / transitive\nsemantics. Read-only — single `with_engine_read` lock for the\nwhole BFS so the candidate scans + per-node edge walks see one\nconsistent snapshot.",
+        "operationId": "traverse",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TraverseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "traversed nodes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TraverseResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph or start node not found"
+          }
+        }
+      }
+    },
+    "/v1/util/cosine_similarity": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_cosine_similarity",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "cosine similarity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/dot_product": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_dot_product",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "dot product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/euclidean_distance": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_euclidean_distance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "euclidean distance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/hadamard": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_hadamard",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "elementwise product",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/jaro_winkler": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_jaro_winkler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryStringRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Jaro-Winkler similarity (0..=100)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_u32"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/l2_norm": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_l2_norm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "L2 norm",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/linear_regression_slope": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_linear_regression_slope",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PointsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "regression slope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / undefined"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/pearson_correlation": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_pearson_correlation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoVectorF64Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pearson correlation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / undefined"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/token_sort_ratio": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_token_sort_ratio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryStringRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "token-sort ratio (0..=100)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_u32"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AdjacencyEntry": {
+        "type": "object",
+        "required": [
+          "edge_type",
+          "to_id",
+          "properties"
+        ],
+        "properties": {
+          "edge_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TargetNode"
+              }
+            ]
+          },
+          "to_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AdjacentDirection": {
+        "type": "string",
+        "enum": [
+          "outgoing",
+          "incoming",
+          "both"
+        ]
+      },
+      "AdjacentEdge": {
+        "type": "object",
+        "required": [
+          "edge_type",
+          "from_id",
+          "to_id",
+          "properties"
+        ],
+        "properties": {
+          "edge_type": {
+            "type": "string"
+          },
+          "from_id": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "to_id": {
+            "type": "string"
+          }
+        }
+      },
+      "BatchOp": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "node_type",
+              "node_id",
+              "op"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string"
+              },
+              "node_type": {
+                "type": "string"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "create_node"
+                ]
+              },
+              "properties": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "node_type",
+              "node_id",
+              "op"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string"
+              },
+              "node_type": {
+                "type": "string"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "replace_node"
+                ]
+              },
+              "properties": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "node_type",
+              "node_id",
+              "op"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string"
+              },
+              "node_type": {
+                "type": "string"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "delete_node"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "edge_type",
+              "from_type",
+              "from_id",
+              "to_type",
+              "to_id",
+              "op"
+            ],
+            "properties": {
+              "edge_type": {
+                "type": "string"
+              },
+              "from_id": {
+                "type": "string"
+              },
+              "from_type": {
+                "type": "string"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "create_edge"
+                ]
+              },
+              "properties": {
+                "type": "object"
+              },
+              "to_id": {
+                "type": "string"
+              },
+              "to_type": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "edge_type",
+              "from_id",
+              "to_id",
+              "op"
+            ],
+            "properties": {
+              "edge_type": {
+                "type": "string"
+              },
+              "from_id": {
+                "type": "string"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "merge_edge"
+                ]
+              },
+              "properties": {
+                "type": "object"
+              },
+              "to_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "edge_type",
+              "from_id",
+              "to_id",
+              "op"
+            ],
+            "properties": {
+              "edge_type": {
+                "type": "string"
+              },
+              "from_id": {
+                "type": "string"
+              },
+              "op": {
+                "type": "string",
+                "enum": [
+                  "delete_edge"
+                ]
+              },
+              "to_id": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "One mutation. Field names match the existing single-handler bodies\nso callers can translate `POST /v1/graphs/{id}/nodes` payloads into\n`{\"op\": \"create_node\", ...}` entries with no field renames."
+      },
+      "BatchOpError": {
+        "type": "object",
+        "description": "Structured per-op error body. Plain-text errors (the convention for\nsingle handlers) lose the index of the failing op, which is the one\nthing a batch caller needs to diagnose a rejection.",
+        "required": [
+          "error",
+          "op_index",
+          "op_type"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "op_index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "op_type": {
+            "type": "string"
+          }
+        }
+      },
+      "BatchRequest": {
+        "type": "object",
+        "required": [
+          "ops"
+        ],
+        "properties": {
+          "ops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchOp"
+            }
+          }
+        }
+      },
+      "BatchResponse": {
+        "type": "object",
+        "required": [
+          "ops_applied",
+          "nodes_created",
+          "nodes_replaced",
+          "nodes_deleted",
+          "edges_created",
+          "edges_merged",
+          "edges_deleted"
+        ],
+        "properties": {
+          "edges_created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "edges_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "edges_merged": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nodes_created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nodes_deleted": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "nodes_replaced": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ops_applied": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "BinaryStringRequest": {
+        "type": "object",
+        "required": [
+          "a",
+          "b"
+        ],
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          }
+        }
+      },
+      "BinaryVectorRequest": {
+        "type": "object",
+        "required": [
+          "a",
+          "b"
+        ],
+        "properties": {
+          "a": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "b": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          }
+        }
+      },
+      "BuildInfoResponse": {
+        "type": "object",
+        "required": [
+          "version",
+          "git_sha",
+          "git_dirty",
+          "uptime_seconds"
+        ],
+        "properties": {
+          "git_dirty": {
+            "type": "boolean"
+          },
+          "git_sha": {
+            "type": "string"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "format": "double"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "CollectPropertyFilter": {
+        "type": "object",
+        "required": [
+          "prop",
+          "value"
+        ],
+        "properties": {
+          "prop": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          }
+        }
+      },
+      "CollectedEdge": {
+        "type": "object",
+        "required": [
+          "edge_type",
+          "from_type",
+          "from_id",
+          "to_id",
+          "properties"
+        ],
+        "properties": {
+          "edge_type": {
+            "type": "string"
+          },
+          "from_id": {
+            "type": "string"
+          },
+          "from_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TargetNode",
+                "description": "Present only when `resolve_target = true` AND the target node\nwas found. Caller can rely on `target.is_some()` ↔ resolution\nsucceeded; absence with `resolve_target = true` means the edge\npoints at a node id no schema-candidate type could find — a\nreferential-integrity gap worth surfacing in caller logs (see\nthe v0.5.1 batch.rs hazard documentation for one source of such\norphans)."
+              }
+            ]
+          },
+          "to_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateEdgeBody": {
+        "type": "object",
+        "required": [
+          "edge_type",
+          "from_type",
+          "from_id",
+          "to_type",
+          "to_id"
+        ],
+        "properties": {
+          "edge_type": {
+            "type": "string"
+          },
+          "from_id": {
+            "type": "string"
+          },
+          "from_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "to_id": {
+            "type": "string"
+          },
+          "to_type": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateGraphBody": {
+        "type": "object",
+        "required": [
+          "id",
+          "schema"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "object"
+          }
+        }
+      },
+      "CreateNodeBody": {
+        "type": "object",
+        "required": [
+          "node_type",
+          "node_id"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          }
+        }
+      },
+      "EdgeResponse": {
+        "type": "object",
+        "required": [
+          "edge_type",
+          "from_id",
+          "to_id",
+          "properties"
+        ],
+        "properties": {
+          "edge_type": {
+            "type": "string"
+          },
+          "from_id": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "to_id": {
+            "type": "string"
+          }
+        }
+      },
+      "EdgesAdjacentRequest": {
+        "type": "object",
+        "required": [
+          "node_id"
+        ],
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AdjacentDirection"
+          },
+          "edge_type": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Cap on the total edges returned (outgoing + incoming combined).\nOptional and defaults to `MAX_LIMIT` — unlike the *required*\n`limit` on `edges:collect` / `nodes:scan`, because this route\nshipped without one and defaulting keeps existing callers\n(which send no `limit`) working while still bounding the\nsuper-node response.",
+            "minimum": 0
+          },
+          "node_id": {
+            "type": "string"
+          }
+        }
+      },
+      "EdgesAdjacentResponse": {
+        "type": "object",
+        "required": [
+          "edges",
+          "truncated"
+        ],
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdjacentEdge"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "`true` when more edges existed than `limit` allowed — some were\nomitted from `edges`."
+          }
+        }
+      },
+      "EdgesCollectRequest": {
+        "type": "object",
+        "required": [
+          "source",
+          "edge_types",
+          "limit"
+        ],
+        "properties": {
+          "edge_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "format": {
+            "$ref": "#/components/schemas/ResponseFormat"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resolve_target": {
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/SourceSpec"
+          }
+        }
+      },
+      "EdgesCollectResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "edges",
+              "truncated"
+            ],
+            "properties": {
+              "edges": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/CollectedEdge"
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "adjacency",
+              "truncated"
+            ],
+            "properties": {
+              "adjacency": {
+                "type": "object"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          }
+        ],
+        "description": "Untagged so the JSON has the shape the caller asked for: an\n`{\"edges\": [...], \"truncated\": ...}` object for `format = \"edges\"`,\nan `{\"adjacency\": {...}, \"truncated\": ...}` object for\n`format = \"adjacency\"`. Caller distinguishes by which field is\npresent (always exactly one)."
+      },
+      "EmbeddingResponse": {
+        "type": "object",
+        "required": [
+          "node_type",
+          "node_id",
+          "embedding"
+        ],
+        "properties": {
+          "embedding": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          }
+        }
+      },
+      "GraphListResponse": {
+        "type": "object",
+        "required": [
+          "graphs"
+        ],
+        "properties": {
+          "graphs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "GraphMetadataResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "wire_version",
+          "content_hash"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "wire_version": {
+            "type": "string"
+          }
+        }
+      },
+      "MatchKind": {
+        "type": "string",
+        "enum": [
+          "auto_merge",
+          "vector_merge",
+          "created_new"
+        ]
+      },
+      "MergeEdgeBody": {
+        "type": "object",
+        "properties": {
+          "properties": {
+            "type": "object"
+          }
+        }
+      },
+      "NodeExistence": {
+        "type": "object",
+        "required": [
+          "type",
+          "name",
+          "exists"
+        ],
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeListResponse": {
+        "type": "object",
+        "description": "Envelope for node-list endpoints. Matches the convention used by\n`GraphListResponse` (`{graphs: [...]}`) — a top-level object, not a\nbare array, so future additions (pagination cursor, total count)\nare non-breaking.",
+        "required": [
+          "nodes"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeResponse"
+            }
+          }
+        }
+      },
+      "NodeQuery": {
+        "type": "object",
+        "required": [
+          "type",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeResponse": {
+        "type": "object",
+        "required": [
+          "node_type",
+          "node_id",
+          "properties"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          }
+        }
+      },
+      "NodesExistsRequest": {
+        "type": "object",
+        "required": [
+          "queries"
+        ],
+        "properties": {
+          "queries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeQuery"
+            }
+          }
+        }
+      },
+      "NodesExistsResponse": {
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeExistence"
+            }
+          }
+        }
+      },
+      "NodesScanRequest": {
+        "type": "object",
+        "required": [
+          "type",
+          "where",
+          "limit"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "return": {
+            "$ref": "#/components/schemas/ReturnShape"
+          },
+          "type": {
+            "type": "string"
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WhereClause"
+            }
+          }
+        }
+      },
+      "NodesScanResponse": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "results",
+              "truncated"
+            ],
+            "properties": {
+              "results": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "results",
+              "truncated"
+            ],
+            "properties": {
+              "results": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/NodeResponse"
+                }
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            }
+          }
+        ],
+        "description": "Untagged so the wire produces either `{\"results\": [\"id\", ...], ...}`\nor `{\"results\": [{...node}, ...], ...}` depending on `return`. The\nnode shape is the shared `NodeResponse` — same `{node_type,\nnode_id, properties}` triple `GET /nodes` and the rest of foundation\nemit, so consumers can deserialize into a single struct."
+      },
+      "Op": {
+        "type": "string",
+        "enum": [
+          "eq",
+          "neq",
+          "in",
+          "gt",
+          "lt",
+          "gte",
+          "lte"
+        ]
+      },
+      "PointsRequest": {
+        "type": "object",
+        "required": [
+          "points"
+        ],
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": false,
+              "prefixItems": [
+                {
+                  "type": "number",
+                  "format": "double"
+                },
+                {
+                  "type": "number",
+                  "format": "double"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "Precision": {
+        "type": "string",
+        "description": "Numeric precision for vector ops. Wire form is the lowercase\nvariant name (`\"f32\"` / `\"f64\"`). Public so `dynograph-client`\ncan re-export it and consumers can pass `Precision::F32` instead\nof stringly-typed `\"f32\"`.",
+        "enum": [
+          "f32",
+          "f64"
+        ]
+      },
+      "ReplaceNodeBody": {
+        "type": "object",
+        "properties": {
+          "properties": {
+            "type": "object"
+          }
+        }
+      },
+      "ResolveOrCreateRequest": {
+        "type": "object",
+        "required": [
+          "node_type"
+        ],
+        "properties": {
+          "embedding": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScopeFilter"
+              }
+            ]
+          }
+        }
+      },
+      "ResolveOrCreateResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "was_created",
+          "match_kind"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "match_kind": {
+            "$ref": "#/components/schemas/MatchKind"
+          },
+          "was_created": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ResponseFormat": {
+        "type": "string",
+        "enum": [
+          "edges",
+          "adjacency"
+        ]
+      },
+      "ReturnFormat": {
+        "type": "string",
+        "enum": [
+          "ids",
+          "nodes"
+        ]
+      },
+      "ReturnShape": {
+        "type": "string",
+        "enum": [
+          "nodes",
+          "ids"
+        ]
+      },
+      "ScalarResponse_f64": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "ScalarResponse_u32": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "SchemaResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "wire_version",
+          "content_hash",
+          "schema"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "schema": {
+            "type": "object"
+          },
+          "wire_version": {
+            "type": "string"
+          }
+        }
+      },
+      "ScopeFilter": {
+        "type": "object",
+        "required": [
+          "prop",
+          "value"
+        ],
+        "properties": {
+          "prop": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          }
+        }
+      },
+      "SetEmbeddingBody": {
+        "type": "object",
+        "required": [
+          "embedding"
+        ],
+        "properties": {
+          "embedding": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            }
+          }
+        }
+      },
+      "SimilarBody": {
+        "type": "object",
+        "required": [
+          "embedding",
+          "top_k",
+          "node_type"
+        ],
+        "properties": {
+          "embedding": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "top_k": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "SimilarHit": {
+        "type": "object",
+        "required": [
+          "node_id",
+          "score"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
+      "SimilarResponse": {
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SimilarHit"
+            }
+          }
+        }
+      },
+      "SourceSpec": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "filter": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectPropertyFilter"
+              }
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/SourceTypeFilter"
+          }
+        }
+      },
+      "SourceTypeFilter": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Source-type matcher. Untagged so the JSON can be either a string\n(`\"*\"` or a single type name) or an array of names."
+      },
+      "StartSpec": {
+        "type": "object",
+        "required": [
+          "type",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        }
+      },
+      "TargetNode": {
+        "type": "object",
+        "required": [
+          "node_type",
+          "node_id",
+          "properties"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          }
+        }
+      },
+      "TraverseDirection": {
+        "type": "string",
+        "enum": [
+          "outgoing",
+          "incoming",
+          "both"
+        ]
+      },
+      "TraversePropertyFilter": {
+        "type": "object",
+        "required": [
+          "prop",
+          "value"
+        ],
+        "properties": {
+          "prop": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          }
+        }
+      },
+      "TraverseRequest": {
+        "type": "object",
+        "required": [
+          "start",
+          "traverse",
+          "limit"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "return": {
+            "$ref": "#/components/schemas/ReturnFormat"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TraversePropertyFilter"
+              }
+            ]
+          },
+          "start": {
+            "$ref": "#/components/schemas/StartSpec"
+          },
+          "traverse": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TraverseStep"
+            }
+          }
+        }
+      },
+      "TraverseResponse": {
+        "type": "object",
+        "required": [
+          "nodes",
+          "truncated"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TraversedNode"
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TraverseStep": {
+        "type": "object",
+        "required": [
+          "edge_type",
+          "direction"
+        ],
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/TraverseDirection"
+          },
+          "edge_type": {
+            "type": "string"
+          },
+          "transitive": {
+            "type": "boolean"
+          }
+        }
+      },
+      "TraversedNode": {
+        "type": "object",
+        "description": "Per-result entry. `properties` is populated only when\n`return: \"nodes\"`; for `return: \"ids\"` the field is omitted from\nthe wire shape via `skip_serializing_if`. Caller distinguishes by\npresence of the field, OR by request echo (the request shape is\nthe source of truth for which they asked for).",
+        "required": [
+          "node_type",
+          "node_id"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object"
+          }
+        }
+      },
+      "TwoVectorF64Request": {
+        "type": "object",
+        "required": [
+          "a",
+          "b"
+        ],
+        "properties": {
+          "a": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "b": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        }
+      },
+      "UnaryVectorRequest": {
+        "type": "object",
+        "required": [
+          "v"
+        ],
+        "properties": {
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          },
+          "v": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        }
+      },
+      "VectorResponse": {
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        }
+      },
+      "WelfordUpdateRequest": {
+        "type": "object",
+        "required": [
+          "observation",
+          "alpha"
+        ],
+        "properties": {
+          "alpha": {
+            "type": "number",
+            "format": "double"
+          },
+          "observation": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "WelfordUpdateResponse": {
+        "type": "object",
+        "required": [
+          "score",
+          "score_m2",
+          "score_stddev",
+          "score_min",
+          "score_max",
+          "score_count"
+        ],
+        "properties": {
+          "score": {
+            "type": "number",
+            "format": "double"
+          },
+          "score_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "score_m2": {
+            "type": "number",
+            "format": "double"
+          },
+          "score_max": {
+            "type": "number",
+            "format": "double"
+          },
+          "score_min": {
+            "type": "number",
+            "format": "double"
+          },
+          "score_stddev": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "WhereClause": {
+        "type": "object",
+        "required": [
+          "property",
+          "op",
+          "value"
+        ],
+        "properties": {
+          "op": {
+            "$ref": "#/components/schemas/Op"
+          },
+          "property": {
+            "type": "string"
+          },
+          "value": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "graphs",
+      "description": "Graph lifecycle + schema"
+    },
+    {
+      "name": "nodes",
+      "description": "Node CRUD"
+    },
+    {
+      "name": "edges",
+      "description": "Edge CRUD"
+    },
+    {
+      "name": "embeddings",
+      "description": "Per-node embeddings"
+    },
+    {
+      "name": "search",
+      "description": "Vector similarity search"
+    },
+    {
+      "name": "primitives",
+      "description": "Composite graph primitives (batch, resolve, edges:*, nodes:*, traverse, welford)"
+    },
+    {
+      "name": "util",
+      "description": "Stateless pure-math utilities"
+    },
+    {
+      "name": "ops",
+      "description": "Health, readiness, metrics, build info"
+    }
+  ]
+}

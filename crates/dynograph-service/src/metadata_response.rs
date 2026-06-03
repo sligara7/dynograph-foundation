@@ -2,10 +2,11 @@
 //! `GET /v1/graphs/{id}/schema` (returns `SchemaResponse`).
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::schema_response::WIRE_VERSION;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct GraphMetadataResponse {
     pub id: String,
     pub wire_version: &'static str,

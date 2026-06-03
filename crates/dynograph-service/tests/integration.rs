@@ -5377,3 +5377,70 @@ async fn v1_sheds_load_with_503_but_probes_stay_up() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 }
+
+// =========================================================================
+// OpenAPI contract — /openapi.json served + covers the whole surface
+// =========================================================================
+
+#[tokio::test]
+async fn openapi_json_is_served_and_covers_every_route() {
+    let app = build_app();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/openapi.json")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let spec: Value = serde_json::from_slice(&bytes).expect("openapi.json is valid JSON");
+
+    // Valid OpenAPI 3.x envelope with a version.
+    assert!(
+        spec["openapi"].as_str().unwrap().starts_with("3."),
+        "openapi version: {}",
+        spec["openapi"]
+    );
+    assert_eq!(spec["info"]["version"], env!("CARGO_PKG_VERSION"));
+
+    // The served spec must expose exactly the path set of the committed
+    // contract — no hand-maintained route list (the drift-gate unit test
+    // locks committed == generated; this locks served == committed, so
+    // the served endpoint can't silently diverge from the contract).
+    let committed: Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/openapi.json"
+        ))
+        .expect("read docs/openapi.json"),
+    )
+    .expect("docs/openapi.json is valid JSON");
+
+    let served_paths: std::collections::BTreeSet<&str> = spec["paths"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let committed_paths: std::collections::BTreeSet<&str> = committed["paths"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        served_paths, committed_paths,
+        "served /openapi.json paths differ from committed docs/openapi.json"
+    );
+    // Sanity floor: the full surface is documented, not an accidental subset.
+    assert!(
+        served_paths.len() >= 30,
+        "expected >= 30 paths, got {}",
+        served_paths.len()
+    );
+}

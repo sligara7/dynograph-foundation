@@ -9,11 +9,13 @@ use std::collections::HashMap;
 use dynograph_core::Value;
 use dynograph_storage::StoredNode;
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct NodeResponse {
     pub node_type: String,
     pub node_id: String,
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
 }
 
@@ -31,7 +33,7 @@ impl From<StoredNode> for NodeResponse {
 /// `GraphListResponse` (`{graphs: [...]}`) — a top-level object, not a
 /// bare array, so future additions (pagination cursor, total count)
 /// are non-breaking.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct NodeListResponse {
     pub nodes: Vec<NodeResponse>,
 }

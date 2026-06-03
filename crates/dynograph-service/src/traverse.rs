@@ -85,6 +85,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::{EdgeEndpoint, Schema, Value};
 use dynograph_storage::StorageEngine;
@@ -98,7 +99,7 @@ use crate::validation::{validate_indexed_property, validate_limit};
 /// boundary rather than service it.
 pub(crate) const MAX_STEPS: usize = 10;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct TraverseRequest {
     pub start: StartSpec,
     pub traverse: Vec<TraverseStep>,
@@ -109,14 +110,14 @@ pub(crate) struct TraverseRequest {
     pub limit: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct StartSpec {
     #[serde(rename = "type")]
     pub node_type: String,
     pub id: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct TraverseStep {
     pub edge_type: String,
     pub direction: Direction,
@@ -124,21 +125,24 @@ pub(crate) struct TraverseStep {
     pub transitive: bool,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Clone, Copy, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = TraverseDirection)]
 pub(crate) enum Direction {
     Outgoing,
     Incoming,
     Both,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = TraversePropertyFilter)]
 pub(crate) struct PropertyFilter {
     pub prop: String,
+    #[schema(value_type = Object)]
     pub value: Value,
 }
 
-#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ReturnFormat {
     #[default]
@@ -151,15 +155,16 @@ pub(crate) enum ReturnFormat {
 /// the wire shape via `skip_serializing_if`. Caller distinguishes by
 /// presence of the field, OR by request echo (the request shape is
 /// the source of truth for which they asked for).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TraversedNode {
     pub node_type: String,
     pub node_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Object)]
     pub properties: Option<HashMap<String, Value>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TraverseResponse {
     pub nodes: Vec<TraversedNode>,
     pub truncated: bool,

@@ -31,6 +31,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::Value;
 use dynograph_storage::StorageEngine;
@@ -41,7 +42,7 @@ use dynograph_storage::StorageEngine;
 /// arbitrarily long. Lift if real workloads push past.
 pub(crate) const MAX_BATCH_OPS: usize = 1000;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct BatchRequest {
     pub ops: Vec<BatchOp>,
 }
@@ -49,19 +50,21 @@ pub(crate) struct BatchRequest {
 /// One mutation. Field names match the existing single-handler bodies
 /// so callers can translate `POST /v1/graphs/{id}/nodes` payloads into
 /// `{"op": "create_node", ...}` entries with no field renames.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub(crate) enum BatchOp {
     CreateNode {
         node_type: String,
         node_id: String,
         #[serde(default)]
+        #[schema(value_type = Object)]
         properties: HashMap<String, Value>,
     },
     ReplaceNode {
         node_type: String,
         node_id: String,
         #[serde(default)]
+        #[schema(value_type = Object)]
         properties: HashMap<String, Value>,
     },
     DeleteNode {
@@ -75,6 +78,7 @@ pub(crate) enum BatchOp {
         to_type: String,
         to_id: String,
         #[serde(default)]
+        #[schema(value_type = Object)]
         properties: HashMap<String, Value>,
     },
     MergeEdge {
@@ -82,6 +86,7 @@ pub(crate) enum BatchOp {
         from_id: String,
         to_id: String,
         #[serde(default)]
+        #[schema(value_type = Object)]
         properties: HashMap<String, Value>,
     },
     DeleteEdge {
@@ -116,7 +121,7 @@ pub(crate) enum OpEffect {
     EdgeDeleted,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, ToSchema)]
 pub(crate) struct BatchResponse {
     pub ops_applied: usize,
     pub nodes_created: usize,
@@ -130,7 +135,7 @@ pub(crate) struct BatchResponse {
 /// Structured per-op error body. Plain-text errors (the convention for
 /// single handlers) lose the index of the failing op, which is the one
 /// thing a batch caller needs to diagnose a rejection.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct BatchOpError {
     pub error: String,
     pub op_index: usize,

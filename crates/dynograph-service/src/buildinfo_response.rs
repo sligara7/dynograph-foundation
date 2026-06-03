@@ -5,13 +5,14 @@
 //! Prometheus text format.
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::schema_response::WIRE_VERSION;
 
 pub const GIT_SHA: &str = env!("DYNOGRAPH_GIT_SHA");
 pub const GIT_DIRTY: &str = env!("DYNOGRAPH_GIT_DIRTY");
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct BuildInfoResponse {
     pub version: &'static str,
     pub git_sha: &'static str,

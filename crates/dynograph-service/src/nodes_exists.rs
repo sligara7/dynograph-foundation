@@ -53,6 +53,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::Value;
 use dynograph_storage::StorageEngine;
@@ -67,19 +68,19 @@ use crate::validation::validate_indexed_property;
 /// graph-wide scans.
 pub(crate) const MAX_QUERIES: usize = 1000;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct NodesExistsRequest {
     pub queries: Vec<NodeQuery>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct NodeQuery {
     #[serde(rename = "type")]
     pub node_type: String,
     pub name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct NodeExistence {
     #[serde(rename = "type")]
     pub node_type: String,
@@ -88,7 +89,7 @@ pub(crate) struct NodeExistence {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct NodesExistsResponse {
     pub results: Vec<NodeExistence>,
 }
