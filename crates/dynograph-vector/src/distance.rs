@@ -70,18 +70,54 @@ pub fn l2_norm(v: &[f32]) -> f32 {
 /// - 0.0 = orthogonal
 /// - -1.0 = opposite direction
 ///
-/// Returns 0.0 if either vector has zero magnitude.
+/// Returns 0.0 only when the cosine is genuinely undefined — either
+/// vector has *exactly* zero magnitude, or a non-finite component made
+/// the denominator non-finite. The guard is `denom == 0.0 ||
+/// !denom.is_finite()`, NOT `denom < EPSILON`: an epsilon floor would
+/// wrongly collapse tiny-but-valid vectors (e.g. two parallel `1e-4`
+/// vectors, true cosine 1.0) to a fake 0.0.
+///
+/// A degenerate input scoring 0.0 reads as "orthogonal," not "invalid"
+/// — callers that need to fail loud on bad data should screen inputs
+/// with [`validate_similarity_vector`] at ingest rather than relying on
+/// this return value.
 #[inline]
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot = dot_product(a, b);
     let norm_a = l2_norm(a);
     let norm_b = l2_norm(b);
     let denom = norm_a * norm_b;
-    if denom < f32::EPSILON {
+    if denom == 0.0 || !denom.is_finite() {
         return 0.0;
     }
     // Clamp to [-1, 1] to handle floating point imprecision
     (dot / denom).clamp(-1.0, 1.0)
+}
+
+/// Reject a vector that cannot produce a meaningful cosine similarity:
+/// one with a non-finite component (`NaN` / `±∞`) or zero magnitude
+/// (all components zero, including the empty vector).
+///
+/// Both cases would otherwise score a silent `0.0` against everything
+/// — indistinguishable from a legitimately orthogonal hit — so callers
+/// that ingest user- or model-supplied embeddings (the HNSW index, the
+/// resolver, the `set_embedding` / `similar` / `resolve-or-create`
+/// handlers) should screen here and surface a loud error instead of
+/// admitting degenerate data.
+///
+/// The `Err` carries a human-readable reason suitable for a 400 body.
+pub fn validate_similarity_vector(v: &[f32]) -> Result<(), &'static str> {
+    let mut sum_sq = 0.0f32;
+    for &x in v {
+        if !x.is_finite() {
+            return Err("vector contains a non-finite component (NaN or ±∞)");
+        }
+        sum_sq += x * x;
+    }
+    if sum_sq == 0.0 {
+        return Err("vector has zero magnitude (all components zero)");
+    }
+    Ok(())
 }
 
 /// Euclidean distance between two f32 vectors.
@@ -130,15 +166,18 @@ pub fn l2_norm_f64(v: &[f64]) -> f64 {
 
 /// Cosine similarity between two f64 vectors.
 ///
-/// Returns `0.0` if either vector has zero magnitude. Result is clamped
-/// to `[-1.0, 1.0]` to handle floating-point imprecision.
+/// Returns `0.0` only when the cosine is genuinely undefined — a
+/// zero-magnitude or non-finite denominator (`denom == 0.0 ||
+/// !denom.is_finite()`), NOT an epsilon floor that would collapse
+/// tiny-but-valid vectors. Result is clamped to `[-1.0, 1.0]` to handle
+/// floating-point imprecision.
 #[inline]
 pub fn cosine_similarity_f64(a: &[f64], b: &[f64]) -> f64 {
     let dot = dot_product_f64(a, b);
     let norm_a = l2_norm_f64(a);
     let norm_b = l2_norm_f64(b);
     let denom = norm_a * norm_b;
-    if denom < f64::EPSILON {
+    if denom == 0.0 || !denom.is_finite() {
         return 0.0;
     }
     (dot / denom).clamp(-1.0, 1.0)
@@ -218,6 +257,37 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0];
         let zero = vec![0.0, 0.0, 0.0];
         assert_eq!(cosine_similarity(&a, &zero), 0.0);
+    }
+
+    #[test]
+    fn cosine_tiny_but_valid_vectors_not_collapsed() {
+        // Two parallel vectors whose magnitudes are well below
+        // f32::EPSILON. The old `denom < EPSILON` guard returned a fake
+        // 0.0 ("orthogonal") here; the correct cosine is 1.0.
+        let a = vec![1e-4_f32, 2e-4, 3e-4];
+        let b = vec![2e-4_f32, 4e-4, 6e-4]; // 2x a, same direction
+        assert!((cosine_similarity(&a, &b) - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn validate_similarity_vector_accepts_normal() {
+        assert!(validate_similarity_vector(&[1.0, 2.0, 3.0]).is_ok());
+        // Tiny-but-nonzero is valid.
+        assert!(validate_similarity_vector(&[0.0, 1e-20, 0.0]).is_ok());
+    }
+
+    #[test]
+    fn validate_similarity_vector_rejects_zero_magnitude() {
+        assert!(validate_similarity_vector(&[0.0, 0.0, 0.0]).is_err());
+        // Empty counts as zero magnitude.
+        assert!(validate_similarity_vector(&[]).is_err());
+    }
+
+    #[test]
+    fn validate_similarity_vector_rejects_non_finite() {
+        assert!(validate_similarity_vector(&[1.0, f32::NAN, 3.0]).is_err());
+        assert!(validate_similarity_vector(&[1.0, f32::INFINITY, 3.0]).is_err());
+        assert!(validate_similarity_vector(&[f32::NEG_INFINITY, 2.0]).is_err());
     }
 
     #[test]

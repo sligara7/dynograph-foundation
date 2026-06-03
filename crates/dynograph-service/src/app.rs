@@ -63,6 +63,7 @@ use crate::{
         TwoVectorF64Request, UnaryVectorRequest, VectorResponse, run_cosine_similarity,
         run_dot_product, run_euclidean_distance, run_hadamard, run_jaro_winkler, run_l2_norm,
         run_linear_regression_slope, run_pearson_correlation, run_token_sort_ratio,
+        validate_embedding_values,
     },
     validation::validate_limit,
     welford_update::{WelfordUpdateRequest, WelfordUpdateResponse, run as run_welford_update},
@@ -1588,6 +1589,10 @@ async fn set_embedding(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let SetEmbeddingBody { embedding } = body;
+    // Reject degenerate embeddings (non-finite / zero magnitude) before
+    // any storage write or index insert — a silent 0.0-against-everything
+    // vector must never enter the index. 400, no on-disk rollback needed.
+    validate_embedding_values(&embedding)?;
     // Build the response inside the closure and hand it back: this
     // moves `node_type`/`node_id`/`embedding` into the blocking task
     // (required by `Send + 'static`) without cloning the embedding
@@ -1749,6 +1754,10 @@ async fn similar(
             "embedding must be non-empty".to_string(),
         ));
     }
+    // A degenerate query (non-finite / zero magnitude) scores 0.0
+    // against every node — a silent "nothing is similar" that hides bad
+    // upstream data. Reject loudly.
+    validate_embedding_values(&embedding)?;
     // Cap `top_k` at MAX_LIMIT (and reject 0) like every other
     // result-bearing route — an unbounded `top_k` is a DoS/OOM vector
     // (the HNSW search collects up to that many hits).

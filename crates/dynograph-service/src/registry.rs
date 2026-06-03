@@ -25,7 +25,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use dynograph_core::{DynoError, Schema};
 use dynograph_storage::StorageEngine;
-use dynograph_vector::{HnswIndex, HnswStats};
+use dynograph_vector::{HnswIndex, HnswStats, validate_similarity_vector};
 
 use crate::schema_response::content_hash;
 
@@ -647,6 +647,17 @@ fn build_indexes_from_storage(
                     "embedding dim drift in {graph_id}/{node_type}/{node_id}: \
                      first vector was {dim}, this one is {}",
                     vec.len()
+                )));
+            }
+            // Same "corrupted store fails loud" contract as the dim
+            // drift above: a non-finite / zero-magnitude embedding on
+            // disk would silently re-enter the index and score 0.0
+            // against every query. The HTTP ingest boundaries reject
+            // these now, but a vector persisted before that guard
+            // existed must not be readmitted on restart.
+            if let Err(reason) = validate_similarity_vector(vec) {
+                return Err(RegistryError::Rehydration(format!(
+                    "degenerate embedding in {graph_id}/{node_type}/{node_id}: {reason}"
                 )));
             }
             index.insert(node_id, vec);
