@@ -148,6 +148,13 @@ pub struct HnswStats {
     pub tombstoned_count: usize,
 }
 
+/// Hard cap on a node's tower height. With the default `ml`
+/// (`1/ln(16) ≈ 0.36`) realistic levels stay in the low teens even
+/// for millions of nodes; 64 is far above that while bounding the
+/// per-node `connections` allocation against a degenerate RNG draw
+/// (see [`HnswIndex::level_for_draw`]).
+const MAX_LEVEL: usize = 64;
+
 /// The HNSW index.
 pub struct HnswIndex {
     config: HnswConfig,
@@ -246,8 +253,24 @@ impl HnswIndex {
     /// Generate a random level for a new node. Uses the index's owned
     /// RNG so a seeded config produces a deterministic level sequence.
     fn random_level(&mut self) -> usize {
-        let r: f64 = self.rng.random();
-        (-r.ln() * self.config.ml).floor() as usize
+        Self::level_for_draw(self.rng.random::<f64>(), self.config.ml)
+    }
+
+    /// Map a raw `[0, 1)` RNG draw to a tower level. Split out of
+    /// [`random_level`](Self::random_level) so the boundary cases are
+    /// unit-testable without driving the RNG.
+    ///
+    /// `r == 0.0` is a valid (if rare) draw from `[0, 1)`, and
+    /// `(-ln(0.0))` is `+inf`; `(+inf).floor() as usize` *saturates* to
+    /// `usize::MAX`, which then overflows the `vec![_; level + 1]`
+    /// allocation in `insert` and panics. Clamp the draw away from zero
+    /// so `ln` stays finite, and cap the result at [`MAX_LEVEL`] so a
+    /// pathologically small draw can't produce an absurd tower height
+    /// either. The clamp leaves every non-zero draw — i.e. essentially
+    /// all of them — unchanged, so seeded level sequences are stable.
+    fn level_for_draw(r: f64, ml: f64) -> usize {
+        let r = r.max(f64::MIN_POSITIVE);
+        ((-r.ln() * ml).floor() as usize).min(MAX_LEVEL)
     }
 
     /// Insert a vector with an associated ID. If `id` already exists,
@@ -852,6 +875,23 @@ mod tests {
             levels_a, levels_b,
             "seeded indexes must produce identical level assignments"
         );
+    }
+
+    #[test]
+    fn level_for_draw_is_always_capped() {
+        // Across the whole [0, 1) draw space — including the extreme
+        // tail that maps to very tall towers — the level never exceeds
+        // MAX_LEVEL, so `insert`'s `connections` allocation is bounded.
+        // `0.0` is the panic regression: pre-fix it gave ln(0) = -inf
+        // -> usize::MAX -> a capacity-overflow panic in `insert`.
+        let ml = HnswConfig::new(3).ml;
+        for raw in [0.0, f64::MIN_POSITIVE, 1e-300, 1e-12, 0.5, 0.999_999_999] {
+            let level = HnswIndex::level_for_draw(raw, ml);
+            assert!(
+                level <= MAX_LEVEL,
+                "draw {raw} produced level {level} > MAX_LEVEL {MAX_LEVEL}"
+            );
+        }
     }
 
     #[test]

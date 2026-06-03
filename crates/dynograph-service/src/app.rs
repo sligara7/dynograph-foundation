@@ -429,7 +429,9 @@ async fn get_schema(
     Path(id): Path<String>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let schema = entry.with_engine_read(|engine| engine.schema().clone());
+    let schema = entry
+        .with_engine_read(|engine| engine.schema().clone())
+        .await;
     let response = SchemaResponse::with_cached_hash(id, schema, entry.content_hash().to_string());
     Ok(Json(response).into_response())
 }
@@ -441,7 +443,10 @@ async fn replace_schema(
     Path(id): Path<String>,
     Json(new_schema): Json<Schema>,
 ) -> Result<Response, RegistryError> {
-    let new_hash = state.registry.replace_schema(&id, new_schema.clone())?;
+    let new_hash = state
+        .registry
+        .replace_schema(&id, new_schema.clone())
+        .await?;
     let response = SchemaResponse::with_cached_hash(id, new_schema, new_hash.to_string());
     Ok(Json(response).into_response())
 }
@@ -474,7 +479,8 @@ async fn create_node(
         properties,
     } = body;
     let stored = entry
-        .with_engine_write(|engine| engine.create_node(&id, &node_type, &node_id, properties))?;
+        .with_engine_write(move |engine| engine.create_node(&id, &node_type, &node_id, properties))
+        .await?;
     Ok((StatusCode::CREATED, Json(NodeResponse::from(stored))).into_response())
 }
 
@@ -503,22 +509,24 @@ async fn list_nodes(
         value,
     } = q;
 
-    let nodes = entry.with_engine_read(|engine| -> Result<Vec<_>, RegistryError> {
-        match (prop, value) {
-            (None, None) => engine
-                .scan_nodes(&id, &node_type)
-                .map_err(RegistryError::Storage),
-            (Some(prop), Some(value)) => {
-                let coerced = coerce_query_value(engine.schema(), &node_type, &prop, &value)?;
-                engine
-                    .scan_nodes_by_property(&id, &node_type, &prop, &coerced)
-                    .map_err(RegistryError::Storage)
+    let nodes = entry
+        .with_engine_read(move |engine| -> Result<Vec<_>, RegistryError> {
+            match (prop, value) {
+                (None, None) => engine
+                    .scan_nodes(&id, &node_type)
+                    .map_err(RegistryError::Storage),
+                (Some(prop), Some(value)) => {
+                    let coerced = coerce_query_value(engine.schema(), &node_type, &prop, &value)?;
+                    engine
+                        .scan_nodes_by_property(&id, &node_type, &prop, &coerced)
+                        .map_err(RegistryError::Storage)
+                }
+                (Some(_), None) | (None, Some(_)) => Err(RegistryError::BadRequest(
+                    "prop and value must be supplied together".to_string(),
+                )),
             }
-            (Some(_), None) | (None, Some(_)) => Err(RegistryError::BadRequest(
-                "prop and value must be supplied together".to_string(),
-            )),
-        }
-    })?;
+        })
+        .await?;
 
     let response = NodeListResponse::new(nodes.into_iter().map(NodeResponse::from).collect());
     Ok(Json(response).into_response())
@@ -568,7 +576,12 @@ async fn get_node(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let stored = entry
-        .with_engine_read(|engine| engine.get_node(&id, &node_type, &node_id))?
+        .with_engine_read({
+            let node_type = node_type.clone();
+            let node_id = node_id.clone();
+            move |engine| engine.get_node(&id, &node_type, &node_id)
+        })
+        .await?
         .ok_or(RegistryError::NodeNotFound { node_type, node_id })?;
     Ok(Json(NodeResponse::from(stored)).into_response())
 }
@@ -590,9 +603,12 @@ async fn replace_node(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let stored = entry
-        .with_engine_write(|engine| {
-            engine.replace_node_properties(&id, &node_type, &node_id, body.properties)
-        })?
+        .with_engine_write({
+            let node_type = node_type.clone();
+            let node_id = node_id.clone();
+            move |engine| engine.replace_node_properties(&id, &node_type, &node_id, body.properties)
+        })
+        .await?
         .ok_or(RegistryError::NodeNotFound { node_type, node_id })?;
     Ok(Json(NodeResponse::from(stored)).into_response())
 }
@@ -606,13 +622,19 @@ async fn delete_node(
     // embedding (slice 8a). The HNSW index is service-side state, so
     // we mirror the cascade here: if an index exists for this type,
     // remove the node from it. The whole cycle runs under one lock.
-    let existed = entry.with_state_write(|engine, indexes| -> Result<bool, RegistryError> {
-        let existed = engine.delete_node(&id, &node_type, &node_id)?;
-        if existed && let Some(index) = indexes.get_mut(&node_type) {
-            index.remove(&node_id);
-        }
-        Ok(existed)
-    })?;
+    let existed = entry
+        .with_state_write({
+            let node_type = node_type.clone();
+            let node_id = node_id.clone();
+            move |engine, indexes| -> Result<bool, RegistryError> {
+                let existed = engine.delete_node(&id, &node_type, &node_id)?;
+                if existed && let Some(index) = indexes.get_mut(&node_type) {
+                    index.remove(&node_id);
+                }
+                Ok(existed)
+            }
+        })
+        .await?;
     if existed {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -645,11 +667,13 @@ async fn create_edge(
         to_id,
         properties,
     } = body;
-    let stored = entry.with_engine_write(|engine| {
-        engine.create_edge(
-            &id, &edge_type, &from_type, &from_id, &to_type, &to_id, properties,
-        )
-    })?;
+    let stored = entry
+        .with_engine_write(move |engine| {
+            engine.create_edge(
+                &id, &edge_type, &from_type, &from_id, &to_type, &to_id, properties,
+            )
+        })
+        .await?;
     Ok((StatusCode::CREATED, Json(EdgeResponse::from(stored))).into_response())
 }
 
@@ -659,7 +683,13 @@ async fn get_edge(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let stored = entry
-        .with_engine_read(|engine| engine.get_edge(&id, &edge_type, &from_id, &to_id))?
+        .with_engine_read({
+            let edge_type = edge_type.clone();
+            let from_id = from_id.clone();
+            let to_id = to_id.clone();
+            move |engine| engine.get_edge(&id, &edge_type, &from_id, &to_id)
+        })
+        .await?
         .ok_or(RegistryError::EdgeNotFound {
             edge_type,
             from_id,
@@ -686,9 +716,15 @@ async fn merge_edge(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let stored = entry
-        .with_engine_write(|engine| {
-            engine.merge_edge_properties(&id, &edge_type, &from_id, &to_id, body.properties)
-        })?
+        .with_engine_write({
+            let edge_type = edge_type.clone();
+            let from_id = from_id.clone();
+            let to_id = to_id.clone();
+            move |engine| {
+                engine.merge_edge_properties(&id, &edge_type, &from_id, &to_id, body.properties)
+            }
+        })
+        .await?
         .ok_or(RegistryError::EdgeNotFound {
             edge_type,
             from_id,
@@ -702,8 +738,14 @@ async fn delete_edge(
     Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
 ) -> Result<StatusCode, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let existed =
-        entry.with_engine_write(|engine| engine.delete_edge(&id, &edge_type, &from_id, &to_id))?;
+    let existed = entry
+        .with_engine_write({
+            let edge_type = edge_type.clone();
+            let from_id = from_id.clone();
+            let to_id = to_id.clone();
+            move |engine| engine.delete_edge(&id, &edge_type, &from_id, &to_id)
+        })
+        .await?;
     if existed {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -745,29 +787,31 @@ async fn batch(
         CommitFailed(dynograph_core::DynoError),
     }
 
-    let outcome = entry.with_state_write(|engine, indexes| -> Outcome {
-        engine.begin_batch();
-        match run_ops(engine, &id, req.ops) {
-            Ok((response, deleted_nodes)) => match engine.commit_batch() {
-                Ok(_) => {
-                    // HNSW maintenance for delete_node ops happens
-                    // post-commit so a commit failure leaves the
-                    // index untouched (matches the storage rollback).
-                    for (node_type, node_id) in deleted_nodes {
-                        if let Some(index) = indexes.get_mut(&node_type) {
-                            index.remove(&node_id);
+    let outcome = entry
+        .with_state_write(move |engine, indexes| -> Outcome {
+            engine.begin_batch();
+            match run_ops(engine, &id, req.ops) {
+                Ok((response, deleted_nodes)) => match engine.commit_batch() {
+                    Ok(_) => {
+                        // HNSW maintenance for delete_node ops happens
+                        // post-commit so a commit failure leaves the
+                        // index untouched (matches the storage rollback).
+                        for (node_type, node_id) in deleted_nodes {
+                            if let Some(index) = indexes.get_mut(&node_type) {
+                                index.remove(&node_id);
+                            }
                         }
+                        Outcome::Success(response)
                     }
-                    Outcome::Success(response)
+                    Err(e) => Outcome::CommitFailed(e),
+                },
+                Err(per_op_err) => {
+                    engine.discard_batch();
+                    Outcome::OpFailed(per_op_err)
                 }
-                Err(e) => Outcome::CommitFailed(e),
-            },
-            Err(per_op_err) => {
-                engine.discard_batch();
-                Outcome::OpFailed(per_op_err)
             }
-        }
-    });
+        })
+        .await;
 
     match outcome {
         Outcome::Success(resp) => Ok(Json(resp).into_response()),
@@ -788,7 +832,8 @@ async fn resolve_or_create(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry
-        .with_state_write(|engine, indexes| run_resolve_or_create(engine, indexes, &id, req))?;
+        .with_state_write(move |engine, indexes| run_resolve_or_create(engine, indexes, &id, req))
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -801,7 +846,9 @@ async fn edges_collect(
     Json(req): Json<EdgesCollectRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let response = entry.with_engine_read(|engine| run_edges_collect(engine, &id, req))?;
+    let response = entry
+        .with_engine_read(move |engine| run_edges_collect(engine, &id, req))
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -814,7 +861,9 @@ async fn edges_adjacent(
     Json(req): Json<EdgesAdjacentRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let response = entry.with_engine_read(|engine| run_edges_adjacent(engine, &id, req))?;
+    let response = entry
+        .with_engine_read(move |engine| run_edges_adjacent(engine, &id, req))
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -828,7 +877,9 @@ async fn nodes_exists(
     Json(req): Json<NodesExistsRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let response = entry.with_engine_read(|engine| run_nodes_exists(engine, &id, req))?;
+    let response = entry
+        .with_engine_read(move |engine| run_nodes_exists(engine, &id, req))
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -842,7 +893,9 @@ async fn nodes_scan(
     Json(req): Json<NodesScanRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let response = entry.with_engine_read(|engine| run_nodes_scan(engine, &id, req))?;
+    let response = entry
+        .with_engine_read(move |engine| run_nodes_scan(engine, &id, req))
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -857,9 +910,11 @@ async fn welford_update(
     Json(req): Json<WelfordUpdateRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let response = entry.with_engine_write(|engine| {
-        run_welford_update(engine, &id, &edge_type, &from_id, &to_id, req)
-    })?;
+    let response = entry
+        .with_engine_write(move |engine| {
+            run_welford_update(engine, &id, &edge_type, &from_id, &to_id, req)
+        })
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -874,7 +929,9 @@ async fn traverse(
     Json(req): Json<TraverseRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let response = entry.with_engine_read(|engine| run_traverse(engine, &id, req))?;
+    let response = entry
+        .with_engine_read(move |engine| run_traverse(engine, &id, req))
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -894,35 +951,42 @@ async fn set_embedding(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let SetEmbeddingBody { embedding } = body;
-    entry.with_state_write(|engine, indexes| -> Result<(), RegistryError> {
-        if let Some(index) = indexes.get(&node_type)
-            && index.dim() != embedding.len()
-        {
-            return Err(RegistryError::EmbeddingDimMismatch {
-                node_type: node_type.clone(),
-                expected: index.dim(),
-                actual: embedding.len(),
-            });
-        }
-        engine.set_embedding(&id, &node_type, &node_id, &embedding)?;
-        // Avoid the `entry()` clone on the hot post-first-insert
-        // path: only allocate the key when we actually need to
-        // insert. After the first insert per type, this is a single
-        // get_mut.
-        let index = match indexes.get_mut(&node_type) {
-            Some(i) => i,
-            None => indexes
-                .entry(node_type.clone())
-                .or_insert_with(|| HnswIndex::with_dim(embedding.len())),
-        };
-        index.insert(&node_id, &embedding);
-        Ok(())
-    })?;
-    let response = EmbeddingResponse {
-        node_type,
-        node_id,
-        embedding,
-    };
+    // Build the response inside the closure and hand it back: this
+    // moves `node_type`/`node_id`/`embedding` into the blocking task
+    // (required by `Send + 'static`) without cloning the embedding
+    // vector back out afterward.
+    let response = entry
+        .with_state_write(
+            move |engine, indexes| -> Result<EmbeddingResponse, RegistryError> {
+                if let Some(index) = indexes.get(&node_type)
+                    && index.dim() != embedding.len()
+                {
+                    return Err(RegistryError::EmbeddingDimMismatch {
+                        node_type: node_type.clone(),
+                        expected: index.dim(),
+                        actual: embedding.len(),
+                    });
+                }
+                engine.set_embedding(&id, &node_type, &node_id, &embedding)?;
+                // Avoid the `entry()` clone on the hot post-first-insert
+                // path: only allocate the key when we actually need to
+                // insert. After the first insert per type, this is a single
+                // get_mut.
+                let index = match indexes.get_mut(&node_type) {
+                    Some(i) => i,
+                    None => indexes
+                        .entry(node_type.clone())
+                        .or_insert_with(|| HnswIndex::with_dim(embedding.len())),
+                };
+                index.insert(&node_id, &embedding);
+                Ok(EmbeddingResponse {
+                    node_type,
+                    node_id,
+                    embedding,
+                })
+            },
+        )
+        .await?;
     Ok(Json(response).into_response())
 }
 
@@ -932,7 +996,12 @@ async fn get_embedding(
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let embedding = entry
-        .with_engine_read(|engine| engine.get_embedding(&id, &node_type, &node_id))?
+        .with_engine_read({
+            let node_type = node_type.clone();
+            let node_id = node_id.clone();
+            move |engine| engine.get_embedding(&id, &node_type, &node_id)
+        })
+        .await?
         .ok_or_else(|| RegistryError::EmbeddingNotFound {
             node_type: node_type.clone(),
             node_id: node_id.clone(),
@@ -950,13 +1019,19 @@ async fn delete_embedding(
     Path((id, node_type, node_id)): Path<(String, String, String)>,
 ) -> Result<StatusCode, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    let existed = entry.with_state_write(|engine, indexes| -> Result<bool, RegistryError> {
-        let existed = engine.delete_embedding(&id, &node_type, &node_id)?;
-        if existed && let Some(index) = indexes.get_mut(&node_type) {
-            index.remove(&node_id);
-        }
-        Ok(existed)
-    })?;
+    let existed = entry
+        .with_state_write({
+            let node_type = node_type.clone();
+            let node_id = node_id.clone();
+            move |engine, indexes| -> Result<bool, RegistryError> {
+                let existed = engine.delete_embedding(&id, &node_type, &node_id)?;
+                if existed && let Some(index) = indexes.get_mut(&node_type) {
+                    index.remove(&node_id);
+                }
+                Ok(existed)
+            }
+        })
+        .await?;
     if existed {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -1000,36 +1075,38 @@ async fn similar(
     if top_k == 0 {
         return Err(RegistryError::BadRequest("top_k must be > 0".to_string()));
     }
-    let response = entry.with_state_read(
-        |engine, indexes| -> Result<SimilarResponse, RegistryError> {
-            if !engine.schema().node_types.contains_key(&node_type) {
-                return Err(RegistryError::BadRequest(format!(
-                    "unknown node type: {node_type}"
-                )));
-            }
-            let Some(index) = indexes.get(&node_type) else {
-                return Ok(SimilarResponse {
-                    results: Vec::new(),
-                });
-            };
-            if index.dim() != embedding.len() {
-                return Err(RegistryError::EmbeddingDimMismatch {
-                    node_type: node_type.clone(),
-                    expected: index.dim(),
-                    actual: embedding.len(),
-                });
-            }
-            let results = index
-                .search(&embedding, top_k)
-                .into_iter()
-                .map(|sr| SimilarHit {
-                    node_id: sr.id.to_string(),
-                    score: sr.score,
-                })
-                .collect();
-            Ok(SimilarResponse { results })
-        },
-    )?;
+    let response = entry
+        .with_state_read(
+            move |engine, indexes| -> Result<SimilarResponse, RegistryError> {
+                if !engine.schema().node_types.contains_key(&node_type) {
+                    return Err(RegistryError::BadRequest(format!(
+                        "unknown node type: {node_type}"
+                    )));
+                }
+                let Some(index) = indexes.get(&node_type) else {
+                    return Ok(SimilarResponse {
+                        results: Vec::new(),
+                    });
+                };
+                if index.dim() != embedding.len() {
+                    return Err(RegistryError::EmbeddingDimMismatch {
+                        node_type: node_type.clone(),
+                        expected: index.dim(),
+                        actual: embedding.len(),
+                    });
+                }
+                let results = index
+                    .search(&embedding, top_k)
+                    .into_iter()
+                    .map(|sr| SimilarHit {
+                        node_id: sr.id.to_string(),
+                        score: sr.score,
+                    })
+                    .collect();
+                Ok(SimilarResponse { results })
+            },
+        )
+        .await?;
     Ok(Json(response).into_response())
 }
 
