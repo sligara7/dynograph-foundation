@@ -121,14 +121,45 @@ pub fn validate_similarity_vector(v: &[f32]) -> Result<(), &'static str> {
 }
 
 /// Euclidean distance between two f32 vectors.
+///
+/// Same 8-wide unrolled accumulator structure as [`dot_product`] so it
+/// autovectorizes under the same `RUSTFLAGS` (see the module docstring);
+/// without those flags it is correct scalar code.
 #[inline]
 pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
     let mut sum = 0.0f32;
-    for i in 0..a.len() {
-        let d = a[i] - b[i];
+    let chunks = a.len() / 8;
+    let remainder = a.len() % 8;
+
+    for i in 0..chunks {
+        let base = i * 8;
+        let mut local_sum = 0.0f32;
+        let d0 = a[base] - b[base];
+        let d1 = a[base + 1] - b[base + 1];
+        let d2 = a[base + 2] - b[base + 2];
+        let d3 = a[base + 3] - b[base + 3];
+        let d4 = a[base + 4] - b[base + 4];
+        let d5 = a[base + 5] - b[base + 5];
+        let d6 = a[base + 6] - b[base + 6];
+        let d7 = a[base + 7] - b[base + 7];
+        local_sum += d0 * d0;
+        local_sum += d1 * d1;
+        local_sum += d2 * d2;
+        local_sum += d3 * d3;
+        local_sum += d4 * d4;
+        local_sum += d5 * d5;
+        local_sum += d6 * d6;
+        local_sum += d7 * d7;
+        sum += local_sum;
+    }
+
+    let base = chunks * 8;
+    for i in 0..remainder {
+        let d = a[base + i] - b[base + i];
         sum += d * d;
     }
+
     sum.sqrt()
 }
 
@@ -315,6 +346,21 @@ mod tests {
         let a = vec![0.0, 0.0];
         let b = vec![3.0, 4.0];
         assert!((euclidean_distance(&a, &b) - 5.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn euclidean_unrolled_matches_naive_across_chunk_boundary() {
+        // 13 elements exercises both the 8-wide chunk and the 5-element
+        // remainder tail of the unrolled accumulator.
+        let a: Vec<f32> = (0..13).map(|i| (i as f32) * 0.5).collect();
+        let b: Vec<f32> = (0..13).map(|i| (i as f32) * 0.25 + 1.0).collect();
+        let naive: f32 = a
+            .iter()
+            .zip(b.iter())
+            .map(|(x, y)| (x - y) * (x - y))
+            .sum::<f32>()
+            .sqrt();
+        assert!((euclidean_distance(&a, &b) - naive).abs() < 1e-5);
     }
 
     #[test]

@@ -368,6 +368,20 @@ impl StorageEngine {
                 message: "embedding must be non-empty".to_string(),
             });
         }
+        // Reject non-finite components (NaN / ±∞) before the existence
+        // read or any write — a non-finite float is corrupt data, not a
+        // measurement, and it poisons every distance computation that
+        // later reads it back. Checked here (cheaper than the DB read
+        // below) and again on decode, so neither the write nor the read
+        // path can admit it. (Zero-magnitude is a *similarity* concern,
+        // screened at the service boundary, not here.)
+        if let Some(i) = embedding.iter().position(|f| !f.is_finite()) {
+            return Err(DynoError::Validation {
+                node_type: node_type.to_string(),
+                property: "embedding".to_string(),
+                message: format!("embedding component at index {i} is non-finite (NaN or ±∞)"),
+            });
+        }
         let key = crate::keys::node_key(graph_id, node_type, node_id);
         if self.get(CF_NODES, &key)?.is_none() {
             return Err(DynoError::NodeNotFound {
@@ -1554,9 +1568,19 @@ fn decode_embedding(bytes: &[u8]) -> Result<Vec<f32>, DynoError> {
         )));
     }
     let mut floats = Vec::with_capacity(bytes.len() / 4);
-    for chunk in bytes.chunks_exact(4) {
+    for (i, chunk) in bytes.chunks_exact(4).enumerate() {
         let arr: [u8; 4] = chunk.try_into().expect("chunks_exact yields 4-byte slices");
-        floats.push(f32::from_le_bytes(arr));
+        let f = f32::from_le_bytes(arr);
+        // The write path rejects non-finite embeddings; a NaN/±∞ read
+        // back here means the on-disk bytes are corrupt (or were written
+        // before that guard existed). Fail loud rather than hand a
+        // poison value to the distance functions.
+        if !f.is_finite() {
+            return Err(DynoError::Storage(format!(
+                "embedding component at index {i} is non-finite (NaN or ±∞) — corrupt sidecar?"
+            )));
+        }
+        floats.push(f);
     }
     Ok(floats)
 }
@@ -2964,6 +2988,35 @@ schema:
         make_item(&mut engine, "n1");
         let err = engine.set_embedding("g1", "Item", "n1", &[]).unwrap_err();
         assert!(matches!(err, DynoError::Validation { .. }));
+    }
+
+    #[test]
+    fn set_embedding_rejects_non_finite() {
+        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        make_item(&mut engine, "n1");
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let err = engine
+                .set_embedding("g1", "Item", "n1", &[1.0, bad, 3.0])
+                .unwrap_err();
+            assert!(
+                matches!(err, DynoError::Validation { ref message, .. } if message.contains("non-finite")),
+                "{bad} should be rejected loudly, got {err:?}"
+            );
+        }
+        // Nothing was persisted — the reject ran before the write.
+        assert!(engine.get_embedding("g1", "Item", "n1").unwrap().is_none());
+    }
+
+    #[test]
+    fn decode_embedding_rejects_non_finite() {
+        // NaN bytes (exponent all ones, non-zero mantissa) on the read
+        // path must fail loud rather than yield a poison float.
+        let nan_bytes = f32::NAN.to_le_bytes();
+        let err = decode_embedding(&nan_bytes).unwrap_err();
+        assert!(
+            matches!(err, DynoError::Storage(ref m) if m.contains("non-finite")),
+            "{err:?}"
+        );
     }
 
     #[test]
