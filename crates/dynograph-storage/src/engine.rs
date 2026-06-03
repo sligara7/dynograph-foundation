@@ -1582,7 +1582,7 @@ schema:
             "{err:?}"
         );
         // The reject must happen before any put — no orphaned body left.
-        assert!(engine.count_nodes("g1", "Character") == 0);
+        assert_eq!(engine.count_nodes("g1", "Character").unwrap(), 0);
     }
 
     #[test]
@@ -1626,7 +1626,7 @@ schema:
             matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "story_id"),
             "{err:?}"
         );
-        assert!(engine.count_nodes("g1", "Fragment") == 0);
+        assert_eq!(engine.count_nodes("g1", "Fragment").unwrap(), 0);
     }
 
     #[test]
