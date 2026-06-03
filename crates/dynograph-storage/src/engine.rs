@@ -1622,11 +1622,41 @@ schema:
         .unwrap()
     }
 
-    // In-memory tests (existing)
+    /// Build a `StorageEngine` for a backend-agnostic engine test,
+    /// honoring the `DYNOGRAPH_TEST_BACKEND` env var: unset (or
+    /// `"memory"`) gives the in-memory backend, `"rocksdb"` a fresh
+    /// temp-dir RocksDB store. CI runs the storage suite once per
+    /// backend (the "backend matrix") so engine logic is exercised
+    /// against both — the in-memory string map and the array-indexed
+    /// column-family handles that diverge (the C1 batch panic only
+    /// reproduced on RocksDB, because every batch test was in-memory).
+    ///
+    /// In rocksdb mode the temp dir is intentionally leaked via
+    /// `keep()`: the engine holds it open for the whole test and there's
+    /// no place to park the `TempDir` guard when returning only the
+    /// engine. CI runners are ephemeral; local rocksdb runs leave the
+    /// dirs under the system temp dir for the OS to reclaim. Tests that
+    /// are specifically about one backend keep calling
+    /// `new_in_memory` / `new_rocksdb` directly.
+    fn test_engine(schema: Schema) -> StorageEngine {
+        match std::env::var("DYNOGRAPH_TEST_BACKEND").as_deref() {
+            Ok("rocksdb") => {
+                let dir = tempfile::tempdir()
+                    .expect("create temp dir for rocksdb test")
+                    .keep();
+                let path = dir.to_str().expect("temp path is valid utf-8");
+                StorageEngine::new_rocksdb(schema, path).expect("open rocksdb test engine")
+            }
+            _ => StorageEngine::new_in_memory(schema),
+        }
+    }
+
+    // Backend-agnostic engine tests (run against both backends via the
+    // matrix — see `test_engine`).
 
     #[test]
     fn create_and_get_node() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         let props = props! { "name" => "Alice", "role" => "protagonist" };
         let node = engine.create_node("g1", "Character", "c1", props).unwrap();
         assert_eq!(node.node_id, "c1");
@@ -1636,7 +1666,7 @@ schema:
 
     #[test]
     fn create_node_rejects_nul_in_node_id() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         let err = engine
             .create_node("g1", "Character", "c\x001", props! { "name" => "Alice" })
             .unwrap_err();
@@ -1650,7 +1680,7 @@ schema:
 
     #[test]
     fn create_node_rejects_nul_in_graph_id() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         let err = engine
             .create_node("g\x001", "Character", "c1", props! { "name" => "Alice" })
             .unwrap_err();
@@ -1664,7 +1694,7 @@ schema:
     fn create_node_allows_nul_in_non_indexed_property_value() {
         // `name` is not indexed, so its value lives in the msgpack body,
         // never in a key — a NUL there is harmless and must be allowed.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         let node = engine
             .create_node("g1", "Character", "c1", props! { "name" => "a\x00b" })
             .unwrap();
@@ -1676,7 +1706,7 @@ schema:
     #[test]
     fn create_node_rejects_nul_in_indexed_property_value() {
         // `story_id` IS indexed → its value becomes a key segment.
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         let err = engine
             .create_node(
                 "g1",
@@ -1694,7 +1724,7 @@ schema:
 
     #[test]
     fn replace_node_properties_rejects_nul_in_indexed_value() {
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -1721,7 +1751,7 @@ schema:
     fn scan_nodes_by_property_rejects_nul_in_query_value() {
         // A NUL query value can't match any stored key, so without the
         // guard the scan would silently return empty rather than fail.
-        let engine = StorageEngine::new_in_memory(indexed_schema());
+        let engine = test_engine(indexed_schema());
         let err = engine
             .scan_nodes_by_property(
                 "g1",
@@ -1738,7 +1768,7 @@ schema:
 
     #[test]
     fn create_edge_rejects_nul_in_endpoint_id() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "A" })
             .unwrap();
@@ -1761,21 +1791,21 @@ schema:
 
     #[test]
     fn create_node_validates_schema() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         let result = engine.create_node("g1", "Character", "c1", HashMap::new());
         assert!(result.is_err());
     }
 
     #[test]
     fn create_node_validates_enum() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         let props = props! { "name" => "Bob", "role" => "villain" };
         assert!(engine.create_node("g1", "Character", "c1", props).is_err());
     }
 
     #[test]
     fn get_nonexistent_node_returns_none() {
-        let engine = StorageEngine::new_in_memory(test_schema());
+        let engine = test_engine(test_schema());
         assert!(
             engine
                 .get_node("g1", "Character", "missing")
@@ -1786,7 +1816,7 @@ schema:
 
     #[test]
     fn delete_node() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
             .unwrap();
@@ -1801,7 +1831,7 @@ schema:
         // CF_EDGES entries and inverse adjacency on neighbor nodes.
         // After deleting alice, bob's incoming-edge scan should be empty
         // and the alice→bob edge should be unresolvable.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "Alice" })
             .unwrap();
@@ -1854,7 +1884,7 @@ schema:
     fn delete_node_removes_incoming_edges_and_peer_outgoing_adjacency() {
         // Symmetric case: delete the destination of an edge; the source's
         // outgoing-edge scan should no longer include the deleted endpoint.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "Alice" })
             .unwrap();
@@ -1898,7 +1928,7 @@ schema:
         // we'll use a Location-typed `loc1` with a back-link via KNOWS
         // — but the test_schema only allows VISITS Character→Location.
         // So: alice → loc1 (VISITS), bob → alice (KNOWS).
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "A" })
             .unwrap();
@@ -1963,7 +1993,7 @@ schema:
 
     #[test]
     fn create_and_get_edge() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
             .unwrap();
@@ -1988,7 +2018,7 @@ schema:
 
     #[test]
     fn edge_validates_types() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         assert!(
             engine
                 .create_edge(
@@ -2006,7 +2036,7 @@ schema:
 
     #[test]
     fn cross_type_edge() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
             .unwrap();
@@ -2029,7 +2059,7 @@ schema:
 
     #[test]
     fn count_nodes_by_type() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
             .unwrap();
@@ -2045,7 +2075,7 @@ schema:
 
     #[test]
     fn graph_isolation() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
             .unwrap();
@@ -2099,7 +2129,7 @@ schema:
 
     #[test]
     fn create_populates_index_and_scan_filters_by_value() {
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2144,7 +2174,7 @@ schema:
     #[test]
     fn scan_filters_by_node_type() {
         // Same story_id across Fragment and Character — scan must not bleed types.
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2180,7 +2210,7 @@ schema:
 
     #[test]
     fn update_moves_index_entry() {
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2223,7 +2253,7 @@ schema:
         // indexed value must drop the old index entry, not leave it
         // dangling (which would make scan_nodes_by_property return the
         // node under its stale value).
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2260,7 +2290,7 @@ schema:
 
     #[test]
     fn delete_cleans_up_index_entries() {
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2283,7 +2313,7 @@ schema:
     fn non_indexed_property_returns_empty() {
         // `name` isn't declared indexed, so no CF_NODE_IDX entries are written
         // and scans against it see nothing.
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2302,7 +2332,7 @@ schema:
 
     #[test]
     fn unsupported_value_types_return_empty() {
-        let engine = StorageEngine::new_in_memory(indexed_schema());
+        let engine = test_engine(indexed_schema());
         assert_eq!(
             engine
                 .scan_nodes_by_property("g1", "Fragment", "story_id", &Value::Float(1.0))
@@ -2534,7 +2564,7 @@ schema:
 
     #[test]
     fn batch_buffers_mixed_put_and_delete_visible_within_batch() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         // Pre-existing node we'll delete inside the batch.
         engine
             .create_node("g1", "Character", "to_delete", props! { "name" => "Goner" })
@@ -2581,7 +2611,7 @@ schema:
 
     #[test]
     fn batch_discard_with_mixed_ops_leaves_pre_batch_state() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "keep_me", props! { "name" => "Stay" })
             .unwrap();
@@ -2615,7 +2645,7 @@ schema:
         // index state mid-batch; the within-batch view matches the
         // post-commit view (with the only difference being whether
         // the change has hit disk).
-        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let mut engine = test_engine(indexed_schema());
         engine
             .create_node(
                 "g1",
@@ -2680,7 +2710,7 @@ schema:
         // these tombstones were invisible to scans until commit; v0.5.5+
         // overlays the buffer on scans, so the deletion is observable
         // mid-batch.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "A" })
             .unwrap();
@@ -2752,7 +2782,7 @@ schema:
 
     #[test]
     fn buffer_aware_get_sees_in_batch_create() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine.begin_batch();
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "Alice" })
@@ -2769,7 +2799,7 @@ schema:
 
     #[test]
     fn buffer_aware_get_sees_in_batch_delete_of_existing_node() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "alice", props! { "name" => "Alice" })
             .unwrap();
@@ -2786,7 +2816,7 @@ schema:
 
     #[test]
     fn buffer_aware_scan_overlays_in_batch_creates_and_deletes() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "pre", props! { "name" => "Pre" })
             .unwrap();
@@ -2807,7 +2837,7 @@ schema:
         // [delete_node X (prefix-delete on adj), Put X again] — the
         // late Put wins. Ordering is preserved end-to-end at commit;
         // mid-batch reads must see the same final state.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "phoenix", props! { "name" => "v1" })
             .unwrap();
@@ -2829,7 +2859,7 @@ schema:
 
     #[test]
     fn buffer_aware_discard_keeps_backend_unchanged() {
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "keep", props! { "name" => "Keep" })
             .unwrap();
@@ -2903,7 +2933,7 @@ schema:
         )
         .unwrap();
 
-        let mut engine = StorageEngine::new_in_memory(old);
+        let mut engine = test_engine(old);
         engine
             .create_node("g1", "Person", "alice", HashMap::new())
             .unwrap_err(); // missing required `name` — sanity check old schema in force
@@ -2944,7 +2974,7 @@ schema:
 
     #[test]
     fn embedding_round_trip() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         make_item(&mut engine, "n1");
         let v = vec![1.0_f32, 2.0, 3.0, 4.0];
         engine.set_embedding("g1", "Item", "n1", &v).unwrap();
@@ -2957,7 +2987,7 @@ schema:
 
     #[test]
     fn embedding_overwrites_in_place() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         make_item(&mut engine, "n1");
         engine
             .set_embedding("g1", "Item", "n1", &[1.0, 2.0])
@@ -2971,7 +3001,7 @@ schema:
 
     #[test]
     fn set_embedding_on_missing_node_errors_loudly() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         let err = engine
             .set_embedding("g1", "Item", "ghost", &[1.0, 2.0])
             .unwrap_err();
@@ -2984,7 +3014,7 @@ schema:
 
     #[test]
     fn set_embedding_rejects_empty_vector() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         make_item(&mut engine, "n1");
         let err = engine.set_embedding("g1", "Item", "n1", &[]).unwrap_err();
         assert!(matches!(err, DynoError::Validation { .. }));
@@ -2992,7 +3022,7 @@ schema:
 
     #[test]
     fn set_embedding_rejects_non_finite() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         make_item(&mut engine, "n1");
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
             let err = engine
@@ -3021,7 +3051,7 @@ schema:
 
     #[test]
     fn delete_embedding_returns_existed_bool() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         make_item(&mut engine, "n1");
         engine.set_embedding("g1", "Item", "n1", &[1.0]).unwrap();
         assert!(engine.delete_embedding("g1", "Item", "n1").unwrap());
@@ -3033,7 +3063,7 @@ schema:
 
     #[test]
     fn delete_node_cascades_to_embedding() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         make_item(&mut engine, "n1");
         engine
             .set_embedding("g1", "Item", "n1", &[0.5, 0.5])
@@ -3044,7 +3074,7 @@ schema:
 
     #[test]
     fn scan_embeddings_by_type_returns_all_and_only_that_type() {
-        let mut engine = StorageEngine::new_in_memory(embedding_schema());
+        let mut engine = test_engine(embedding_schema());
         for id in ["a", "b", "c"] {
             make_item(&mut engine, id);
         }
@@ -3175,7 +3205,7 @@ schema:
         // After clear_graph("g1"), every g1 key — nodes, edges, both
         // adjacency CFs, and embeddings — must be gone, but g2's data
         // must survive untouched. Idempotent: a second clear is Ok.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         seed_alice_bob(&mut engine, &["g1", "g2"], true);
 
         engine.clear_graph("g1").unwrap();
@@ -3242,7 +3272,7 @@ schema:
         // get_node populates the CF_NODES read cache; clear_graph
         // prefix-deletes CF_NODES, which must also invalidate the cache
         // or a subsequent read would serve the cleared node from cache.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
             .unwrap();
@@ -3262,7 +3292,7 @@ schema:
         // Regression: a naive prefix without the trailing separator
         // would let `clear_graph("g1")` also wipe "g10", "g1_test", etc.
         // The graph_prefix helper appends \x00, so the boundary is exact.
-        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let mut engine = test_engine(test_schema());
         engine
             .create_node("g1", "Character", "a", props! { "name" => "A" })
             .unwrap();

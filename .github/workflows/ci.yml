@@ -64,6 +64,25 @@ jobs:
       - run: cargo build --release --bin dynograph
       - run: ./scripts/smoke-test.sh
 
+  storage-rocksdb:
+    # Backend matrix: the storage engine suite also runs against a real
+    # temp-dir RocksDB store, not just the in-memory map (build-test
+    # already covers in-memory). The C1 `commit_batch` panic reached main
+    # because every batch test was in-memory and the array-indexed
+    # column-family handles only diverge on RocksDB — this leg is the
+    # guard against that whole class. `test_engine` in the storage tests
+    # honors DYNOGRAPH_TEST_BACKEND.
+    runs-on: ubuntu-latest
+    env:
+      DYNOGRAPH_TEST_BACKEND: rocksdb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master 2026-05-04
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p dynograph-storage
+
   msrv-check:
     # Builds against the declared MSRV (Cargo.toml's `rust-version`).
     # Catches "we accidentally used a feature stabilized after MSRV"
