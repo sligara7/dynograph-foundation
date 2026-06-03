@@ -1786,6 +1786,19 @@ async fn similar_zero_top_k_returns_400() {
 }
 
 #[tokio::test]
+async fn similar_over_max_limit_top_k_returns_400() {
+    // top_k is now bounded by MAX_LIMIT (10_000) like every other
+    // result-bearing route — an unbounded top_k is a DoS vector.
+    let app = build_app_with_item_graph().await;
+    let (status, _) = post_similar(
+        &app,
+        json!({ "embedding": [0.1, 0.2], "top_k": 10_001, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn similar_on_missing_graph_returns_404() {
     let app = build_app();
     let res = app
@@ -3654,6 +3667,45 @@ async fn edges_adjacent_unknown_graph_returns_404() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn edges_adjacent_default_is_not_truncated() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // No `limit` → defaults to the safety cap; char-A1's 3 edges fit.
+    let (status, resp) = post_adjacent(&app, json!({"node_id": "char-A1"})).await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    assert_eq!(resp["edges"].as_array().unwrap().len(), 3);
+    assert_eq!(resp["truncated"], false);
+}
+
+#[tokio::test]
+async fn edges_adjacent_respects_limit_and_sets_truncated() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // char-A1 has 3 incident edges; cap at 1 → 1 returned, truncated.
+    let (status, resp) = post_adjacent(&app, json!({"node_id": "char-A1", "limit": 1})).await;
+    assert_eq!(status, StatusCode::OK, "got: {resp}");
+    assert_eq!(resp["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(resp["truncated"], true);
+}
+
+#[tokio::test]
+async fn edges_adjacent_rejects_out_of_range_limit() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    for bad in [json!(0), json!(10_001)] {
+        let (status, resp) = post_adjacent(&app, json!({"node_id": "char-A1", "limit": bad})).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "limit {bad} should be rejected, got: {resp}"
+        );
+    }
 }
 
 // =========================================================================
