@@ -141,6 +141,35 @@ async fn get_unknown_graph_returns_404() {
 }
 
 #[tokio::test]
+async fn malformed_graph_id_rejected_with_400_on_read_and_write_paths() {
+    // A malformed id is rejected up front (400), not merely missed
+    // (404) — both the read path (`graph_entry`) and the write paths
+    // that join the id into a filesystem path on the OnDisk backend
+    // (`delete_graph` / `replace_schema`) validate it, matching the
+    // create-time contract. `$` is outside the allowed `[A-Za-z0-9_-]`
+    // set but routes as a single path segment.
+    let app = build_app();
+    for method in ["GET", "DELETE"] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri("/v1/graphs/bad$id")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "{method} on a malformed id should be 400"
+        );
+    }
+}
+
+#[tokio::test]
 async fn create_duplicate_graph_returns_409() {
     let app = build_app();
     let body = json!({
