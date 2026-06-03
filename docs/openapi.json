@@ -877,6 +877,7 @@
           "nodes"
         ],
         "summary": "PUT semantics — full replacement of the node's property map (the\nunderlying storage call is `replace_node_properties`). PATCH is\nnot exposed because there is no merge primitive on nodes; if a\ncaller needs partial-update semantics they GET, mutate, PUT.",
+        "description": "An empty or omitted `properties` (`{}`) is a deliberate full wipe —\nPUT replaces the whole map, so `{}` clears every property. This is\nthe REST-correct reading of PUT and is intentionally NOT rejected;\ncallers that don't mean to clear should send the properties they\nwant to keep (or use the GET-mutate-PUT cycle above).",
         "operationId": "replace_node",
         "parameters": [
           {

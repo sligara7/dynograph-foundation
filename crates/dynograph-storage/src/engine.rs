@@ -683,6 +683,16 @@ impl StorageEngine {
             });
             return Ok(());
         }
+        // Invalidate cached entries under this prefix before deleting —
+        // the non-batch path must mirror what `commit_batch` does for
+        // buffered PrefixDeletes. Without this, `clear_graph` (which
+        // prefix-deletes CF_NODES) could keep serving cached nodes of a
+        // cleared graph until their TTL. The cache holds only CF_NODES
+        // bodies, so an adjacency-prefix delete here is a harmless no-op.
+        self.read_cache
+            .lock()
+            .expect("read_cache lock poisoned")
+            .invalidate_prefix(prefix);
         match &mut self.backend {
             Backend::Memory { .. } => {
                 self.backend
@@ -829,11 +839,24 @@ impl StorageEngine {
         self.validate_node_key_segments(graph_id, node_type, node_id, &properties)?;
 
         let key = crate::keys::node_key(graph_id, node_type, node_id);
+        let has_indexed = self.schema.has_indexed_properties(node_type);
+
+        // Create-or-replace semantics: if a node already exists at this id,
+        // reconcile its reverse-index entries before overwriting. A bare
+        // create would leave the prior (value -> node_id) entries dangling
+        // under stale values, corrupting `scan_nodes_by_property`. Mirrors
+        // the diff in `replace_node_properties`.
+        if has_indexed && let Some(old_bytes) = self.get(CF_NODES, &key)? {
+            let old: HashMap<String, Value> = rmp_serde::from_slice(&old_bytes)
+                .map_err(|e| DynoError::Serialization(e.to_string()))?;
+            self.delete_index_entries(graph_id, node_type, node_id, &old)?;
+        }
+
         let value =
             rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;
 
         self.put(CF_NODES, key, value)?;
-        if self.schema.has_indexed_properties(node_type) {
+        if has_indexed {
             self.write_index_entries(graph_id, node_type, node_id, &properties)?;
         }
 
@@ -2171,6 +2194,47 @@ schema:
     }
 
     #[test]
+    fn create_node_overwrite_reconciles_index() {
+        // create-or-replace: re-creating an existing id with a different
+        // indexed value must drop the old index entry, not leave it
+        // dangling (which would make scan_nodes_by_property return the
+        // node under its stale value).
+        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        engine
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sA" },
+            )
+            .unwrap();
+        // Overwrite the SAME id with a new story_id (bare create, not
+        // replace_node_properties).
+        engine
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sB" },
+            )
+            .unwrap();
+
+        assert_eq!(
+            engine
+                .scan_nodes_by_property("g1", "Fragment", "story_id", &Value::from("sA"))
+                .unwrap()
+                .len(),
+            0,
+            "stale index entry under the old value must be gone"
+        );
+        let hits_b = engine
+            .scan_nodes_by_property("g1", "Fragment", "story_id", &Value::from("sB"))
+            .unwrap();
+        assert_eq!(hits_b.len(), 1);
+        assert_eq!(hits_b[0].node_id, "f1");
+    }
+
+    #[test]
     fn delete_cleans_up_index_entries() {
         let mut engine = StorageEngine::new_in_memory(indexed_schema());
         engine
@@ -3118,6 +3182,26 @@ schema:
         // Idempotent re-clear.
         engine.clear_graph("g1").unwrap();
         engine.clear_graph("never_existed").unwrap();
+    }
+
+    #[test]
+    fn clear_graph_invalidates_read_cache() {
+        // get_node populates the CF_NODES read cache; clear_graph
+        // prefix-deletes CF_NODES, which must also invalidate the cache
+        // or a subsequent read would serve the cleared node from cache.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap();
+        // Prime the cache.
+        assert!(engine.get_node("g1", "Character", "c1").unwrap().is_some());
+
+        engine.clear_graph("g1").unwrap();
+
+        assert!(
+            engine.get_node("g1", "Character", "c1").unwrap().is_none(),
+            "cleared node must not be served from a stale read cache"
+        );
     }
 
     #[test]
