@@ -46,7 +46,7 @@ use crate::{
         NodesScanRequest, NodesScanResponse, Op, ReturnShape, WhereClause, run as run_nodes_scan,
     },
     readiness::Readiness,
-    registry::{GraphEntry, GraphRegistry, RegistryError},
+    registry::{GraphEntry, GraphRegistry, RegistryError, validate_graph_id},
     resolve_or_create::{
         MatchKind, ResolveOrCreateRequest, ResolveOrCreateResponse, ScopeFilter,
         run as run_resolve_or_create,
@@ -700,6 +700,13 @@ async fn ready(State(state): State<AppState>) -> (StatusCode, &'static str) {
 /// `state.registry.get(...).ok_or_else(...)` boilerplate that every
 /// graph-id-bearing handler shares.
 fn graph_entry(state: &AppState, id: &str) -> Result<Arc<GraphEntry>, RegistryError> {
+    // Validate the id on every read path, not just on create. Today
+    // `registry.get` is a plain map lookup so a malformed id merely
+    // misses (404), but the OnDisk backend joins the id into a
+    // filesystem path elsewhere — validating here keeps an unvalidated
+    // id from ever reaching a path join (a future-proofed 400 instead of
+    // a latent traversal footgun), and matches the create-time contract.
+    validate_graph_id(id)?;
     state
         .registry
         .get(id)

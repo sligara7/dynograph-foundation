@@ -426,6 +426,11 @@ impl GraphRegistry {
     /// need orderly drain should serialize DELETE with their own
     /// quiescence step.
     pub fn delete_graph(&self, id: &str) -> Result<(), RegistryError> {
+        // Validate before the `root.join(id)` below — same contract as
+        // `create_graph`. A registered id is always valid, so this only
+        // bites a malformed id that was never created (it'd otherwise
+        // reach the filesystem join on the OnDisk backend).
+        validate_graph_id(id)?;
         let mut graphs = self.graphs.write().expect("registry write lock poisoned");
         if graphs.remove(id).is_none() {
             return Err(RegistryError::NotFound(id.to_string()));
@@ -458,6 +463,9 @@ impl GraphRegistry {
         id: &str,
         new_schema: Schema,
     ) -> Result<Arc<str>, RegistryError> {
+        // Validate before the `root.join(&id)` in the persist closure
+        // below — same contract as `create_graph` / `delete_graph`.
+        validate_graph_id(id)?;
         let entry = self
             .get(id)
             .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
