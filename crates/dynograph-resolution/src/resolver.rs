@@ -1,7 +1,7 @@
 //! Entity resolver — combines fuzzy matching and vector similarity
 //! into the three-tier resolution system.
 
-use dynograph_core::ResolutionConfig;
+use dynograph_core::{ResolutionConfig, ResolutionStrategy};
 use dynograph_vector::{HnswIndex, cosine_similarity};
 
 use crate::fuzzy;
@@ -34,13 +34,13 @@ pub struct EntityResolver {
 }
 
 impl Default for EntityResolver {
-    /// Default thresholds: auto-merge at 90, fuzzy zone 70-89, vector cutoff 0.85.
+    /// Canonical thresholds, single-sourced from core's
+    /// `ResolutionConfig` defaults (auto-merge 90, fuzzy zone 70-89,
+    /// vector cutoff 0.85) so they can't drift from the schema. The
+    /// strategy is irrelevant here — the resolver only reads the three
+    /// thresholds.
     fn default() -> Self {
-        Self {
-            auto_merge_threshold: 90,
-            fuzzy_threshold: 70,
-            vector_threshold: 0.85,
-        }
+        Self::from_config(&ResolutionConfig::new(ResolutionStrategy::default()))
     }
 }
 
@@ -74,18 +74,19 @@ impl EntityResolver {
             return (ResolutionResult::CreateNew, Vec::new());
         }
 
-        // Phase 1: Fuzzy matching against all existing names
+        // Phase 1: Fuzzy matching against all existing names. The query
+        // is normalized once and scored against each candidate's
+        // normalized form — `PreparedName` owns the lowercase/token-sort
+        // contract so it isn't re-derived (or accidentally reordered)
+        // per candidate.
+        let query_prepared = fuzzy::PreparedName::new(query_name);
         let mut candidates: Vec<Candidate> = existing
             .iter()
-            .map(|(id, name)| {
-                let fuzzy_score = fuzzy::token_sort_ratio(query_name, name)
-                    .max(fuzzy::jaro_winkler(query_name, name));
-                Candidate {
-                    id: (*id).to_string(),
-                    name: (*name).to_string(),
-                    fuzzy_score,
-                    vector_score: None,
-                }
+            .map(|(id, name)| Candidate {
+                id: (*id).to_string(),
+                name: (*name).to_string(),
+                fuzzy_score: query_prepared.score(&fuzzy::PreparedName::new(name)),
+                vector_score: None,
             })
             .collect();
 
@@ -147,7 +148,6 @@ impl EntityResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dynograph_core::ResolutionStrategy;
     use dynograph_vector::HnswConfig;
 
     fn default_resolver() -> EntityResolver {
@@ -180,6 +180,20 @@ mod tests {
             matches!(result, ResolutionResult::AutoMerge { .. }),
             "Expected AutoMerge, got {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn token_reordered_name_auto_merges() {
+        // Exercises the token-sort branch of the (now hoisted) fuzzy
+        // scoring end-to-end: a reordered name must still auto-merge,
+        // since `token_sort_ratio` normalizes token order to 100.
+        let resolver = default_resolver();
+        let existing = [("id1", "Marcus Whitfield")];
+        let (result, _) = resolver.resolve("Whitfield Marcus", &existing, None, None);
+        assert!(
+            matches!(&result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"),
+            "reordered tokens should auto-merge, got {result:?}"
         );
     }
 

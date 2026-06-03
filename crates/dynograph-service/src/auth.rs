@@ -126,10 +126,18 @@ impl AuthProvider for BearerJwt {
         }
         let data = decode::<Claims>(token, &self.decoding_key, &self.validation)
             .map_err(|e| AuthError::new(format!("invalid token: {e}")))?;
+        // A blank `sub` would yield an empty `Identity` — an
+        // authenticated principal that names nobody. The JWT spec lets
+        // `sub` be any non-empty string; an empty (or whitespace-only)
+        // one is a malformed token, not a valid anonymous identity.
+        let sub = data.claims.sub;
+        if sub.trim().is_empty() {
+            return Err(AuthError::new("token `sub` claim is empty"));
+        }
         // Move the decoded `String` into the `Arc<str>`: `From<String>`
         // reuses the heap buffer where possible, avoiding the alloc +
         // memcpy that `Arc::from(s.as_str())` would do.
-        Ok(Identity(Arc::from(data.claims.sub)))
+        Ok(Identity(Arc::from(sub)))
     }
 }
 
@@ -215,6 +223,31 @@ mod tests {
         let provider = BearerJwt::new(secret);
         let id = provider.authenticate(&headers_with_bearer(&token)).unwrap();
         assert_eq!(&*id.0, "alice");
+    }
+
+    #[test]
+    fn bearer_jwt_rejects_empty_sub() {
+        let secret = b"correct-horse-battery-staple";
+        // Empty and whitespace-only subjects both name nobody.
+        for blank in ["", "   "] {
+            let token = mint_token(
+                secret,
+                &TestClaims {
+                    sub: blank.into(),
+                    exp: now_secs() + 60,
+                    iss: None,
+                    aud: None,
+                },
+            );
+            let provider = BearerJwt::new(secret);
+            let err = provider
+                .authenticate(&headers_with_bearer(&token))
+                .unwrap_err();
+            assert!(
+                err.message().contains("`sub` claim is empty"),
+                "blank sub {blank:?} should be rejected, got {err:?}"
+            );
+        }
     }
 
     #[test]
