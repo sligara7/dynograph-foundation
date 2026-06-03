@@ -452,6 +452,12 @@ async fn concurrency_middleware(
 /// into request extensions so downstream handlers can read the
 /// caller's user_id via `Extension<Identity>` if they need it. On
 /// failure, short-circuits with 401 + the auth error's message.
+///
+/// NOTE: no handler reads `Extension<Identity>` yet — the principal is
+/// authenticated but does not affect behavior (a valid token gets
+/// registry-wide access). This insert is deliberate forward plumbing
+/// for per-graph ACLs; until those land, identity is decoded-but-unused
+/// by design, NOT an authorization layer. (Tracked: per-graph ACL TD.)
 async fn auth_middleware(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     match state.auth.authenticate(req.headers()) {
         Ok(identity) => {
@@ -1013,6 +1019,12 @@ struct ReplaceNodeBody {
 /// underlying storage call is `replace_node_properties`). PATCH is
 /// not exposed because there is no merge primitive on nodes; if a
 /// caller needs partial-update semantics they GET, mutate, PUT.
+///
+/// An empty or omitted `properties` (`{}`) is a deliberate full wipe —
+/// PUT replaces the whole map, so `{}` clears every property. This is
+/// the REST-correct reading of PUT and is intentionally NOT rejected;
+/// callers that don't mean to clear should send the properties they
+/// want to keep (or use the GET-mutate-PUT cycle above).
 #[utoipa::path(
     put,
     path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}",

@@ -163,17 +163,23 @@ pub(crate) fn run(
         })?;
 
     // Re-read the new state from the merged result so the response
-    // reflects what's actually persisted (defensive: if a future
-    // merge_edge_properties acquires extra coercion it stays
-    // visible). Falls back to the computed values if a prop went
-    // missing somehow (unreachable: we just wrote all six).
+    // reflects exactly what's persisted. All six props were just
+    // written; if the readback finds one missing or mistyped, a storage
+    // coercion silently diverged — fail loud (500) rather than paper
+    // over it with the computed value the readback exists to verify.
+    let missing = |prop: &str| {
+        RegistryError::Storage(dynograph_core::DynoError::Storage(format!(
+            "welford_update readback: persisted edge missing/mistyped property {prop:?}"
+        )))
+    };
     Ok(WelfordUpdateResponse {
-        score: prop_f64(&merged.properties, PROP_SCORE).unwrap_or(new_state.score),
-        score_m2: prop_f64(&merged.properties, PROP_M2).unwrap_or(new_state.score_m2),
-        score_stddev: prop_f64(&merged.properties, PROP_STDDEV).unwrap_or(new_state.score_stddev),
-        score_min: prop_f64(&merged.properties, PROP_MIN).unwrap_or(new_state.score_min),
-        score_max: prop_f64(&merged.properties, PROP_MAX).unwrap_or(new_state.score_max),
-        score_count: prop_i64(&merged.properties, PROP_COUNT).unwrap_or(new_state.score_count),
+        score: prop_f64(&merged.properties, PROP_SCORE).ok_or_else(|| missing(PROP_SCORE))?,
+        score_m2: prop_f64(&merged.properties, PROP_M2).ok_or_else(|| missing(PROP_M2))?,
+        score_stddev: prop_f64(&merged.properties, PROP_STDDEV)
+            .ok_or_else(|| missing(PROP_STDDEV))?,
+        score_min: prop_f64(&merged.properties, PROP_MIN).ok_or_else(|| missing(PROP_MIN))?,
+        score_max: prop_f64(&merged.properties, PROP_MAX).ok_or_else(|| missing(PROP_MAX))?,
+        score_count: prop_i64(&merged.properties, PROP_COUNT).ok_or_else(|| missing(PROP_COUNT))?,
     })
 }
 
