@@ -1143,11 +1143,13 @@ impl StorageEngine {
     }
 
     /// Count all nodes of a given type in a graph.
-    pub fn count_nodes(&self, graph_id: &str, node_type: &str) -> usize {
+    pub fn count_nodes(&self, graph_id: &str, node_type: &str) -> Result<usize, DynoError> {
         let prefix = crate::keys::node_type_prefix(graph_id, node_type);
-        self.prefix_scan(CF_NODES, &prefix)
-            .map(|entries| entries.len())
-            .unwrap_or(0)
+        // Propagate scan failures rather than collapsing them to 0: a
+        // transient I/O error, a missing CF, or a buffer-overlay error
+        // would otherwise be indistinguishable from a genuinely empty
+        // graph, silently misleading the caller.
+        Ok(self.prefix_scan(CF_NODES, &prefix)?.len())
     }
 
     /// Scan all nodes of a given type in a graph.
@@ -1799,8 +1801,8 @@ schema:
         engine
             .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
             .unwrap();
-        assert_eq!(engine.count_nodes("g1", "Character"), 2);
-        assert_eq!(engine.count_nodes("g1", "Location"), 1);
+        assert_eq!(engine.count_nodes("g1", "Character").unwrap(), 2);
+        assert_eq!(engine.count_nodes("g1", "Location").unwrap(), 1);
     }
 
     #[test]
@@ -2161,7 +2163,7 @@ schema:
             assert_eq!(bob.properties["name"].as_str().unwrap(), "Bob");
             let edge = engine.get_edge("g1", "KNOWS", "c1", "c2").unwrap().unwrap();
             assert_eq!(edge.from_id, "c1");
-            assert_eq!(engine.count_nodes("g1", "Character"), 2);
+            assert_eq!(engine.count_nodes("g1", "Character").unwrap(), 2);
         }
     }
 
@@ -2181,8 +2183,8 @@ schema:
             .create_node("g1", "Location", "loc1", props! { "name" => "Tavern" })
             .unwrap();
 
-        assert_eq!(engine.count_nodes("g1", "Character"), 2);
-        assert_eq!(engine.count_nodes("g1", "Location"), 1);
+        assert_eq!(engine.count_nodes("g1", "Character").unwrap(), 2);
+        assert_eq!(engine.count_nodes("g1", "Location").unwrap(), 1);
 
         let chars = engine.scan_nodes("g1", "Character").unwrap();
         assert_eq!(chars.len(), 2);
