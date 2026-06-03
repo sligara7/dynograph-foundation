@@ -73,6 +73,7 @@
 //! degrades for range-only filters.
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::Value;
 use dynograph_storage::{StorageEngine, StoredNode};
@@ -88,7 +89,7 @@ use crate::validation::{validate_indexed_property, validate_limit};
 /// set?" enum query and well below pathological pasted-CSV inputs.
 pub(crate) const MAX_IN_LIST_LEN: usize = 1_000;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct NodesScanRequest {
     #[serde(rename = "type")]
     pub node_type: String,
@@ -99,14 +100,15 @@ pub(crate) struct NodesScanRequest {
     pub r#return: ReturnShape,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct WhereClause {
     pub property: String,
     pub op: Op,
+    #[schema(value_type = Object)]
     pub value: Value,
 }
 
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Op {
     Eq,
@@ -118,7 +120,7 @@ pub(crate) enum Op {
     Lte,
 }
 
-#[derive(Debug, Deserialize, Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, Deserialize, Default, PartialEq, Eq, Clone, Copy, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ReturnShape {
     #[default]
@@ -131,7 +133,7 @@ pub(crate) enum ReturnShape {
 /// node shape is the shared `NodeResponse` — same `{node_type,
 /// node_id, properties}` triple `GET /nodes` and the rest of foundation
 /// emit, so consumers can deserialize into a single struct.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(untagged)]
 pub(crate) enum NodesScanResponse {
     Ids {

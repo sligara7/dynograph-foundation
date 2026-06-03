@@ -73,6 +73,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::{EdgeEndpoint, Schema, Value};
 use dynograph_storage::StorageEngine;
@@ -80,7 +81,7 @@ use dynograph_storage::StorageEngine;
 use crate::registry::RegistryError;
 use crate::validation::{validate_indexed_property, validate_limit};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct EdgesCollectRequest {
     pub source: SourceSpec,
     pub edge_types: Vec<String>,
@@ -91,7 +92,7 @@ pub(crate) struct EdgesCollectRequest {
     pub limit: usize,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct SourceSpec {
     #[serde(rename = "type")]
     pub type_filter: SourceTypeFilter,
@@ -101,7 +102,7 @@ pub(crate) struct SourceSpec {
 
 /// Source-type matcher. Untagged so the JSON can be either a string
 /// (`"*"` or a single type name) or an array of names.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(untagged)]
 pub(crate) enum SourceTypeFilter {
     Single(String),
@@ -129,13 +130,15 @@ impl SourceTypeFilter {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = CollectPropertyFilter)]
 pub(crate) struct PropertyFilter {
     pub prop: String,
+    #[schema(value_type = Object)]
     pub value: Value,
 }
 
-#[derive(Debug, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Default, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum ResponseFormat {
     #[default]
@@ -143,12 +146,13 @@ pub(crate) enum ResponseFormat {
     Adjacency,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct CollectedEdge {
     pub edge_type: String,
     pub from_type: String,
     pub from_id: String,
     pub to_id: String,
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
     /// Present only when `resolve_target = true` AND the target node
     /// was found. Caller can rely on `target.is_some()` ↔ resolution
@@ -161,19 +165,21 @@ pub(crate) struct CollectedEdge {
     pub target: Option<TargetNode>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AdjacencyEntry {
     pub edge_type: String,
     pub to_id: String,
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<TargetNode>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct TargetNode {
     pub node_type: String,
     pub node_id: String,
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
 }
 
@@ -182,7 +188,7 @@ pub(crate) struct TargetNode {
 /// an `{"adjacency": {...}, "truncated": ...}` object for
 /// `format = "adjacency"`. Caller distinguishes by which field is
 /// present (always exactly one).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(untagged)]
 pub(crate) enum EdgesCollectResponse {
     Edges {
@@ -190,6 +196,7 @@ pub(crate) enum EdgesCollectResponse {
         truncated: bool,
     },
     Adjacency {
+        #[schema(value_type = Object)]
         adjacency: HashMap<String, Vec<AdjacencyEntry>>,
         truncated: bool,
     },

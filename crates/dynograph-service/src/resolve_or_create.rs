@@ -67,6 +67,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use dynograph_core::{ResolutionConfig, Value};
@@ -77,10 +78,11 @@ use dynograph_vector::HnswIndex;
 use crate::registry::RegistryError;
 use crate::validation::validate_indexed_property;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct ResolveOrCreateRequest {
     pub node_type: String,
     #[serde(default)]
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
     #[serde(default)]
     pub embedding: Option<Vec<f32>>,
@@ -88,13 +90,14 @@ pub(crate) struct ResolveOrCreateRequest {
     pub scope: Option<ScopeFilter>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct ScopeFilter {
     pub prop: String,
+    #[schema(value_type = Object)]
     pub value: Value,
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MatchKind {
     /// Resolver returned `AutoMerge` — fuzzy score ≥ auto_merge_threshold.
@@ -107,7 +110,7 @@ pub(crate) enum MatchKind {
     CreatedNew,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ResolveOrCreateResponse {
     pub id: String,
     pub was_created: bool,

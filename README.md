@@ -48,7 +48,20 @@ curl http://localhost:8080/health     # ok
 curl http://localhost:8080/ready      # ready
 curl http://localhost:8080/metrics    # Prometheus text
 curl http://localhost:8080/buildinfo  # JSON: version + git SHA
+curl http://localhost:8080/openapi.json  # OpenAPI 3.1 contract
 ```
+
+### API contract (OpenAPI)
+
+`GET /openapi.json` serves an OpenAPI 3.1 document generated from the
+service's handlers and wire types, so it can't drift from the running
+code. The same document is committed at
+[`docs/openapi.json`](docs/openapi.json) as the reviewed wire contract:
+point consumer codegen at it, and a CI test fails if the code changes
+the contract without the committed spec being regenerated
+(`UPDATE_OPENAPI=1 cargo test -p dynograph-service openapi_spec`). The
+spec's `info.version` tracks the crate version, so regenerate it as part
+of a release bump.
 
 Published images are tagged per release (`:0.5.6`) plus `:latest`.
 The publish workflow (`.github/workflows/release.yml`) runs on every

@@ -8,14 +8,16 @@
 use dynograph_core::Schema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use utoipa::ToSchema;
 
 pub const WIRE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SchemaResponse {
     pub id: String,
     pub wire_version: &'static str,
     pub content_hash: String,
+    #[schema(value_type = Object)]
     pub schema: Schema,
 }
 

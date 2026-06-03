@@ -11,12 +11,14 @@ use std::collections::HashMap;
 use dynograph_core::Value;
 use dynograph_storage::StoredEdge;
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct EdgeResponse {
     pub edge_type: String,
     pub from_id: String,
     pub to_id: String,
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
 }
 

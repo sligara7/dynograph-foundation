@@ -6,8 +6,9 @@
 //! with `NodeResponse`; `graph_id` stays in the URL.
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct EmbeddingResponse {
     pub node_type: String,
     pub node_id: String,

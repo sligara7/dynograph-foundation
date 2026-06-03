@@ -51,6 +51,7 @@
 //! once that TD lands.
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_resolution::{jaro_winkler, token_sort_ratio};
 use dynograph_vector::{
@@ -79,7 +80,7 @@ pub(crate) const MAX_STRING_LEN: usize = 64 * 1024;
 /// variant name (`"f32"` / `"f64"`). Public so `dynograph-client`
 /// can re-export it and consumers can pass `Precision::F32` instead
 /// of stringly-typed `"f32"`.
-#[derive(Debug, Deserialize, Serialize, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Serialize, Default, Clone, Copy, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Precision {
     F32,
@@ -87,7 +88,7 @@ pub enum Precision {
     F64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct BinaryVectorRequest {
     pub a: Vec<f64>,
     pub b: Vec<f64>,
@@ -95,36 +96,36 @@ pub(crate) struct BinaryVectorRequest {
     pub precision: Precision,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct UnaryVectorRequest {
     pub v: Vec<f64>,
     #[serde(default)]
     pub precision: Precision,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct TwoVectorF64Request {
     pub a: Vec<f64>,
     pub b: Vec<f64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct PointsRequest {
     pub points: Vec<(f64, f64)>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct BinaryStringRequest {
     pub a: String,
     pub b: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ScalarResponse<T> {
     pub result: T,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct VectorResponse {
     pub result: Vec<f64>,
 }

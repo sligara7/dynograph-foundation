@@ -79,6 +79,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::Value;
 use dynograph_storage::StorageEngine;
@@ -92,13 +93,13 @@ pub(crate) const PROP_MIN: &str = "score_min";
 pub(crate) const PROP_MAX: &str = "score_max";
 pub(crate) const PROP_COUNT: &str = "score_count";
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct WelfordUpdateRequest {
     pub observation: f64,
     pub alpha: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct WelfordUpdateResponse {
     pub score: f64,
     pub score_m2: f64,

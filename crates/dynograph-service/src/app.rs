@@ -15,39 +15,243 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
+use utoipa::{IntoParams, ToSchema};
 
 use dynograph_core::{PropertyType, Schema, Value};
 use dynograph_vector::HnswIndex;
 
 use crate::{
     auth::{AuthProvider, NoAuth},
-    batch::{BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
+    batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     config::ServerLimits,
     edge_response::EdgeResponse,
-    edges_adjacent::{EdgesAdjacentRequest, run as run_edges_adjacent},
-    edges_collect::{EdgesCollectRequest, run as run_edges_collect},
+    edges_adjacent::{
+        AdjacentEdge, Direction as AdjacentDirection, EdgesAdjacentRequest, EdgesAdjacentResponse,
+        run as run_edges_adjacent,
+    },
+    edges_collect::{
+        AdjacencyEntry, CollectedEdge, EdgesCollectRequest, EdgesCollectResponse,
+        PropertyFilter as CollectPropertyFilter, ResponseFormat, SourceSpec, SourceTypeFilter,
+        TargetNode, run as run_edges_collect,
+    },
     embedding_response::EmbeddingResponse,
     metadata_response::GraphMetadataResponse,
     metrics_state::MetricsState,
     node_response::{NodeListResponse, NodeResponse},
-    nodes_exists::{NodesExistsRequest, run as run_nodes_exists},
-    nodes_scan::{NodesScanRequest, run as run_nodes_scan},
+    nodes_exists::{
+        NodeExistence, NodeQuery, NodesExistsRequest, NodesExistsResponse, run as run_nodes_exists,
+    },
+    nodes_scan::{
+        NodesScanRequest, NodesScanResponse, Op, ReturnShape, WhereClause, run as run_nodes_scan,
+    },
     readiness::Readiness,
     registry::{GraphEntry, GraphRegistry, RegistryError},
-    resolve_or_create::{ResolveOrCreateRequest, run as run_resolve_or_create},
+    resolve_or_create::{
+        MatchKind, ResolveOrCreateRequest, ResolveOrCreateResponse, ScopeFilter,
+        run as run_resolve_or_create,
+    },
     schema_response::{SchemaResponse, WIRE_VERSION},
     similar_response::{SimilarHit, SimilarResponse},
-    traverse::{TraverseRequest, run as run_traverse},
+    traverse::{
+        Direction as TraverseDirection, PropertyFilter as TraversePropertyFilter, ReturnFormat,
+        StartSpec, TraverseRequest, TraverseResponse, TraverseStep, TraversedNode,
+        run as run_traverse,
+    },
     util::{
-        BinaryStringRequest, BinaryVectorRequest, PointsRequest, TwoVectorF64Request,
-        UnaryVectorRequest, run_cosine_similarity, run_dot_product, run_euclidean_distance,
-        run_hadamard, run_jaro_winkler, run_l2_norm, run_linear_regression_slope,
-        run_pearson_correlation, run_token_sort_ratio,
+        BinaryStringRequest, BinaryVectorRequest, PointsRequest, Precision, ScalarResponse,
+        TwoVectorF64Request, UnaryVectorRequest, VectorResponse, run_cosine_similarity,
+        run_dot_product, run_euclidean_distance, run_hadamard, run_jaro_winkler, run_l2_norm,
+        run_linear_regression_slope, run_pearson_correlation, run_token_sort_ratio,
     },
     validation::validate_limit,
-    welford_update::{WelfordUpdateRequest, run as run_welford_update},
+    welford_update::{WelfordUpdateRequest, WelfordUpdateResponse, run as run_welford_update},
 };
+
+/// OpenAPI 3.1 document aggregator. Lists every annotated handler and
+/// every `ToSchema` wire type so `<ApiDoc as OpenApi>::openapi()` (served
+/// at `GET /openapi.json`) describes the whole `/v1` surface plus the ops
+/// endpoints.
+#[derive(utoipa::OpenApi)]
+#[openapi(
+    info(title = "dynograph-foundation", version = env!("CARGO_PKG_VERSION")),
+    modifiers(&AuthResponses),
+    paths(
+        // graphs
+        list_graphs,
+        create_graph,
+        get_graph,
+        get_schema,
+        replace_schema,
+        delete_graph,
+        // nodes
+        create_node,
+        list_nodes,
+        get_node,
+        replace_node,
+        delete_node,
+        // edges
+        create_edge,
+        get_edge,
+        merge_edge,
+        delete_edge,
+        // primitives
+        batch,
+        resolve_or_create,
+        edges_collect,
+        edges_adjacent,
+        nodes_exists,
+        nodes_scan,
+        welford_update,
+        traverse,
+        // embeddings + search
+        set_embedding,
+        get_embedding,
+        delete_embedding,
+        similar,
+        // util
+        util_cosine_similarity,
+        util_dot_product,
+        util_euclidean_distance,
+        util_l2_norm,
+        util_hadamard,
+        util_pearson_correlation,
+        util_linear_regression_slope,
+        util_jaro_winkler,
+        util_token_sort_ratio,
+        // ops
+        health,
+        ready,
+        buildinfo_handler,
+        metrics_handler,
+    ),
+    components(schemas(
+        // graph / node / edge / schema wire types
+        GraphListResponse,
+        CreateGraphBody,
+        SchemaResponse,
+        GraphMetadataResponse,
+        CreateNodeBody,
+        ReplaceNodeBody,
+        NodeResponse,
+        NodeListResponse,
+        CreateEdgeBody,
+        MergeEdgeBody,
+        EdgeResponse,
+        // embeddings + search
+        SetEmbeddingBody,
+        EmbeddingResponse,
+        SimilarBody,
+        SimilarHit,
+        SimilarResponse,
+        // batch
+        BatchRequest,
+        BatchOp,
+        BatchResponse,
+        BatchOpError,
+        // resolve-or-create
+        ResolveOrCreateRequest,
+        ScopeFilter,
+        MatchKind,
+        ResolveOrCreateResponse,
+        // edges:collect
+        EdgesCollectRequest,
+        SourceSpec,
+        SourceTypeFilter,
+        CollectPropertyFilter,
+        ResponseFormat,
+        CollectedEdge,
+        AdjacencyEntry,
+        TargetNode,
+        EdgesCollectResponse,
+        // edges:adjacent
+        EdgesAdjacentRequest,
+        AdjacentDirection,
+        AdjacentEdge,
+        EdgesAdjacentResponse,
+        // nodes:exists
+        NodesExistsRequest,
+        NodeQuery,
+        NodeExistence,
+        NodesExistsResponse,
+        // nodes:scan
+        NodesScanRequest,
+        WhereClause,
+        Op,
+        ReturnShape,
+        NodesScanResponse,
+        // traverse
+        TraverseRequest,
+        StartSpec,
+        TraverseStep,
+        TraverseDirection,
+        TraversePropertyFilter,
+        ReturnFormat,
+        TraversedNode,
+        TraverseResponse,
+        // welford
+        WelfordUpdateRequest,
+        WelfordUpdateResponse,
+        // util
+        Precision,
+        BinaryVectorRequest,
+        UnaryVectorRequest,
+        TwoVectorF64Request,
+        PointsRequest,
+        BinaryStringRequest,
+        ScalarResponse<f64>,
+        ScalarResponse<u32>,
+        VectorResponse,
+        // ops
+        BuildInfoResponse,
+    )),
+    tags(
+        (name = "graphs", description = "Graph lifecycle + schema"),
+        (name = "nodes", description = "Node CRUD"),
+        (name = "edges", description = "Edge CRUD"),
+        (name = "embeddings", description = "Per-node embeddings"),
+        (name = "search", description = "Vector similarity search"),
+        (name = "primitives", description = "Composite graph primitives (batch, resolve, edges:*, nodes:*, traverse, welford)"),
+        (name = "util", description = "Stateless pure-math utilities"),
+        (name = "ops", description = "Health, readiness, metrics, build info"),
+    )
+)]
+pub struct ApiDoc;
+
+/// Documents the cross-cutting 401 that `auth_middleware` can return on
+/// every `/v1` route when bearer auth is configured. Modeled once as a
+/// modifier rather than repeated in 30 `#[utoipa::path]` blocks — the
+/// 401 comes from middleware, not the handlers. (Default config is
+/// `noauth`, hence "when bearer auth is enabled".)
+struct AuthResponses;
+
+impl utoipa::Modify for AuthResponses {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        use utoipa::openapi::{RefOr, Response};
+        for (path, item) in openapi.paths.paths.iter_mut() {
+            if !path.starts_with("/v1/") {
+                continue;
+            }
+            let ops = [
+                item.get.as_mut(),
+                item.post.as_mut(),
+                item.put.as_mut(),
+                item.delete.as_mut(),
+                item.patch.as_mut(),
+            ];
+            for op in ops.into_iter().flatten() {
+                op.responses
+                    .responses
+                    .entry("401".to_string())
+                    .or_insert_with(|| {
+                        RefOr::T(Response::new(
+                            "missing or invalid credentials (when bearer auth is enabled)",
+                        ))
+                    });
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -195,6 +399,7 @@ pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/buildinfo", get(buildinfo_handler))
+        .route("/openapi.json", get(openapi_json))
         .merge(observed_public)
         // Global: body-size cap (413) + per-request timeout (408) apply
         // to every route, probes included — probes are cheap so neither
@@ -292,6 +497,12 @@ async fn metrics_middleware(State(state): State<AppState>, req: Request, next: N
 /// gauge surfaces in `/metrics`, JSON-shaped for callers that don't
 /// want to parse Prometheus text format. Public; same auth/middleware
 /// posture as `/metrics`.
+#[utoipa::path(
+    get,
+    path = "/buildinfo",
+    responses((status = 200, description = "build provenance", body = BuildInfoResponse)),
+    tag = "ops",
+)]
 async fn buildinfo_handler(State(state): State<AppState>) -> impl IntoResponse {
     Json(BuildInfoResponse::new(state.metrics.uptime_secs()))
 }
@@ -304,6 +515,12 @@ async fn buildinfo_handler(State(state): State<AppState>) -> impl IntoResponse {
 /// recording every scrape into the request-counter series, which
 /// would inflate cardinality and mostly measure Prometheus's own
 /// scrape interval.
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    responses((status = 200, description = "Prometheus text-format metrics", body = String)),
+    tag = "ops",
+)]
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     use std::fmt::Write;
     let mut out = String::new();
@@ -435,6 +652,18 @@ fn emit_hnsw_metric(
     }
 }
 
+/// Serve the generated OpenAPI 3.1 document. Public — same posture as
+/// `/metrics` and `/buildinfo` (no auth, no metrics-recording layer).
+async fn openapi_json() -> impl IntoResponse {
+    Json(<ApiDoc as utoipa::OpenApi>::openapi())
+}
+
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses((status = 200, description = "process is alive", body = String)),
+    tag = "ops",
+)]
 async fn health() -> &'static str {
     "ok"
 }
@@ -443,6 +672,15 @@ async fn health() -> &'static str {
 /// the process is running. `/ready` returns 200 once the service
 /// has finished startup work (notably `rehydrate()` on the on-disk
 /// backend); 503 before that.
+#[utoipa::path(
+    get,
+    path = "/ready",
+    responses(
+        (status = 200, description = "service is ready", body = String),
+        (status = 503, description = "still starting up"),
+    ),
+    tag = "ops",
+)]
 async fn ready(State(state): State<AppState>) -> (StatusCode, &'static str) {
     if state.readiness.is_ready() {
         (StatusCode::OK, "ready")
@@ -461,23 +699,41 @@ fn graph_entry(state: &AppState, id: &str) -> Result<Arc<GraphEntry>, RegistryEr
         .ok_or_else(|| RegistryError::NotFound(id.to_string()))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct CreateGraphBody {
     id: String,
+    #[schema(value_type = Object)]
     schema: Schema,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 struct GraphListResponse {
     graphs: Vec<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/graphs",
+    responses((status = 200, description = "graph ids", body = GraphListResponse)),
+    tag = "graphs",
+)]
 async fn list_graphs(State(state): State<AppState>) -> Json<GraphListResponse> {
     Json(GraphListResponse {
         graphs: state.registry.list_ids(),
     })
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/graphs",
+    request_body = CreateGraphBody,
+    responses(
+        (status = 201, description = "graph created", body = SchemaResponse),
+        (status = 400, description = "invalid request"),
+        (status = 409, description = "graph already exists"),
+    ),
+    tag = "graphs",
+)]
 async fn create_graph(
     State(state): State<AppState>,
     Json(body): Json<CreateGraphBody>,
@@ -489,6 +745,16 @@ async fn create_graph(
 }
 
 /// Metadata-only — see `GET /v1/graphs/{id}/schema` for the full schema.
+#[utoipa::path(
+    get,
+    path = "/v1/graphs/{id}",
+    params(("id" = String, Path, description = "graph id")),
+    responses(
+        (status = 200, description = "graph metadata", body = GraphMetadataResponse),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "graphs",
+)]
 async fn get_graph(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -500,6 +766,16 @@ async fn get_graph(
 
 /// Full schema view: same shape consumed by generation_plus codegen
 /// (matches storyflow's C-partial `build_schema_contract` output).
+#[utoipa::path(
+    get,
+    path = "/v1/graphs/{id}/schema",
+    params(("id" = String, Path, description = "graph id")),
+    responses(
+        (status = 200, description = "full schema", body = SchemaResponse),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "graphs",
+)]
 async fn get_schema(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -514,6 +790,18 @@ async fn get_schema(
 
 /// Replace a graph's schema. Compat rules + atomicity guarantees
 /// live on `GraphRegistry::replace_schema`; this is a thin wrapper.
+#[utoipa::path(
+    put,
+    path = "/v1/graphs/{id}/schema",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = Object,
+    responses(
+        (status = 200, description = "schema replaced", body = SchemaResponse),
+        (status = 400, description = "incompatible schema change"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "graphs",
+)]
 async fn replace_schema(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -527,6 +815,16 @@ async fn replace_schema(
     Ok(Json(response).into_response())
 }
 
+#[utoipa::path(
+    delete,
+    path = "/v1/graphs/{id}",
+    params(("id" = String, Path, description = "graph id")),
+    responses(
+        (status = 204, description = "graph deleted"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "graphs",
+)]
 async fn delete_graph(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -535,14 +833,27 @@ async fn delete_graph(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct CreateNodeBody {
     node_type: String,
     node_id: String,
     #[serde(default)]
+    #[schema(value_type = Object)]
     properties: HashMap<String, Value>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/nodes",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = CreateNodeBody,
+    responses(
+        (status = 201, description = "node created", body = NodeResponse),
+        (status = 400, description = "invalid request / schema violation"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "nodes",
+)]
 async fn create_node(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -560,7 +871,8 @@ async fn create_node(
     Ok((StatusCode::CREATED, Json(NodeResponse::from(stored))).into_response())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 struct ListNodesQuery {
     #[serde(rename = "type")]
     node_type: String,
@@ -573,6 +885,20 @@ struct ListNodesQuery {
 /// of it is a 400. `value` arrives as a URL string and is coerced to
 /// the schema-declared `PropertyType` for the property; coerce
 /// failures are 400, not silent zero-result.
+#[utoipa::path(
+    get,
+    path = "/v1/graphs/{id}/nodes",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ListNodesQuery,
+    ),
+    responses(
+        (status = 200, description = "matching nodes", body = NodeListResponse),
+        (status = 400, description = "invalid filter"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "nodes",
+)]
 async fn list_nodes(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -646,6 +972,20 @@ fn coerce_query_value(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("node_type" = String, Path, description = "node type"),
+        ("node_id" = String, Path, description = "node id"),
+    ),
+    responses(
+        (status = 200, description = "the node", body = NodeResponse),
+        (status = 404, description = "graph or node not found"),
+    ),
+    tag = "nodes",
+)]
 async fn get_node(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -662,9 +1002,10 @@ async fn get_node(
     Ok(Json(NodeResponse::from(stored)).into_response())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct ReplaceNodeBody {
     #[serde(default)]
+    #[schema(value_type = Object)]
     properties: HashMap<String, Value>,
 }
 
@@ -672,6 +1013,22 @@ struct ReplaceNodeBody {
 /// underlying storage call is `replace_node_properties`). PATCH is
 /// not exposed because there is no merge primitive on nodes; if a
 /// caller needs partial-update semantics they GET, mutate, PUT.
+#[utoipa::path(
+    put,
+    path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("node_type" = String, Path, description = "node type"),
+        ("node_id" = String, Path, description = "node id"),
+    ),
+    request_body = ReplaceNodeBody,
+    responses(
+        (status = 200, description = "node replaced", body = NodeResponse),
+        (status = 400, description = "schema violation"),
+        (status = 404, description = "graph or node not found"),
+    ),
+    tag = "nodes",
+)]
 async fn replace_node(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -689,6 +1046,20 @@ async fn replace_node(
     Ok(Json(NodeResponse::from(stored)).into_response())
 }
 
+#[utoipa::path(
+    delete,
+    path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("node_type" = String, Path, description = "node type"),
+        ("node_id" = String, Path, description = "node id"),
+    ),
+    responses(
+        (status = 204, description = "node deleted"),
+        (status = 404, description = "graph or node not found"),
+    ),
+    tag = "nodes",
+)]
 async fn delete_node(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -718,7 +1089,7 @@ async fn delete_node(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct CreateEdgeBody {
     edge_type: String,
     from_type: String,
@@ -726,9 +1097,22 @@ struct CreateEdgeBody {
     to_type: String,
     to_id: String,
     #[serde(default)]
+    #[schema(value_type = Object)]
     properties: HashMap<String, Value>,
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/edges",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = CreateEdgeBody,
+    responses(
+        (status = 201, description = "edge created", body = EdgeResponse),
+        (status = 400, description = "invalid request / schema violation"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "edges",
+)]
 async fn create_edge(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -753,6 +1137,21 @@ async fn create_edge(
     Ok((StatusCode::CREATED, Json(EdgeResponse::from(stored))).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("edge_type" = String, Path, description = "edge type"),
+        ("from_id" = String, Path, description = "source node id"),
+        ("to_id" = String, Path, description = "target node id"),
+    ),
+    responses(
+        (status = 200, description = "the edge", body = EdgeResponse),
+        (status = 404, description = "graph or edge not found"),
+    ),
+    tag = "edges",
+)]
 async fn get_edge(
     State(state): State<AppState>,
     Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
@@ -774,9 +1173,10 @@ async fn get_edge(
     Ok(Json(EdgeResponse::from(stored)).into_response())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct MergeEdgeBody {
     #[serde(default)]
+    #[schema(value_type = Object)]
     properties: HashMap<String, Value>,
 }
 
@@ -785,6 +1185,23 @@ struct MergeEdgeBody {
 /// node CRUD's PUT (REPLACE) shape but with the verb flipped to match
 /// the storage primitive's asymmetry — see `replace_node_properties`
 /// docs for why nodes don't have a merge primitive.
+#[utoipa::path(
+    patch,
+    path = "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("edge_type" = String, Path, description = "edge type"),
+        ("from_id" = String, Path, description = "source node id"),
+        ("to_id" = String, Path, description = "target node id"),
+    ),
+    request_body = MergeEdgeBody,
+    responses(
+        (status = 200, description = "edge merged", body = EdgeResponse),
+        (status = 400, description = "schema violation"),
+        (status = 404, description = "graph or edge not found"),
+    ),
+    tag = "edges",
+)]
 async fn merge_edge(
     State(state): State<AppState>,
     Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
@@ -809,6 +1226,21 @@ async fn merge_edge(
     Ok(Json(EdgeResponse::from(stored)).into_response())
 }
 
+#[utoipa::path(
+    delete,
+    path = "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("edge_type" = String, Path, description = "edge type"),
+        ("from_id" = String, Path, description = "source node id"),
+        ("to_id" = String, Path, description = "target node id"),
+    ),
+    responses(
+        (status = 204, description = "edge deleted"),
+        (status = 404, description = "graph or edge not found"),
+    ),
+    tag = "edges",
+)]
 async fn delete_edge(
     State(state): State<AppState>,
     Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
@@ -838,6 +1270,18 @@ async fn delete_edge(
 /// lock so (a) ops and HNSW maintenance for any `delete_node` happen
 /// in lockstep, and (b) concurrent readers either see pre-batch or
 /// post-batch state, never a torn intermediate.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/batch",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = BatchRequest,
+    responses(
+        (status = 200, description = "all ops applied", body = BatchResponse),
+        (status = 400, description = "validation error or per-op failure", body = BatchOpError),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "primitives",
+)]
 async fn batch(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -901,6 +1345,18 @@ async fn batch(
 /// atomicity model. Whole call runs under one `with_state_write`
 /// lock so candidate scan + resolve + (create + set_embedding +
 /// HNSW insert) compose atomically.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/resolve-or-create",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ResolveOrCreateRequest,
+    responses(
+        (status = 200, description = "resolved or created", body = ResolveOrCreateResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "primitives",
+)]
 async fn resolve_or_create(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -916,6 +1372,18 @@ async fn resolve_or_create(
 /// Fan-out edge collection. See `crate::edges_collect` for wire
 /// shape, validation, and the per-node-iteration cost model.
 /// Read-only — single `with_engine_read` lock for the whole scan.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/edges:collect",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = EdgesCollectRequest,
+    responses(
+        (status = 200, description = "collected edges (edges or adjacency form)", body = EdgesCollectResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "primitives",
+)]
 async fn edges_collect(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -931,6 +1399,18 @@ async fn edges_collect(
 /// Single-node 1-hop adjacency (the per-node `outgoing_edges(id)` /
 /// `incoming_edges(id)` that `edges:collect` — fan-out by source type — does
 /// not cover). See `crate::edges_adjacent`. Read-only.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/edges:adjacent",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = EdgesAdjacentRequest,
+    responses(
+        (status = 200, description = "incident edges of one node", body = EdgesAdjacentResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "primitives",
+)]
 async fn edges_adjacent(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -947,6 +1427,18 @@ async fn edges_adjacent(
 /// wire shape and the indexed-`name` requirement. Read-only — one
 /// `with_engine_read` lock for the whole batch so the per-query
 /// scans see one consistent snapshot.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/nodes:exists",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = NodesExistsRequest,
+    responses(
+        (status = 200, description = "per-query existence results", body = NodesExistsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "primitives",
+)]
 async fn nodes_exists(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -963,6 +1455,18 @@ async fn nodes_exists(
 /// `crate::nodes_scan` for wire shape, the seven supported ops, and
 /// the seed-strategy/in-memory-filter design. Read-only — one
 /// `with_engine_read` lock for the whole scan.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/nodes:scan",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = NodesScanRequest,
+    responses(
+        (status = 200, description = "matching nodes or ids", body = NodesScanResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "primitives",
+)]
 async fn nodes_scan(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -980,6 +1484,23 @@ async fn nodes_scan(
 /// six-property convention, and pre-flight validation. Whole
 /// read-modify-write runs under one `with_engine_write` lock —
 /// concurrent updates serialize.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/edges/{edge_type}/{from_id}/{to_id}/welford_update",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("edge_type" = String, Path, description = "edge type"),
+        ("from_id" = String, Path, description = "source node id"),
+        ("to_id" = String, Path, description = "target node id"),
+    ),
+    request_body = WelfordUpdateRequest,
+    responses(
+        (status = 200, description = "updated score statistics", body = WelfordUpdateResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph or edge not found"),
+    ),
+    tag = "primitives",
+)]
 async fn welford_update(
     State(state): State<AppState>,
     Path((id, edge_type, from_id, to_id)): Path<(String, String, String, String)>,
@@ -999,6 +1520,18 @@ async fn welford_update(
 /// semantics. Read-only — single `with_engine_read` lock for the
 /// whole BFS so the candidate scans + per-node edge walks see one
 /// consistent snapshot.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/traverse",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = TraverseRequest,
+    responses(
+        (status = 200, description = "traversed nodes", body = TraverseResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph or start node not found"),
+    ),
+    tag = "primitives",
+)]
 async fn traverse(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1011,7 +1544,7 @@ async fn traverse(
     Ok(Json(response).into_response())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct SetEmbeddingBody {
     embedding: Vec<f32>,
 }
@@ -1020,6 +1553,22 @@ struct SetEmbeddingBody {
 /// Preflight order matters: dim check against any existing index
 /// runs *before* the storage write, so a mismatch rejects without
 /// on-disk rollback. Per-type dim is locked at first insert.
+#[utoipa::path(
+    put,
+    path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("node_type" = String, Path, description = "node type"),
+        ("node_id" = String, Path, description = "node id"),
+    ),
+    request_body = SetEmbeddingBody,
+    responses(
+        (status = 200, description = "embedding set", body = EmbeddingResponse),
+        (status = 400, description = "dimension mismatch / invalid request"),
+        (status = 404, description = "graph or node not found"),
+    ),
+    tag = "embeddings",
+)]
 async fn set_embedding(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -1066,6 +1615,20 @@ async fn set_embedding(
     Ok(Json(response).into_response())
 }
 
+#[utoipa::path(
+    get,
+    path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("node_type" = String, Path, description = "node type"),
+        ("node_id" = String, Path, description = "node id"),
+    ),
+    responses(
+        (status = 200, description = "the embedding", body = EmbeddingResponse),
+        (status = 404, description = "graph or embedding not found"),
+    ),
+    tag = "embeddings",
+)]
 async fn get_embedding(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -1090,6 +1653,20 @@ async fn get_embedding(
     Ok(Json(response).into_response())
 }
 
+#[utoipa::path(
+    delete,
+    path = "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
+    params(
+        ("id" = String, Path, description = "graph id"),
+        ("node_type" = String, Path, description = "node type"),
+        ("node_id" = String, Path, description = "node id"),
+    ),
+    responses(
+        (status = 204, description = "embedding deleted"),
+        (status = 404, description = "graph or embedding not found"),
+    ),
+    tag = "embeddings",
+)]
 async fn delete_embedding(
     State(state): State<AppState>,
     Path((id, node_type, node_id)): Path<(String, String, String)>,
@@ -1115,7 +1692,7 @@ async fn delete_embedding(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 struct SimilarBody {
     embedding: Vec<f32>,
     top_k: usize,
@@ -1132,6 +1709,18 @@ struct SimilarBody {
 /// If no index exists for `node_type` (no embedding has ever been
 /// set for any node of that type), returns an empty result list —
 /// the type-name is honest, just no data to search yet.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/similar",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = SimilarBody,
+    responses(
+        (status = 200, description = "nearest neighbors", body = SimilarResponse),
+        (status = 400, description = "dimension mismatch / invalid request"),
+        (status = 404, description = "graph not found"),
+    ),
+    tag = "search",
+)]
 async fn similar(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1195,48 +1784,138 @@ async fn similar(
 // trivially unit-testable.
 // =========================================================================
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/cosine_similarity",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "cosine similarity", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_cosine_similarity(
     Json(req): Json<BinaryVectorRequest>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_cosine_similarity(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/dot_product",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "dot product", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_dot_product(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
     Ok(Json(run_dot_product(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/euclidean_distance",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "euclidean distance", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_euclidean_distance(
     Json(req): Json<BinaryVectorRequest>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_euclidean_distance(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/l2_norm",
+    request_body = UnaryVectorRequest,
+    responses(
+        (status = 200, description = "L2 norm", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_l2_norm(Json(req): Json<UnaryVectorRequest>) -> Result<Response, RegistryError> {
     Ok(Json(run_l2_norm(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/hadamard",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "elementwise product", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_hadamard(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
     Ok(Json(run_hadamard(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/pearson_correlation",
+    request_body = TwoVectorF64Request,
+    responses(
+        (status = 200, description = "Pearson correlation", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error / undefined"),
+    ),
+    tag = "util",
+)]
 async fn util_pearson_correlation(
     Json(req): Json<TwoVectorF64Request>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_pearson_correlation(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/linear_regression_slope",
+    request_body = PointsRequest,
+    responses(
+        (status = 200, description = "regression slope", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error / undefined"),
+    ),
+    tag = "util",
+)]
 async fn util_linear_regression_slope(
     Json(req): Json<PointsRequest>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_linear_regression_slope(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/jaro_winkler",
+    request_body = BinaryStringRequest,
+    responses(
+        (status = 200, description = "Jaro-Winkler similarity (0..=100)", body = ScalarResponse<u32>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_jaro_winkler(
     Json(req): Json<BinaryStringRequest>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_jaro_winkler(req)?).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/util/token_sort_ratio",
+    request_body = BinaryStringRequest,
+    responses(
+        (status = 200, description = "token-sort ratio (0..=100)", body = ScalarResponse<u32>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
 async fn util_token_sort_ratio(
     Json(req): Json<BinaryStringRequest>,
 ) -> Result<Response, RegistryError> {
@@ -1281,5 +1960,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::REQUEST_TIMEOUT);
+    }
+
+    /// Contract gate: the committed `docs/openapi.json` must match the
+    /// spec generated from the code. This makes the OpenAPI document a
+    /// reviewed artifact — any change to a route or wire type that
+    /// alters the contract fails this test (and the existing CI
+    /// `cargo test`) until the spec is regenerated and committed.
+    ///
+    /// Regenerate after an intended contract change with:
+    ///   `UPDATE_OPENAPI=1 cargo test -p dynograph-service openapi_spec`
+    #[test]
+    fn openapi_spec_matches_committed_docs() {
+        use utoipa::OpenApi;
+        let generated =
+            serde_json::to_string_pretty(&ApiDoc::openapi()).expect("serialize openapi") + "\n";
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/openapi.json");
+
+        if std::env::var_os("UPDATE_OPENAPI").is_some() {
+            std::fs::write(path, &generated).expect("write docs/openapi.json");
+            return;
+        }
+
+        let committed = std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!(
+                "docs/openapi.json unreadable ({e}); regenerate with \
+                 `UPDATE_OPENAPI=1 cargo test -p dynograph-service openapi_spec`"
+            )
+        });
+        assert_eq!(
+            generated, committed,
+            "OpenAPI spec drifted from docs/openapi.json — the wire contract changed. \
+             Review the diff, then regenerate with \
+             `UPDATE_OPENAPI=1 cargo test -p dynograph-service openapi_spec`."
+        );
     }
 }

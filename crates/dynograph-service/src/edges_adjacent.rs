@@ -24,6 +24,7 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use dynograph_core::Value;
 use dynograph_storage::StorageEngine;
@@ -31,7 +32,7 @@ use dynograph_storage::StorageEngine;
 use crate::registry::RegistryError;
 use crate::validation::{MAX_LIMIT, validate_limit};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct EdgesAdjacentRequest {
     pub node_id: String,
     #[serde(default)]
@@ -52,8 +53,9 @@ fn default_limit() -> usize {
     MAX_LIMIT
 }
 
-#[derive(Debug, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Default, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "snake_case")]
+#[schema(as = AdjacentDirection)]
 pub(crate) enum Direction {
     Outgoing,
     Incoming,
@@ -61,15 +63,16 @@ pub(crate) enum Direction {
     Both,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct AdjacentEdge {
     pub edge_type: String,
     pub from_id: String,
     pub to_id: String,
+    #[schema(value_type = Object)]
     pub properties: HashMap<String, Value>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct EdgesAdjacentResponse {
     pub edges: Vec<AdjacentEdge>,
     /// `true` when more edges existed than `limit` allowed — some were
