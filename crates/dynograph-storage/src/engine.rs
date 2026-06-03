@@ -786,8 +786,9 @@ impl StorageEngine {
     /// Reject node-write key segments that contain the NUL separator
     /// *before* anything is persisted. A NUL in `graph_id`, `node_id`,
     /// or an indexed string property value would make the encoded key
-    /// ambiguous on decode (mis-split scans, forged index boundaries),
-    /// silently corrupting later reads — so we fail loud at write time.
+    /// ambiguous on decode (scans split at the wrong position, forged
+    /// index boundaries), silently corrupting later reads — so we fail
+    /// loud at write time.
     /// `node_type` is already constrained by `validate_node` (it must be
     /// a declared type), and non-indexed property values live in the
     /// msgpack body, not in keys, so neither needs checking here.

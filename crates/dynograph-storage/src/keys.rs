@@ -15,8 +15,9 @@ const SEP: u8 = 0x00;
 ///
 /// Keys join their segments with `SEP` (NUL, `0x00`), so a segment
 /// that itself contains NUL is indistinguishable from a field boundary
-/// once encoded: a scan's `splitn(_, SEP)` mis-splits it, and an index
-/// value can forge a `(value, node_id)` boundary — both silent
+/// once encoded: a scan's `splitn(_, SEP)` splits it at the wrong
+/// position, and an index value can forge a `(value, node_id)`
+/// boundary — both silent
 /// wrong-data hazards. Reject at write time (loudly) rather than
 /// persist an ambiguous key. Only NUL is rejected: it is the sole byte
 /// that breaks the encoding; other control bytes are stored verbatim.
