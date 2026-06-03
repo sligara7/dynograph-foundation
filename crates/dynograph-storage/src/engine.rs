@@ -1390,20 +1390,34 @@ impl StorageEngine {
                 }
             }
             Backend::Rocks { db } => {
-                // Resolve all 5 cf_handles up front so the per-op loop
-                // doesn't re-do the string-keyed lookup against the same
-                // five names — that's N HashMap lookups under an
-                // internal lock for an N-op batch, all redundant.
-                let handles = [
-                    db.cf_handle(CfId::Nodes.as_str()),
-                    db.cf_handle(CfId::Edges.as_str()),
-                    db.cf_handle(CfId::AdjOut.as_str()),
-                    db.cf_handle(CfId::AdjIn.as_str()),
-                    db.cf_handle(CfId::NodeIdx.as_str()),
-                ];
+                // Resolve every cf_handle once up front so the per-op
+                // loop doesn't re-do the string-keyed lookup against the
+                // same names — N redundant HashMap lookups under an
+                // internal lock for an N-op batch. `handle_for` then
+                // dispatches with an exhaustive match over `CfId` rather
+                // than indexing a fixed-size array by `cf as usize`: the
+                // array form desynced from the enum and panicked out of
+                // bounds on `CfId::Embeddings` (index 5 into 5 entries).
+                // The match makes adding a column family a compile error
+                // here instead.
+                let nodes = db.cf_handle(CfId::Nodes.as_str());
+                let edges = db.cf_handle(CfId::Edges.as_str());
+                let adj_out = db.cf_handle(CfId::AdjOut.as_str());
+                let adj_in = db.cf_handle(CfId::AdjIn.as_str());
+                let node_idx = db.cf_handle(CfId::NodeIdx.as_str());
+                let embeddings = db.cf_handle(CfId::Embeddings.as_str());
                 let handle_for = |cf: CfId| -> Result<_, DynoError> {
-                    handles[cf as usize]
-                        .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf.as_str())))
+                    // `cf_handle` returns `Option<&ColumnFamily>` (Copy),
+                    // so the arms copy the handle out by value — no clone.
+                    match cf {
+                        CfId::Nodes => nodes,
+                        CfId::Edges => edges,
+                        CfId::AdjOut => adj_out,
+                        CfId::AdjIn => adj_in,
+                        CfId::NodeIdx => node_idx,
+                        CfId::Embeddings => embeddings,
+                    }
+                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf.as_str())))
                 };
 
                 let mut batch = WriteBatch::default();
@@ -2946,6 +2960,58 @@ schema:
         let engine = StorageEngine::new_rocksdb(embedding_schema(), path).unwrap();
         let got = engine.get_embedding("g1", "Item", "n1").unwrap().unwrap();
         assert_eq!(got, v);
+    }
+
+    /// Regression for the C1 panic: a batched `delete_node` buffers a
+    /// `Delete` on `CF_EMBEDDINGS` (the embedding cascade), and on the
+    /// RocksDB backend `commit_batch` used to index a 5-element handle
+    /// array with `CfId::Embeddings as usize == 5`, panicking out of
+    /// bounds. Reachable in production via the `/batch` endpoint. The
+    /// in-memory backend keys CFs by string so it never hit this; the
+    /// bug only surfaces on RocksDB, hence the explicit backend here.
+    #[test]
+    fn rocksdb_batched_delete_node_with_embedding_commits() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(embedding_schema(), tmp.path().to_str().unwrap()).unwrap();
+
+        make_item(&mut engine, "n1");
+        engine
+            .set_embedding("g1", "Item", "n1", &[0.1_f32, 0.2, 0.3, 0.4])
+            .unwrap();
+
+        engine.begin_batch();
+        engine.delete_node("g1", "Item", "n1").unwrap();
+        let committed = engine.commit_batch().unwrap();
+
+        assert!(committed > 0, "batch should have committed ops");
+        assert!(engine.get_node("g1", "Item", "n1").unwrap().is_none());
+        assert!(
+            engine.get_embedding("g1", "Item", "n1").unwrap().is_none(),
+            "embedding cascade should have removed the sidecar embedding"
+        );
+    }
+
+    /// Companion to the above: the batched `set_embedding` *put* path
+    /// also resolves the `CF_EMBEDDINGS` handle on commit, the same
+    /// handle that was missing from the old array.
+    #[test]
+    fn rocksdb_batched_set_embedding_commits() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut engine =
+            StorageEngine::new_rocksdb(embedding_schema(), tmp.path().to_str().unwrap()).unwrap();
+
+        make_item(&mut engine, "n1");
+
+        let v = vec![0.5_f32, 0.25, 0.125, 0.0625];
+        engine.begin_batch();
+        engine.set_embedding("g1", "Item", "n1", &v).unwrap();
+        engine.commit_batch().unwrap();
+
+        assert_eq!(
+            engine.get_embedding("g1", "Item", "n1").unwrap().unwrap(),
+            v
+        );
     }
 
     #[test]
