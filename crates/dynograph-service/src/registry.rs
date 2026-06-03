@@ -123,6 +123,7 @@ fn status_for_dyno_error(e: &DynoError) -> StatusCode {
         | DynoError::InvalidEdge { .. }
         | DynoError::UnknownNodeType(_)
         | DynoError::UnknownEdgeType(_)
+        | DynoError::InvalidKeySegment { .. }
         | DynoError::Schema(_) => StatusCode::BAD_REQUEST,
         DynoError::NodeNotFound { .. } | DynoError::EdgeNotFound { .. } => StatusCode::NOT_FOUND,
         DynoError::Storage(_)
