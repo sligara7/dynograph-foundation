@@ -233,9 +233,15 @@ impl HnswIndex {
     }
 
     /// Number of live (non-tombstoned) vectors. Differs from `len()`
-    /// once anything has been removed.
+    /// once anything has been removed. `saturating_sub` guards the
+    /// invariant `tombstoned_count <= nodes.len()`: it holds today
+    /// (every tombstone marks a slot still present in `nodes`), but an
+    /// underflow here would wrap to a huge bogus count rather than fail,
+    /// so we clamp defensively instead of leaving the footgun.
     pub fn live_count(&self) -> usize {
-        self.nodes.len() - self.tombstoned_count.load(Ordering::Relaxed)
+        self.nodes
+            .len()
+            .saturating_sub(self.tombstoned_count.load(Ordering::Relaxed))
     }
 
     /// Snapshot of runtime counters for observability.
@@ -418,14 +424,21 @@ impl HnswIndex {
         self.removes_total.fetch_add(1, Ordering::Relaxed);
 
         if self.entry_point == Some(idx) {
-            // Pick any surviving live node as the new entry. Walks the
-            // nodes vec; O(n) in the size of the index. Remove is a
-            // cold path compared to search so this is acceptable.
+            // The entry point must sit at the top of the layer
+            // hierarchy (HNSW invariant). Picking the *first* live node
+            // by index can land on a level-0 leaf, which then collapses
+            // `max_level` to 0 and routes every later search through one
+            // arbitrary, poorly-connected node — search reaches < k live
+            // results. Pick the highest-level live node instead. (`idx`
+            // is already tombstoned above, so the filter excludes it.)
+            // Walks the nodes vec; O(n), but remove is a cold path
+            // compared to search so this is acceptable.
             self.entry_point = self
                 .nodes
                 .iter()
                 .enumerate()
-                .find(|(i, n)| *i != idx && !n.tombstoned)
+                .filter(|(_, n)| !n.tombstoned)
+                .max_by_key(|(_, n)| n.level)
                 .map(|(i, _)| i);
             // Recompute max_level based on the new entry's level.
             self.max_level = self.entry_point.map(|i| self.nodes[i].level).unwrap_or(0);
@@ -872,6 +885,56 @@ mod tests {
         assert_eq!(index.get_vector("id").unwrap(), &[0.0, 1.0, 0.0]);
         assert_eq!(index.live_count(), 1);
         assert_eq!(index.len(), 2, "tombstoned slot + live slot");
+    }
+
+    #[test]
+    fn remove_entry_point_reselects_highest_level_node() {
+        // Seeded so node levels are deterministic. With enough inserts
+        // the entry point sits above layer 0; removing it must promote
+        // another *top-level* live node, not an arbitrary level-0 leaf
+        // (which would collapse `max_level` to 0 and route every later
+        // search through one poorly-connected node).
+        let mut index = HnswIndex::new(make_config(4).with_seed(7));
+        for i in 0..128 {
+            let v = [i as f32, (i * 2) as f32, (i % 5) as f32, (i % 3) as f32];
+            index.insert(&format!("v{i}"), &v);
+        }
+        assert!(
+            index.max_level >= 1,
+            "seed/N should yield a multi-level index (got max_level {})",
+            index.max_level
+        );
+
+        let ep = index
+            .entry_point
+            .expect("non-empty index has an entry point");
+        let ep_id = index.nodes[ep].id.to_string();
+        assert_eq!(
+            index.nodes[ep].level, index.max_level,
+            "entry point starts at the top level"
+        );
+
+        assert!(index.remove(&ep_id));
+
+        let new_ep = index
+            .entry_point
+            .expect("still has live nodes after one remove");
+        let highest_live_level = index
+            .nodes
+            .iter()
+            .filter(|n| !n.tombstoned)
+            .map(|n| n.level)
+            .max()
+            .unwrap();
+        assert_eq!(
+            index.nodes[new_ep].level, highest_live_level,
+            "new entry point must be a highest-level live node"
+        );
+        assert_eq!(
+            index.max_level, highest_live_level,
+            "max_level tracks the new entry"
+        );
+        assert!(!index.nodes[new_ep].tombstoned, "new entry point is live");
     }
 
     #[test]
