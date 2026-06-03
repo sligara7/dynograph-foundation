@@ -167,15 +167,19 @@ pub(crate) fn run(
         validate_indexed_property(engine.schema(), &req.node_type, &scope.prop, "scope")?;
     }
 
-    // (5) Embedding pre-flight: non-empty + dim matches existing
-    // index. Both validations land 400 BEFORE any writes so a
-    // CreateNew dispatch can't tear (node created, embedding rejected).
+    // (5) Embedding pre-flight: non-empty + finite/non-degenerate + dim
+    // matches existing index. All validations land 400 BEFORE any writes
+    // so a CreateNew dispatch can't tear (node created, embedding rejected).
     if let Some(ref emb) = req.embedding {
         if emb.is_empty() {
             return Err(RegistryError::BadRequest(
                 "embedding must be non-empty".to_string(),
             ));
         }
+        // Degenerate embedding (non-finite / zero magnitude) → a 0.0
+        // vector score that quietly falls below `vector_threshold` and
+        // masquerades as a legitimate CreateNew. Reject before any write.
+        crate::util::validate_embedding_values(emb)?;
         if let Some(idx) = indexes.get(&req.node_type)
             && idx.dim() != emb.len()
         {

@@ -57,7 +57,7 @@ use dynograph_resolution::{jaro_winkler, token_sort_ratio};
 use dynograph_vector::{
     cosine_similarity, cosine_similarity_f64, dot_product, dot_product_f64, euclidean_distance,
     euclidean_distance_f64, hadamard, hadamard_f64, l2_norm, l2_norm_f64, linear_regression_slope,
-    pearson_correlation,
+    pearson_correlation, validate_similarity_vector,
 };
 
 use crate::registry::RegistryError;
@@ -171,6 +171,19 @@ fn validate_unary(v: &[f64]) -> Result<(), RegistryError> {
 
 fn cast_f32(v: &[f64]) -> Vec<f32> {
     v.iter().map(|x| *x as f32).collect()
+}
+
+/// Reject an embedding that can't produce a meaningful cosine
+/// similarity — a non-finite component (NaN/±∞) or zero magnitude.
+/// Such a vector scores a silent 0.0 against everything (looks
+/// "orthogonal," not "invalid"), so the ingest boundaries
+/// (`set_embedding`, `similar`, `resolve-or-create`) screen here and
+/// return 400 instead of admitting degenerate data into the index or
+/// resolver. Empty-ness is left to each caller's own non-empty check so
+/// the message stays specific.
+pub(crate) fn validate_embedding_values(emb: &[f32]) -> Result<(), RegistryError> {
+    validate_similarity_vector(emb)
+        .map_err(|reason| RegistryError::BadRequest(format!("invalid embedding: {reason}")))
 }
 
 // =========================================================================

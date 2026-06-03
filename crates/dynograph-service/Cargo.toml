@@ -32,3 +32,7 @@ tower = { workspace = true }
 http-body-util = { workspace = true }
 tempfile = "3"
 jsonwebtoken = { workspace = true }
+# Used by persistence tests to plant raw on-disk state (e.g. a degenerate
+# embedding the HTTP boundary would reject) and verify rehydrate fails loud.
+dynograph-storage = { path = "../dynograph-storage" }
+dynograph-core = { path = "../dynograph-core" }

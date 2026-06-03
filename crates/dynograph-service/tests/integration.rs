@@ -1606,6 +1606,24 @@ async fn put_embedding_rejects_empty_vector() {
 }
 
 #[tokio::test]
+async fn put_embedding_rejects_zero_magnitude_vector() {
+    // An all-zeros embedding (e.g. a sidecar returning zeros on empty
+    // input) has no direction — cosine scores 0.0 against everything,
+    // which reads as "orthogonal" not "broken". It must never enter the
+    // index; the boundary rejects it loudly with 400.
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    assert_eq!(
+        put_embedding(&app, "Item", "n1", &[0.0, 0.0, 0.0]).await,
+        StatusCode::BAD_REQUEST
+    );
+    // And the node must have no embedding stored — the reject ran before
+    // the storage write.
+    let (status, _) = get_embedding(&app, "Item", "n1").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn get_embedding_on_node_without_one_returns_404() {
     let app = build_app_with_item_graph().await;
     create_item(&app, "n1").await;
@@ -1749,6 +1767,22 @@ async fn similar_dim_mismatch_returns_400() {
     let (status, _) = post_similar(
         &app,
         json!({ "embedding": [1.0, 0.0], "top_k": 1, "node_type": "Item" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn similar_rejects_zero_magnitude_query() {
+    // A degenerate query (zero magnitude) scores 0.0 against every node
+    // — a silent "nothing is similar" that hides bad upstream data.
+    // Reject with 400 before touching the index.
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "n1").await;
+    put_embedding(&app, "Item", "n1", &[1.0, 0.0, 0.0]).await;
+    let (status, _) = post_similar(
+        &app,
+        json!({ "embedding": [0.0, 0.0, 0.0], "top_k": 1, "node_type": "Item" }),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -2913,6 +2947,28 @@ async fn resolve_or_create_non_string_name_returns_400() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(
         resp.as_str().unwrap_or("").contains("must be a string"),
+        "got: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_or_create_rejects_zero_magnitude_embedding() {
+    // A zero-magnitude embedding scores 0.0 < vector_threshold, which
+    // would quietly fall through to CreateNew and masquerade as a real
+    // miss. Reject at the pre-flight, before any node is created.
+    let app = build_app_with_character_graph().await;
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Aria", "story_id": "story-A"},
+            "embedding": [0.0, 0.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        resp.as_str().unwrap_or("").contains("invalid embedding"),
         "got: {resp}"
     );
 }

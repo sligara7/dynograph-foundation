@@ -17,7 +17,9 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tower::ServiceExt;
 
+use dynograph_core::Schema;
 use dynograph_service::{AppState, GraphRegistry, app};
+use dynograph_storage::StorageEngine;
 
 fn schema_body(id: &str) -> Value {
     json!({
@@ -367,6 +369,97 @@ async fn embedding_persists_through_rehydrate() {
     for (got, want) in got.iter().zip([0.25, 0.5, 0.75, 1.0].iter()) {
         assert!((got - want).abs() < 1e-6, "got {got} want {want}");
     }
+}
+
+/// V3 (#9): a degenerate embedding (zero magnitude / non-finite) on
+/// disk must NOT silently re-enter the HNSW index on restart. The HTTP
+/// ingest boundaries reject these now, but a vector persisted before
+/// that guard existed has to fail loud during rehydration — same
+/// "corrupted store" contract as the dim-drift check beside it.
+///
+/// We plant the bad state by reopening the graph's RocksDB store
+/// directly (bypassing the service's validation) and overwriting the
+/// embedding with all-zeros, then assert the next rehydrate errors.
+#[tokio::test]
+async fn rehydrate_fails_loud_on_degenerate_embedding_on_disk() {
+    let tmp = TempDir::new().unwrap();
+
+    // Round 1 (via HTTP): create graph + node + a valid embedding.
+    {
+        let (app, _registry) = build_persistent_app(tmp.path());
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs")
+                    .header("content-type", "application/json")
+                    .body(Body::from(schema_body("g1").to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let create_node = json!({
+            "node_type": "Item",
+            "node_id": "n1",
+            "properties": { "name": "widget" }
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs/g1/nodes")
+                    .header("content-type", "application/json")
+                    .body(Body::from(create_node.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+
+        let put = json!({ "embedding": [1.0, 0.0, 0.0] });
+        let res = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/v1/graphs/g1/nodes/Item/n1/embedding")
+                    .header("content-type", "application/json")
+                    .body(Body::from(put.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+    // Service dropped → RocksDB lock released.
+
+    // Plant degenerate state: reopen the store directly (the storage
+    // layer only rejects *empty* embeddings, not zero-magnitude ones —
+    // that screening lives at the service boundary) and overwrite the
+    // node's embedding with all-zeros.
+    {
+        let graph_dir = tmp.path().join("g1");
+        let schema_json = std::fs::read_to_string(graph_dir.join("schema.json")).unwrap();
+        let schema: Schema = serde_json::from_str(&schema_json).unwrap();
+        let db_path = graph_dir.join("db");
+        let mut engine = StorageEngine::new_rocksdb(schema, db_path.to_str().unwrap()).unwrap();
+        engine
+            .set_embedding("g1", "Item", "n1", &[0.0, 0.0, 0.0])
+            .expect("storage accepts zero-magnitude (no boundary here)");
+    }
+    // Direct engine dropped → RocksDB lock released.
+
+    // Round 2: rehydrate must fail loud, citing g1 + the degeneracy.
+    let (_app, registry) = build_persistent_app(tmp.path());
+    let err = registry.rehydrate().unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("degenerate") && msg.contains("g1"),
+        "expected a loud Rehydration error naming g1 + degeneracy; got: {msg}"
+    );
 }
 
 /// Slice 8b: rehydrate must rebuild the HNSW indexes from CF_EMBEDDINGS
