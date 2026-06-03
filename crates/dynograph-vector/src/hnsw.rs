@@ -905,7 +905,9 @@ mod tests {
             index.max_level
         );
 
-        let ep = index.entry_point.expect("non-empty index has an entry point");
+        let ep = index
+            .entry_point
+            .expect("non-empty index has an entry point");
         let ep_id = index.nodes[ep].id.to_string();
         assert_eq!(
             index.nodes[ep].level, index.max_level,
@@ -914,7 +916,9 @@ mod tests {
 
         assert!(index.remove(&ep_id));
 
-        let new_ep = index.entry_point.expect("still has live nodes after one remove");
+        let new_ep = index
+            .entry_point
+            .expect("still has live nodes after one remove");
         let highest_live_level = index
             .nodes
             .iter()
@@ -926,7 +930,10 @@ mod tests {
             index.nodes[new_ep].level, highest_live_level,
             "new entry point must be a highest-level live node"
         );
-        assert_eq!(index.max_level, highest_live_level, "max_level tracks the new entry");
+        assert_eq!(
+            index.max_level, highest_live_level,
+            "max_level tracks the new entry"
+        );
         assert!(!index.nodes[new_ep].tombstoned, "new entry point is live");
     }
 
