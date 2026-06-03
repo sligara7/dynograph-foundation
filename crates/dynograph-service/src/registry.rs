@@ -145,7 +145,24 @@ fn status_for_dyno_error(e: &DynoError) -> StatusCode {
 /// dual-write for `set_embedding` / `delete_embedding` / `delete_node`
 /// can't be observed mid-update.
 pub struct GraphEntry {
-    state: RwLock<GraphState>,
+    // `Arc` so the async engine wrappers can hand an owned handle to
+    // the lock to `spawn_blocking` (the closure must be `'static`).
+    // The remaining synchronous callers (`content_hash`,
+    // `hnsw_stats_snapshot` — both in-memory only, no RocksDB I/O)
+    // still `self.state.read()` unchanged via `Arc`'s `Deref`.
+    state: Arc<RwLock<GraphState>>,
+}
+
+/// Resume the original panic on the calling thread if an engine
+/// blocking task panicked (e.g. a poisoned lock). `spawn_blocking`
+/// tasks are never cancelled, so a `JoinError` here is always a panic
+/// — re-raise it loudly rather than swallowing it into a fabricated
+/// return value.
+fn unwrap_engine_task<R>(res: Result<R, tokio::task::JoinError>) -> R {
+    match res {
+        Ok(value) => value,
+        Err(join_err) => std::panic::resume_unwind(join_err.into_panic()),
+    }
 }
 
 struct GraphState {
@@ -173,11 +190,11 @@ impl GraphEntry {
         indexes: HashMap<String, HnswIndex>,
     ) -> Self {
         Self {
-            state: RwLock::new(GraphState {
+            state: Arc::new(RwLock::new(GraphState {
                 engine,
                 content_hash,
                 indexes,
-            }),
+            })),
         }
     }
 
@@ -193,58 +210,114 @@ impl GraphEntry {
             .clone()
     }
 
-    /// Run a closure with a read-lock on the engine.
-    pub fn with_engine_read<R>(&self, f: impl FnOnce(&StorageEngine) -> R) -> R {
-        let guard = self.state.read().expect("graph state read lock poisoned");
-        f(&guard.engine)
+    /// Run a closure with a read-lock on the whole `GraphState`, on a
+    /// blocking thread.
+    ///
+    /// The engine does synchronous RocksDB I/O, so running it inline
+    /// would block a tokio worker for the whole call and, under
+    /// concurrent load, starve all request handling (including
+    /// `/health`). `spawn_blocking` moves it to the blocking pool; the
+    /// closure is therefore `Send + 'static` and must own its inputs.
+    /// This is the shared engine of the four public `with_*` wrappers.
+    async fn with_read<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&GraphState) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let state = Arc::clone(&self.state);
+        let res = tokio::task::spawn_blocking(move || {
+            let guard = state.read().expect("graph state read lock poisoned");
+            f(&guard)
+        })
+        .await;
+        unwrap_engine_task(res)
     }
 
-    /// Run a closure with a write-lock on the engine.
-    pub fn with_engine_write<R>(&self, f: impl FnOnce(&mut StorageEngine) -> R) -> R {
-        let mut guard = self.state.write().expect("graph state write lock poisoned");
-        f(&mut guard.engine)
+    /// Write-lock counterpart of [`with_read`](Self::with_read).
+    async fn with_write<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut GraphState) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let state = Arc::clone(&self.state);
+        let res = tokio::task::spawn_blocking(move || {
+            let mut guard = state.write().expect("graph state write lock poisoned");
+            f(&mut guard)
+        })
+        .await;
+        unwrap_engine_task(res)
+    }
+
+    /// Run a closure with a read-lock on the engine. Blocking — see
+    /// [`with_read`](Self::with_read).
+    pub async fn with_engine_read<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&StorageEngine) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.with_read(move |s| f(&s.engine)).await
+    }
+
+    /// Run a closure with a write-lock on the engine. Blocking — see
+    /// [`with_read`](Self::with_read).
+    pub async fn with_engine_write<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StorageEngine) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.with_write(move |s| f(&mut s.engine)).await
     }
 
     /// Run a closure with a read-lock that exposes both the engine
     /// and the per-type HNSW indexes. Used by `/similar` searches
     /// (no index mutation; the engine is needed to validate the
-    /// requested `node_type` against the live schema).
-    pub(crate) fn with_state_read<R>(
-        &self,
-        f: impl FnOnce(&StorageEngine, &HashMap<String, HnswIndex>) -> R,
-    ) -> R {
-        let guard = self.state.read().expect("graph state read lock poisoned");
-        f(&guard.engine, &guard.indexes)
+    /// requested `node_type` against the live schema). Blocking — see
+    /// [`with_read`](Self::with_read).
+    pub(crate) async fn with_state_read<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&StorageEngine, &HashMap<String, HnswIndex>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.with_read(move |s| f(&s.engine, &s.indexes)).await
     }
 
     /// Snapshot of per-(node_type) HNSW stats. Used by the
     /// `/metrics` handler — runs under a brief read lock and walks
     /// the per-graph indexes. Sorted by node_type for stable scrape
     /// output.
+    ///
+    /// Kept synchronous (locks `self.state` directly rather than going
+    /// through the async `with_state_read`): it only touches in-memory
+    /// HNSW stats — no RocksDB I/O — so routing every metrics scrape
+    /// through the blocking pool would be pure overhead.
     pub fn hnsw_stats_snapshot(&self) -> Vec<(String, HnswStats)> {
-        self.with_state_read(|_, indexes| {
-            let mut out: Vec<(String, HnswStats)> = indexes
-                .iter()
-                .map(|(t, idx)| (t.clone(), idx.stats()))
-                .collect();
-            out.sort_by(|a, b| a.0.cmp(&b.0));
-            out
-        })
+        let guard = self.state.read().expect("graph state read lock poisoned");
+        let mut out: Vec<(String, HnswStats)> = guard
+            .indexes
+            .iter()
+            .map(|(t, idx)| (t.clone(), idx.stats()))
+            .collect();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
+        out
     }
 
     /// Run a closure with a write-lock that exposes both the engine
     /// and the per-type HNSW indexes. Used by `set_embedding` /
     /// `delete_embedding` / `delete_node` so the storage write and
-    /// the HNSW maintenance happen atomically.
-    pub(crate) fn with_state_write<R>(
-        &self,
-        f: impl FnOnce(&mut StorageEngine, &mut HashMap<String, HnswIndex>) -> R,
-    ) -> R {
-        let mut guard = self.state.write().expect("graph state write lock poisoned");
-        let GraphState {
-            engine, indexes, ..
-        } = &mut *guard;
-        f(engine, indexes)
+    /// the HNSW maintenance happen atomically. Blocking — see
+    /// [`with_read`](Self::with_read).
+    pub(crate) async fn with_state_write<R, F>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StorageEngine, &mut HashMap<String, HnswIndex>) -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.with_write(move |s| {
+            let GraphState {
+                engine, indexes, ..
+            } = s;
+            f(engine, indexes)
+        })
+        .await
     }
 
     /// Validate, persist, then swap. The whole sequence runs under
@@ -253,19 +326,30 @@ impl GraphEntry {
     /// in-memory mutation — no in-memory-vs-disk skew across a
     /// process restart. Returns the new content hash so the caller
     /// can construct the response without re-acquiring the lock.
-    pub(crate) fn replace_schema_with(
+    ///
+    /// `persist` does disk I/O (writes `schema.json` on the OnDisk
+    /// backend), so the whole sequence runs on a blocking thread via
+    /// [`with_write`](Self::with_write) — `validator`/`persist` are
+    /// therefore `Send + 'static`.
+    pub(crate) async fn replace_schema_with<V, P>(
         &self,
         new_schema: Schema,
-        validator: impl FnOnce(&Schema, &Schema) -> Result<(), RegistryError>,
-        persist: impl FnOnce(&Schema) -> Result<(), RegistryError>,
-    ) -> Result<Arc<str>, RegistryError> {
-        let mut guard = self.state.write().expect("graph state write lock poisoned");
-        validator(guard.engine.schema(), &new_schema)?;
-        persist(&new_schema)?;
-        let new_hash: Arc<str> = Arc::from(content_hash(&new_schema).as_str());
-        guard.engine.replace_schema(new_schema);
-        guard.content_hash = new_hash.clone();
-        Ok(new_hash)
+        validator: V,
+        persist: P,
+    ) -> Result<Arc<str>, RegistryError>
+    where
+        V: FnOnce(&Schema, &Schema) -> Result<(), RegistryError> + Send + 'static,
+        P: FnOnce(&Schema) -> Result<(), RegistryError> + Send + 'static,
+    {
+        self.with_write(move |s| {
+            validator(s.engine.schema(), &new_schema)?;
+            persist(&new_schema)?;
+            let new_hash: Arc<str> = Arc::from(content_hash(&new_schema).as_str());
+            s.engine.replace_schema(new_schema);
+            s.content_hash = new_hash.clone();
+            Ok(new_hash)
+        })
+        .await
     }
 }
 
@@ -369,31 +453,41 @@ impl GraphRegistry {
     /// check passes. Disk-write (OnDisk backends) and in-memory swap
     /// run together under one lock so a disk-write failure leaves
     /// the in-memory state untouched.
-    pub fn replace_schema(&self, id: &str, new_schema: Schema) -> Result<Arc<str>, RegistryError> {
+    pub async fn replace_schema(
+        &self,
+        id: &str,
+        new_schema: Schema,
+    ) -> Result<Arc<str>, RegistryError> {
         let entry = self
             .get(id)
             .ok_or_else(|| RegistryError::NotFound(id.to_string()))?;
-        let backend = &self.backend;
-        entry.replace_schema_with(
-            new_schema,
-            |old, new| {
-                crate::schema_evolution::validate_compatible(old, new).map_err(|errors| {
-                    let joined = errors
-                        .iter()
-                        .map(|e| e.to_string())
-                        .collect::<Vec<_>>()
-                        .join("; ");
-                    RegistryError::BadRequest(format!("schema evolution rejected: {joined}"))
-                })
-            },
-            |new| match backend {
-                StorageBackend::InMemory => Ok(()),
-                StorageBackend::OnDisk { root } => {
-                    let graph_dir = root.join(id);
-                    write_schema_file(&graph_dir, new)
-                }
-            },
-        )
+        // `replace_schema_with` runs the persist on a blocking thread,
+        // so the closure must be `Send + 'static`: hand it owned copies
+        // of the backend and id rather than borrows of `self`.
+        let backend = self.backend.clone();
+        let id = id.to_string();
+        entry
+            .replace_schema_with(
+                new_schema,
+                |old, new| {
+                    crate::schema_evolution::validate_compatible(old, new).map_err(|errors| {
+                        let joined = errors
+                            .iter()
+                            .map(|e| e.to_string())
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        RegistryError::BadRequest(format!("schema evolution rejected: {joined}"))
+                    })
+                },
+                move |new| match &backend {
+                    StorageBackend::InMemory => Ok(()),
+                    StorageBackend::OnDisk { root } => {
+                        let graph_dir = root.join(&id);
+                        write_schema_file(&graph_dir, new)
+                    }
+                },
+            )
+            .await
     }
 
     /// Snapshot of registered graph ids. Sorted for stable output.
