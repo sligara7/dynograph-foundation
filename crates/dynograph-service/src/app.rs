@@ -43,6 +43,7 @@ use crate::{
         run_hadamard, run_jaro_winkler, run_l2_norm, run_linear_regression_slope,
         run_pearson_correlation, run_token_sort_ratio,
     },
+    validation::validate_limit,
     welford_update::{WelfordUpdateRequest, run as run_welford_update},
 };
 
@@ -1072,9 +1073,10 @@ async fn similar(
             "embedding must be non-empty".to_string(),
         ));
     }
-    if top_k == 0 {
-        return Err(RegistryError::BadRequest("top_k must be > 0".to_string()));
-    }
+    // Cap `top_k` at MAX_LIMIT (and reject 0) like every other
+    // result-bearing route — an unbounded `top_k` is a DoS/OOM vector
+    // (the HNSW search collects up to that many hits).
+    validate_limit(top_k, "top_k")?;
     let response = entry
         .with_state_read(
             move |engine, indexes| -> Result<SimilarResponse, RegistryError> {

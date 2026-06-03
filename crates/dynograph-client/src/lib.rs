@@ -506,8 +506,10 @@ impl DynographClient {
     /// `POST /v1/graphs/{id}/edges:adjacent` — single-node 1-hop adjacency
     /// (the per-node `outgoing_edges(id)` / `incoming_edges(id)` that
     /// `edges:collect` does not cover). Body:
-    /// `{node_id, direction?: "outgoing"|"incoming"|"both", edge_type?}`.
-    /// Response: `{"edges": [{edge_type, from_id, to_id, properties}]}`.
+    /// `{node_id, direction?: "outgoing"|"incoming"|"both", edge_type?,
+    /// limit?: 1..=10_000 (default 10_000)}`.
+    /// Response: `{"edges": [{edge_type, from_id, to_id, properties}],
+    /// "truncated": bool}`.
     pub async fn edges_adjacent(
         &self,
         id: &str,
