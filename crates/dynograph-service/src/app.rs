@@ -7,13 +7,14 @@ use std::time::Instant;
 
 use axum::{
     Json, Router,
-    extract::{MatchedPath, Path, Query, Request, State},
+    extract::{DefaultBodyLimit, MatchedPath, Path, Query, Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::Semaphore;
 
 use dynograph_core::{PropertyType, Schema, Value};
 use dynograph_vector::HnswIndex;
@@ -22,6 +23,7 @@ use crate::{
     auth::{AuthProvider, NoAuth},
     batch::{BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
+    config::ServerLimits,
     edge_response::EdgeResponse,
     edges_adjacent::{EdgesAdjacentRequest, run as run_edges_adjacent},
     edges_collect::{EdgesCollectRequest, run as run_edges_collect},
@@ -53,6 +55,13 @@ pub struct AppState {
     pub(crate) auth: Arc<dyn AuthProvider>,
     pub(crate) readiness: Arc<Readiness>,
     pub(crate) metrics: Arc<MetricsState>,
+    /// Ingress hardening limits (body size, request timeout) read by
+    /// `app()` when building the middleware layers.
+    pub(crate) limits: ServerLimits,
+    /// Shared permit pool backing the `/v1` concurrency limit. Sized
+    /// from `limits.max_concurrent_requests`; one permit is held for
+    /// the duration of each in-flight `/v1` request.
+    pub(crate) limiter: Arc<Semaphore>,
 }
 
 impl AppState {
@@ -61,12 +70,25 @@ impl AppState {
         auth: Arc<dyn AuthProvider>,
         readiness: Arc<Readiness>,
     ) -> Self {
+        let limits = ServerLimits::default();
         Self {
             registry,
             auth,
             readiness,
             metrics: Arc::new(MetricsState::new()),
+            limiter: Arc::new(Semaphore::new(limits.max_concurrent_requests)),
+            limits,
         }
+    }
+
+    /// Override the ingress hardening limits (the `dynograph` binary
+    /// feeds these from `[server]` config; tests inject tiny values to
+    /// exercise the 413/408/503 paths). Rebuilds the concurrency permit
+    /// pool to match `max_concurrent_requests`.
+    pub fn with_limits(mut self, limits: ServerLimits) -> Self {
+        self.limiter = Arc::new(Semaphore::new(limits.max_concurrent_requests));
+        self.limits = limits;
+        self
     }
 
     /// Convenience for the dev / private-network default. Picks
@@ -146,9 +168,18 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/v1/util/jaro_winkler", post(util_jaro_winkler))
         .route("/v1/util/token_sort_ratio", post(util_token_sort_ratio))
+        // route_layer order is inner→outer in source order, so the
+        // concurrency limit (added last) wraps auth — load is shed at
+        // the door before any auth/handler work. Deliberately scoped to
+        // /v1 only: probes (/health,/ready,/metrics) below are NOT
+        // behind it, so liveness stays observable when /v1 is saturated.
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
+        ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            concurrency_middleware,
         ));
 
     let observed_public: Router<AppState> = Router::new()
@@ -160,11 +191,55 @@ pub fn app(state: AppState) -> Router {
             metrics_middleware,
         ));
 
+    let body_limit = state.limits.max_body_bytes;
     Router::new()
         .route("/metrics", get(metrics_handler))
         .route("/buildinfo", get(buildinfo_handler))
         .merge(observed_public)
+        // Global: body-size cap (413) + per-request timeout (408) apply
+        // to every route, probes included — probes are cheap so neither
+        // ever trips for them.
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            timeout_middleware,
+        ))
+        .layer(DefaultBodyLimit::max(body_limit))
         .with_state(state)
+}
+
+/// Per-request wall-clock cap → 408 when a handler runs past
+/// `limits.request_timeout`. A `spawn_blocking` storage op already in
+/// flight runs to completion in the background; this sheds the client's
+/// wait, it does not cancel the scan.
+async fn timeout_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    match tokio::time::timeout(state.limits.request_timeout, next.run(req)).await {
+        Ok(resp) => resp,
+        Err(_) => (
+            StatusCode::REQUEST_TIMEOUT,
+            "request exceeded the server time limit\n",
+        )
+            .into_response(),
+    }
+}
+
+/// In-flight cap for `/v1` → 503 (load-shed, not queue) once
+/// `limits.max_concurrent_requests` requests are already executing, so
+/// a burst of heavy scans can't exhaust the blocking pool or memory.
+/// The permit borrows `state.limiter` and is held across the handler;
+/// `state` outlives it, so a borrowed (not owned) permit suffices.
+async fn concurrency_middleware(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    match state.limiter.try_acquire() {
+        Ok(_permit) => next.run(req).await,
+        Err(_) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server at capacity, retry later\n",
+        )
+            .into_response(),
+    }
 }
 
 /// Axum middleware: runs `state.auth.authenticate(headers)` on every
@@ -1166,4 +1241,45 @@ async fn util_token_sort_ratio(
     Json(req): Json<BinaryStringRequest>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_token_sort_ratio(req)?).into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::GraphRegistry;
+    use axum::body::Body;
+    use std::time::Duration;
+    use tower::ServiceExt;
+
+    /// `timeout_middleware` returns 408 when the wrapped handler runs
+    /// past the configured `request_timeout`. Driven through a synthetic
+    /// always-slow route so the elapse is deterministic (a real endpoint
+    /// is too fast to race a timer against). The slow future is dropped
+    /// when the timeout fires, so the test finishes in ~the timeout, not
+    /// the 30 s sleep.
+    #[tokio::test]
+    async fn timeout_middleware_returns_408_for_slow_handler() {
+        async fn slow() -> &'static str {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            "unreachable"
+        }
+        let state =
+            AppState::with_no_auth(Arc::new(GraphRegistry::new())).with_limits(ServerLimits {
+                request_timeout: Duration::from_millis(10),
+                ..Default::default()
+            });
+        let app = Router::new()
+            .route("/slow", get(slow))
+            .layer(middleware::from_fn_with_state(
+                state.clone(),
+                timeout_middleware,
+            ))
+            .with_state(state);
+
+        let res = app
+            .oneshot(Request::builder().uri("/slow").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::REQUEST_TIMEOUT);
+    }
 }

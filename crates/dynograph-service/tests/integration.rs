@@ -8,7 +8,9 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use dynograph_service::{AppState, AuthProvider, BearerJwt, GraphRegistry, NoAuth, Readiness, app};
+use dynograph_service::{
+    AppState, AuthProvider, BearerJwt, GraphRegistry, NoAuth, Readiness, ServerLimits, app,
+};
 
 fn build_app() -> axum::Router {
     let registry = Arc::new(GraphRegistry::new());
@@ -5302,4 +5304,76 @@ async fn welford_unknown_graph_returns_404() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+// =========================================================================
+// Ingress hardening — body-size (413), concurrency (503), timeout (408)
+// =========================================================================
+
+fn build_app_with_limits(limits: ServerLimits) -> axum::Router {
+    let registry = Arc::new(GraphRegistry::new());
+    app(AppState::with_no_auth(registry).with_limits(limits))
+}
+
+#[tokio::test]
+async fn oversized_body_returns_413() {
+    // Tiny cap so a normal create-graph body trips it.
+    let app = build_app_with_limits(ServerLimits {
+        max_body_bytes: 50,
+        ..Default::default()
+    });
+    let body = json!({
+        "id": "g1",
+        "schema": { "name": "demo", "version": 1, "node_types": {}, "edge_types": {} }
+    });
+    assert!(body.to_string().len() > 50);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn v1_sheds_load_with_503_but_probes_stay_up() {
+    // Zero permits → every /v1 request is shed immediately. Extreme
+    // value chosen so the load-shed path is deterministic without
+    // needing N concurrent in-flight requests.
+    let app = build_app_with_limits(ServerLimits {
+        max_concurrent_requests: 0,
+        ..Default::default()
+    });
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/v1/graphs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    // Probes are not behind the concurrency layer — liveness stays up.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
 }

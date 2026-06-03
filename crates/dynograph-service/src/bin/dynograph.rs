@@ -70,7 +70,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         registry.clone(),
         cfg.auth.build_provider()?,
         readiness.clone(),
-    );
+    )
+    .with_limits(cfg.server.limits());
 
     if cfg.storage.root.is_some() {
         let rehydrated = registry.rehydrate()?;
