@@ -1353,15 +1353,16 @@ impl StorageEngine {
                 let node_idx = db.cf_handle(CfId::NodeIdx.as_str());
                 let embeddings = db.cf_handle(CfId::Embeddings.as_str());
                 let handle_for = |cf: CfId| -> Result<_, DynoError> {
+                    // `cf_handle` returns `Option<&ColumnFamily>` (Copy),
+                    // so the arms copy the handle out by value — no clone.
                     match cf {
-                        CfId::Nodes => &nodes,
-                        CfId::Edges => &edges,
-                        CfId::AdjOut => &adj_out,
-                        CfId::AdjIn => &adj_in,
-                        CfId::NodeIdx => &node_idx,
-                        CfId::Embeddings => &embeddings,
+                        CfId::Nodes => nodes,
+                        CfId::Edges => edges,
+                        CfId::AdjOut => adj_out,
+                        CfId::AdjIn => adj_in,
+                        CfId::NodeIdx => node_idx,
+                        CfId::Embeddings => embeddings,
                     }
-                    .clone()
                     .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf.as_str())))
                 };
 
