@@ -45,6 +45,9 @@ pub enum DynoError {
     #[error("Unknown edge type: {0}")]
     UnknownEdgeType(String),
 
+    #[error("Invalid {field}: {message}")]
+    InvalidKeySegment { field: String, message: String },
+
     #[error("Storage error: {0}")]
     Storage(String),
 

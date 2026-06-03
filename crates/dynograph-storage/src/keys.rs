@@ -7,9 +7,29 @@
 //! - Adjacency (in): `{graph_id}\x00{to_id}\x00{edge_type}\x00{from_id}`
 //! - Node index: `{graph_id}\x00{node_type}\x00{prop_name}\x00{prop_value}\x00{node_id}`
 
-use dynograph_core::Value;
+use dynograph_core::{DynoError, Value};
 
 const SEP: u8 = 0x00;
+
+/// Reject a string that would corrupt the key encoding.
+///
+/// Keys join their segments with `SEP` (NUL, `0x00`), so a segment
+/// that itself contains NUL is indistinguishable from a field boundary
+/// once encoded: a scan's `splitn(_, SEP)` splits it at the wrong
+/// position, and an index value can forge a `(value, node_id)`
+/// boundary — both silent
+/// wrong-data hazards. Reject at write time (loudly) rather than
+/// persist an ambiguous key. Only NUL is rejected: it is the sole byte
+/// that breaks the encoding; other control bytes are stored verbatim.
+pub fn validate_key_segment(field: &str, value: &str) -> Result<(), DynoError> {
+    if value.as_bytes().contains(&SEP) {
+        return Err(DynoError::InvalidKeySegment {
+            field: field.to_string(),
+            message: "must not contain a NUL byte (0x00), the key-segment separator".to_string(),
+        });
+    }
+    Ok(())
+}
 
 /// Encode a node key.
 pub fn node_key(graph_id: &str, node_type: &str, node_id: &str) -> Vec<u8> {
@@ -301,6 +321,32 @@ mod tests {
         let out_of_range = adj_out_key("g1", "alice2", "KNOWS", "bob");
         assert!(in_range.as_slice() < end.as_slice());
         assert!(out_of_range.as_slice() >= end.as_slice());
+    }
+
+    #[test]
+    fn validate_key_segment_accepts_normal_and_control_but_rejects_nul() {
+        assert!(validate_key_segment("node_id", "abc-123").is_ok());
+        // Non-NUL control bytes don't break the encoding, so they pass.
+        assert!(validate_key_segment("node_id", "a\tb\nc").is_ok());
+
+        let err = validate_key_segment("node_id", "a\x00b").unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "node_id"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn nul_in_id_would_collide_without_the_guard() {
+        // The hazard the guard prevents: a node_id containing NUL
+        // encodes to the same bytes as a different (type, id) split.
+        let sneaky = node_key("g1", "T", "a\x00b");
+        let collision = node_key("g1", "T\x00a", "b");
+        assert_eq!(
+            sneaky, collision,
+            "NUL in a segment makes two distinct tuples encode identically — \
+             validate_key_segment must reject it before this can be stored"
+        );
     }
 
     #[test]

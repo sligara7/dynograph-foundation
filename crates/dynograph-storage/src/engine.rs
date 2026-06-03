@@ -783,6 +783,36 @@ impl StorageEngine {
         Ok(())
     }
 
+    /// Reject node-write key segments that contain the NUL separator
+    /// *before* anything is persisted. A NUL in `graph_id`, `node_id`,
+    /// or an indexed string property value would make the encoded key
+    /// ambiguous on decode (scans split at the wrong position, forged
+    /// index boundaries), silently corrupting later reads — so we fail
+    /// loud at write time.
+    /// `node_type` is already constrained by `validate_node` (it must be
+    /// a declared type), and non-indexed property values live in the
+    /// msgpack body, not in keys, so neither needs checking here.
+    fn validate_node_key_segments(
+        &self,
+        graph_id: &str,
+        node_type: &str,
+        node_id: &str,
+        properties: &HashMap<String, Value>,
+    ) -> Result<(), DynoError> {
+        crate::keys::validate_key_segment("graph_id", graph_id)?;
+        crate::keys::validate_key_segment("node_id", node_id)?;
+        // Validation is `&self`, so iterate the borrowed `&str` names
+        // directly — no need for the owned-`String` copy or the
+        // has-indexed fast-path that `write_index_entries` needs on the
+        // `&mut self` write path. Empty for non-indexed types.
+        for prop_name in self.schema.indexed_properties(node_type) {
+            if let Some(Value::String(s)) = properties.get(prop_name) {
+                crate::keys::validate_key_segment(prop_name, s)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Create a node with schema validation.
     pub fn create_node(
         &mut self,
@@ -793,6 +823,10 @@ impl StorageEngine {
     ) -> Result<StoredNode, DynoError> {
         // validate_node mutates `properties` to apply schema defaults.
         self.schema.validate_node(node_type, &mut properties)?;
+        // Reject NUL-bearing key segments before any put (an orphaned
+        // CF_NODES body would otherwise outlive a later-rejected index
+        // write).
+        self.validate_node_key_segments(graph_id, node_type, node_id, &properties)?;
 
         let key = crate::keys::node_key(graph_id, node_type, node_id);
         let value =
@@ -953,6 +987,9 @@ impl StorageEngine {
 
         // validate_node mutates `properties` to apply schema defaults.
         self.schema.validate_node(node_type, &mut properties)?;
+        // Reject NUL-bearing key segments before the put — the new
+        // indexed string values are the corruption vector on replace.
+        self.validate_node_key_segments(graph_id, node_type, node_id, &properties)?;
 
         let value =
             rmp_serde::to_vec(&properties).map_err(|e| DynoError::Serialization(e.to_string()))?;
@@ -993,6 +1030,14 @@ impl StorageEngine {
         self.schema.validate_edge(edge_type, from_type, to_type)?;
         self.schema
             .validate_edge_properties(edge_type, &mut properties)?;
+        // Reject NUL-bearing key segments before any put. `edge_type`
+        // is already constrained by `validate_edge`; `graph_id` and the
+        // endpoint ids are the unguarded segments. (create_edge does
+        // not require the endpoints to pre-exist, so a NUL id here
+        // would otherwise persist a corrupt adjacency key.)
+        crate::keys::validate_key_segment("graph_id", graph_id)?;
+        crate::keys::validate_key_segment("from_id", from_id)?;
+        crate::keys::validate_key_segment("to_id", to_id)?;
 
         let edge_key = crate::keys::edge_key(graph_id, edge_type, from_id, to_id);
         let adj_out = crate::keys::adj_out_key(graph_id, from_id, edge_type, to_id);
@@ -1121,6 +1166,13 @@ impl StorageEngine {
         prop_name: &str,
         prop_value: &Value,
     ) -> Result<Vec<StoredNode>, DynoError> {
+        // Read-side mirror of the write guard: a NUL in a string query
+        // value can't match any stored key (writes reject it), so an
+        // unguarded scan would silently return empty — masking a
+        // structurally-invalid query as "no matches". Fail loud instead.
+        if let Value::String(s) = prop_value {
+            crate::keys::validate_key_segment(prop_name, s)?;
+        }
         let Some(value_bytes) = crate::keys::value_to_index_bytes(prop_value) else {
             return Ok(Vec::new());
         };
@@ -1533,6 +1585,131 @@ schema:
         assert_eq!(node.node_id, "c1");
         let fetched = engine.get_node("g1", "Character", "c1").unwrap().unwrap();
         assert_eq!(fetched.properties["name"].as_str().unwrap(), "Alice");
+    }
+
+    #[test]
+    fn create_node_rejects_nul_in_node_id() {
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let err = engine
+            .create_node("g1", "Character", "c\x001", props! { "name" => "Alice" })
+            .unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "node_id"),
+            "{err:?}"
+        );
+        // The reject must happen before any put — no orphaned body left.
+        assert_eq!(engine.count_nodes("g1", "Character").unwrap(), 0);
+    }
+
+    #[test]
+    fn create_node_rejects_nul_in_graph_id() {
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let err = engine
+            .create_node("g\x001", "Character", "c1", props! { "name" => "Alice" })
+            .unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "graph_id"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn create_node_allows_nul_in_non_indexed_property_value() {
+        // `name` is not indexed, so its value lives in the msgpack body,
+        // never in a key — a NUL there is harmless and must be allowed.
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        let node = engine
+            .create_node("g1", "Character", "c1", props! { "name" => "a\x00b" })
+            .unwrap();
+        assert_eq!(node.properties["name"].as_str().unwrap(), "a\x00b");
+        let fetched = engine.get_node("g1", "Character", "c1").unwrap().unwrap();
+        assert_eq!(fetched.properties["name"].as_str().unwrap(), "a\x00b");
+    }
+
+    #[test]
+    fn create_node_rejects_nul_in_indexed_property_value() {
+        // `story_id` IS indexed → its value becomes a key segment.
+        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        let err = engine
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "s\x00A" },
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "story_id"),
+            "{err:?}"
+        );
+        assert_eq!(engine.count_nodes("g1", "Fragment").unwrap(), 0);
+    }
+
+    #[test]
+    fn replace_node_properties_rejects_nul_in_indexed_value() {
+        let mut engine = StorageEngine::new_in_memory(indexed_schema());
+        engine
+            .create_node(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "sA" },
+            )
+            .unwrap();
+        let err = engine
+            .replace_node_properties(
+                "g1",
+                "Fragment",
+                "f1",
+                props! { "name" => "A", "story_id" => "s\x00B" },
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "story_id"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn scan_nodes_by_property_rejects_nul_in_query_value() {
+        // A NUL query value can't match any stored key, so without the
+        // guard the scan would silently return empty rather than fail.
+        let engine = StorageEngine::new_in_memory(indexed_schema());
+        let err = engine
+            .scan_nodes_by_property(
+                "g1",
+                "Fragment",
+                "story_id",
+                &Value::String("s\x00A".into()),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "story_id"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn create_edge_rejects_nul_in_endpoint_id() {
+        let mut engine = StorageEngine::new_in_memory(test_schema());
+        engine
+            .create_node("g1", "Character", "alice", props! { "name" => "A" })
+            .unwrap();
+        let err = engine
+            .create_edge(
+                "g1",
+                "KNOWS",
+                "Character",
+                "alice",
+                "Character",
+                "b\x00ob",
+                HashMap::new(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, DynoError::InvalidKeySegment { ref field, .. } if field == "to_id"),
+            "{err:?}"
+        );
     }
 
     #[test]
