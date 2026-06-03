@@ -11,10 +11,48 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Deserialize;
 
 use crate::auth::{AuthProvider, BearerJwt, NoAuth};
+
+// Defaults for the ingress hardening limits. Single source of truth so
+// the serde field defaults and `ServerLimits::default` can't drift.
+//
+// `max_body_bytes`: a binary-vector util request carries two vectors of
+// up to `MAX_VECTOR_LEN` (100_000) f64 each — ~4 MB serialized — so the
+// cap must clear that with headroom for large `/batch` payloads. Bodies
+// above it get 413 before the handler runs.
+const DEFAULT_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+// Wall-clock cap per request; long handlers shed the client wait with
+// 408. (A `spawn_blocking` storage op already in flight still runs to
+// completion in the background — this bounds the client's wait, not the
+// scan.)
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+// In-flight ceiling for `/v1` routes; beyond it new requests are shed
+// with 503 rather than piling up against the blocking pool.
+const DEFAULT_MAX_CONCURRENT_REQUESTS: usize = 1024;
+
+/// Runtime form of the ingress hardening limits (parsed `ServerConfig`
+/// with `request_timeout` as a `Duration`). Consumed by `app()` to
+/// build the body-limit / timeout / concurrency layers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ServerLimits {
+    pub max_body_bytes: usize,
+    pub request_timeout: Duration,
+    pub max_concurrent_requests: usize,
+}
+
+impl Default for ServerLimits {
+    fn default() -> Self {
+        Self {
+            max_body_bytes: DEFAULT_MAX_BODY_BYTES,
+            request_timeout: Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS),
+            max_concurrent_requests: DEFAULT_MAX_CONCURRENT_REQUESTS,
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -135,6 +173,27 @@ pub struct ServerConfig {
     /// `Config`'s `#[serde(default)]` on the `server` field).
     #[serde(default = "default_bind")]
     pub bind: String,
+    /// Max request body size in bytes (413 above it).
+    #[serde(default = "default_max_body_bytes")]
+    pub max_body_bytes: usize,
+    /// Per-request wall-clock cap in seconds (408 past it).
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
+    /// Max concurrently-executing `/v1` requests (503 beyond it).
+    #[serde(default = "default_max_concurrent_requests")]
+    pub max_concurrent_requests: usize,
+}
+
+impl ServerConfig {
+    /// Project the raw TOML fields into the runtime `ServerLimits`
+    /// (converting `request_timeout_secs` into a `Duration`).
+    pub fn limits(&self) -> ServerLimits {
+        ServerLimits {
+            max_body_bytes: self.max_body_bytes,
+            request_timeout: Duration::from_secs(self.request_timeout_secs),
+            max_concurrent_requests: self.max_concurrent_requests,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
@@ -149,10 +208,25 @@ fn default_bind() -> String {
     "127.0.0.1:8080".to_string()
 }
 
+fn default_max_body_bytes() -> usize {
+    DEFAULT_MAX_BODY_BYTES
+}
+
+fn default_request_timeout_secs() -> u64 {
+    DEFAULT_REQUEST_TIMEOUT_SECS
+}
+
+fn default_max_concurrent_requests() -> usize {
+    DEFAULT_MAX_CONCURRENT_REQUESTS
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            max_body_bytes: default_max_body_bytes(),
+            request_timeout_secs: default_request_timeout_secs(),
+            max_concurrent_requests: default_max_concurrent_requests(),
         }
     }
 }

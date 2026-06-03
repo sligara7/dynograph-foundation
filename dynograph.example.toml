@@ -17,6 +17,19 @@
 # port mapping is the access boundary.
 bind = "0.0.0.0:8080"
 
+# Ingress hardening (all optional; defaults shown). Tune for your
+# deployment's request sizes and load profile.
+#   max_body_bytes          — reject larger request bodies with 413.
+#                             Default 16 MiB (admits the largest util
+#                             vector / batch payloads with headroom).
+# max_body_bytes = 16777216
+#   request_timeout_secs    — return 408 when a request runs longer.
+# request_timeout_secs = 30
+#   max_concurrent_requests — cap simultaneously-executing /v1 requests;
+#                             excess is shed with 503. Health/ready/
+#                             metrics probes are exempt.
+# max_concurrent_requests = 1024
+
 [storage]
 # RocksDB root. When set, every graph lives at {root}/{id}/db/
 # (RocksDB store) + {root}/{id}/schema.json (canonical schema for
