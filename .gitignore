@@ -3,3 +3,9 @@
 
 # Local-only working notes (review trackers, scratch plans)
 *.local.md
+
+# proptest's failing-seed corpus. We don't persist it: CI explores fresh
+# random cases each run, and a committed file is easy to populate with
+# noise (e.g. seeds from a deliberately-broken local experiment). If a
+# real shrink is worth pinning, add it as an explicit unit test instead.
+proptest-regressions/
