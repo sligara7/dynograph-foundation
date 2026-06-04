@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-client"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "axum",
  "dynograph-core",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-core"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "serde",
  "serde_json",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-resolution"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "dynograph-core",
  "dynograph-vector",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-service"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "axum",
  "dynograph-core",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-storage"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "dynograph-core",
  "lru",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-vector"
-version = "0.5.6"
+version = "0.5.8"
 dependencies = [
  "rand 0.10.1",
 ]
