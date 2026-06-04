@@ -356,3 +356,129 @@ mod tests {
         assert_eq!(node_idx_key_node_id(&k, &prefix), Some(b"f1".as_ref()));
     }
 }
+
+/// Property tests for the key encoding. The unit tests above pin a few
+/// concrete shapes; these assert the two invariants the encoding lives
+/// or dies by — across thousands of generated inputs:
+///
+///   1. **Round-trip** — splitting an encoded key on `SEP` recovers the
+///      exact segments. Since the encoder is the only producer of `SEP`
+///      bytes (segments are NUL-free), this is also a proof of
+///      **injectivity**: two distinct tuples can't decode to one key, so
+///      they can't encode to one either. That is the ST1 collision
+///      guarantee (`validate_key_segment` enforces the NUL-free
+///      precondition at write time).
+///   2. **Prefix selection** — a scan prefix matches exactly the keys it
+///      should and no others, and `next_prefix` is a correct exclusive
+///      upper bound for the whole prefix range.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// A NUL-free key segment — the precondition `validate_key_segment`
+    /// enforces. Bounded length keeps cases small; the `[^\u{0}]` class
+    /// still draws multibyte UTF-8 and non-NUL control bytes, the inputs
+    /// most likely to trip a naive split. Empty is allowed (segments can
+    /// legitimately be empty at this layer).
+    fn nul_free_segment() -> impl Strategy<Value = String> {
+        "[^\u{0}]{0,12}"
+    }
+
+    /// Split an encoded key into its `SEP`-separated segments.
+    fn split_segments(key: &[u8]) -> Vec<&[u8]> {
+        key.split(|&b| b == SEP).collect()
+    }
+
+    /// A string drawn from a tiny alphabet that includes NUL, so both
+    /// the accept and reject branches of `validate_key_segment` get
+    /// exercised (a fully-random `String` would essentially never draw
+    /// U+0000).
+    fn maybe_nul_string() -> impl Strategy<Value = String> {
+        prop::collection::vec(
+            prop_oneof![Just('\u{0}'), Just('a'), Just('z'), Just('\t')],
+            0..10,
+        )
+        .prop_map(|cs| cs.into_iter().collect())
+    }
+
+    proptest! {
+        /// The guard accepts a segment iff it contains no NUL — exactly
+        /// the precondition every round-trip property below assumes.
+        #[test]
+        fn validate_key_segment_rejects_exactly_nul(s in maybe_nul_string()) {
+            prop_assert_eq!(
+                validate_key_segment("f", &s).is_ok(),
+                !s.contains('\u{0}')
+            );
+        }
+
+        #[test]
+        fn node_key_round_trips(g in nul_free_segment(), t in nul_free_segment(), id in nul_free_segment()) {
+            let key = node_key(&g, &t, &id);
+            let parts = split_segments(&key);
+            prop_assert_eq!(parts, vec![g.as_bytes(), t.as_bytes(), id.as_bytes()]);
+        }
+
+        #[test]
+        fn edge_key_round_trips(g in nul_free_segment(), t in nul_free_segment(), from in nul_free_segment(), to in nul_free_segment()) {
+            let key = edge_key(&g, &t, &from, &to);
+            let parts = split_segments(&key);
+            prop_assert_eq!(parts, vec![g.as_bytes(), t.as_bytes(), from.as_bytes(), to.as_bytes()]);
+        }
+
+        #[test]
+        fn node_idx_key_round_trips(g in nul_free_segment(), t in nul_free_segment(), p in nul_free_segment(), v in nul_free_segment(), id in nul_free_segment()) {
+            let key = node_idx_key(&g, &t, &p, v.as_bytes(), &id);
+            let parts = split_segments(&key);
+            prop_assert_eq!(
+                parts,
+                vec![g.as_bytes(), t.as_bytes(), p.as_bytes(), v.as_bytes(), id.as_bytes()]
+            );
+        }
+
+        /// The headline ST1 property: distinct NUL-free node tuples never
+        /// encode to the same bytes. (Implied by round-trip, asserted
+        /// directly so a regression names the right thing.)
+        #[test]
+        fn distinct_node_tuples_never_collide(
+            a in (nul_free_segment(), nul_free_segment(), nul_free_segment()),
+            b in (nul_free_segment(), nul_free_segment(), nul_free_segment()),
+        ) {
+            prop_assume!(a != b);
+            prop_assert_ne!(
+                node_key(&a.0, &a.1, &a.2),
+                node_key(&b.0, &b.1, &b.2)
+            );
+        }
+
+        /// `node_type_prefix` selects exactly the keys of its (graph,
+        /// type): every matching tuple is prefixed, and any tuple whose
+        /// (graph, type) differs is not.
+        #[test]
+        fn node_type_prefix_selects_exactly(
+            g in nul_free_segment(), t in nul_free_segment(), id in nul_free_segment(),
+            g2 in nul_free_segment(), t2 in nul_free_segment(),
+        ) {
+            let prefix = node_type_prefix(&g, &t);
+            prop_assert!(node_key(&g, &t, &id).starts_with(&prefix));
+            prop_assume!((g2.as_str(), t2.as_str()) != (g.as_str(), t.as_str()));
+            prop_assert!(!node_key(&g2, &t2, &id).starts_with(&prefix));
+        }
+
+        /// `next_prefix` is a correct exclusive upper bound: every key
+        /// that begins with `prefix` sorts strictly below it.
+        #[test]
+        fn next_prefix_upper_bounds_the_range(
+            prefix in prop::collection::vec(any::<u8>(), 1..16),
+            suffix in prop::collection::vec(any::<u8>(), 0..16),
+        ) {
+            // All-0xFF prefixes have no bounded successor by design.
+            prop_assume!(prefix.iter().any(|&b| b != 0xFF));
+            let end = next_prefix(&prefix).expect("non-all-0xFF prefix has a successor");
+            let mut key = prefix.clone();
+            key.extend_from_slice(&suffix);
+            prop_assert!(key.as_slice() < end.as_slice());
+        }
+    }
+}
