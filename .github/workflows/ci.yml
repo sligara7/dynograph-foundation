@@ -22,7 +22,7 @@ jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -41,7 +41,7 @@ jobs:
     # and stay in build-test; this leg adds only the missing coverage.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -54,7 +54,7 @@ jobs:
     # route that 500s on a fresh process — fails CI instead of shipping.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -73,7 +73,7 @@ jobs:
     env:
       DYNOGRAPH_TEST_BACKEND: rocksdb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -86,7 +86,7 @@ jobs:
     # tests and clippy may pull in dev-deps with higher MSRVs.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: "1.94.0"
@@ -99,7 +99,7 @@ jobs:
     # rejects the PR.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ./scripts/check-doc-versions.sh
 
   cargo-deny:
@@ -107,7 +107,7 @@ jobs:
     # compliance, duplicate-version detection. See deny.toml.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   typos:
@@ -116,7 +116,7 @@ jobs:
     # via _typos.toml at repo root.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: crate-ci/typos@v1.46.0
 
   semver-checks:
@@ -132,7 +132,7 @@ jobs:
     env:
       SEMVER_BASELINE_REV: v0.4.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # Need full history so cargo-semver-checks can check out the
           # baseline rev's tree.
