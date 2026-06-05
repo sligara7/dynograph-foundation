@@ -25,8 +25,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Occur, Query, QueryParser, TermQuery};
+use tantivy::query::{BooleanQuery, Occur, Query, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, STORED, STRING, Schema, TEXT, Value};
+use tantivy::tokenizer::TokenStream;
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 /// NUL byte joins `graph_id` and `node_id` into the per-document unique key.
@@ -48,9 +49,6 @@ pub enum TextError {
         #[source]
         source: tantivy::TantivyError,
     },
-    /// A query string could not be parsed by Tantivy's query parser.
-    #[error("invalid full-text query: {0}")]
-    QueryParse(String),
     /// Any other Tantivy-level failure (add/delete/commit/search).
     #[error("full-text index error: {0}")]
     Tantivy(#[from] tantivy::TantivyError),
@@ -199,12 +197,17 @@ impl TextIndex {
         Ok(())
     }
 
-    /// BM25 search within one graph.
+    /// BM25 keyword search within one graph.
     ///
-    /// `query` is parsed by Tantivy's query parser over the text field (terms,
-    /// `"quoted phrases"`, and `AND`/`OR`/`+`/`-` operators). Results are scoped
-    /// to `graph_id`, optionally restricted to one `node_type`, and capped at
-    /// `limit`, returned highest-BM25-score first.
+    /// `query` is tokenized with the same analyzer as the indexed text and
+    /// matched as a conjunction: every token must occur (AND semantics). The
+    /// raw string is **not** run through Tantivy's query grammar, so colons,
+    /// parentheses, `+`/`-`, and `field:value`-looking input are treated as
+    /// plain text — they can neither reference the index's internal fields nor
+    /// raise parse errors. A query that yields no usable tokens (empty or all
+    /// punctuation) matches nothing. Results are scoped to `graph_id`,
+    /// optionally restricted to one `node_type`, capped at `limit`, and
+    /// returned highest-BM25-score first.
     pub fn search(
         &self,
         graph_id: &str,
@@ -217,23 +220,38 @@ impl TextIndex {
         }
         let searcher = self.reader.searcher();
 
-        let parser = QueryParser::for_index(&self.index, vec![self.fields.text]);
-        let user_query = parser
-            .parse_query(query)
-            .map_err(|e| TextError::QueryParse(e.to_string()))?;
+        // Tokenize the raw input with the SAME analyzer the `text` field uses,
+        // then AND a TermQuery per token. We deliberately do NOT feed `query`
+        // to Tantivy's QueryParser: that would resolve `field:value` tokens
+        // against the index's internal fields (graph_id, node_type, uid, ...)
+        // and would error or silently change meaning on punctuation. Tokenizing
+        // treats the input as plain keywords and pins AND semantics.
+        let mut analyzer = self.index.tokenizer_for_field(self.fields.text)?;
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        {
+            let mut stream = analyzer.token_stream(query);
+            while stream.advance() {
+                let term = Term::from_field_text(self.fields.text, &stream.token().text);
+                clauses.push((
+                    Occur::Must,
+                    Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
+                ));
+            }
+        }
+        // No usable tokens (empty or all-punctuation query) → match nothing,
+        // rather than letting the bare graph-scope clause return every node.
+        if clauses.is_empty() {
+            return Ok(Vec::new());
+        }
 
-        // AND together: the user's text query, the graph scope, and (if given)
-        // the node-type filter.
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![
-            (Occur::Must, user_query),
-            (
-                Occur::Must,
-                Box::new(TermQuery::new(
-                    Term::from_field_text(self.fields.graph_id, graph_id),
-                    IndexRecordOption::Basic,
-                )),
-            ),
-        ];
+        // Scope to the graph, and optionally to one node_type.
+        clauses.push((
+            Occur::Must,
+            Box::new(TermQuery::new(
+                Term::from_field_text(self.fields.graph_id, graph_id),
+                IndexRecordOption::Basic,
+            )),
+        ));
         if let Some(nt) = node_type {
             clauses.push((
                 Occur::Must,
@@ -243,9 +261,9 @@ impl TextIndex {
                 )),
             ));
         }
-        let query = BooleanQuery::new(clauses);
+        let bool_query = BooleanQuery::new(clauses);
 
-        let hits = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+        let hits = searcher.search(&bool_query, &TopDocs::with_limit(limit).order_by_score())?;
         let mut out = Vec::with_capacity(hits.len());
         for (score, addr) in hits {
             let doc: TantivyDocument = searcher.doc(addr)?;
@@ -400,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn phrase_query_is_supported() {
+    fn multi_term_query_is_conjunctive() {
         let (_d, idx) = open_tmp();
         idx.upsert(
             "g1",
@@ -413,14 +431,68 @@ mod tests {
             "g1",
             "Document",
             "n2",
-            &fields(&[("body", "brown the quick fox")]),
+            &fields(&[("body", "only brown here")]),
         )
         .unwrap();
         idx.commit().unwrap();
 
-        let hits = idx.search("g1", "\"quick brown\"", None, 10).unwrap();
+        // Every token must occur (AND), order-independent: only n1 has both.
+        let both = idx.search("g1", "quick brown", None, 10).unwrap();
+        assert_eq!(both.len(), 1);
+        assert_eq!(both[0].node_id, "n1");
+        // A single shared term still matches both docs.
+        assert_eq!(idx.search("g1", "brown", None, 10).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn punctuation_query_is_treated_as_text_not_grammar() {
+        let (_d, idx) = open_tmp();
+        idx.upsert(
+            "g1",
+            "Document",
+            "n1",
+            &fields(&[("body", "meeting at 3 30 pm")]),
+        )
+        .unwrap();
+        idx.commit().unwrap();
+
+        // A colon-bearing query that the old QueryParser path rejected now
+        // tokenizes to plain terms (3, 30) and searches — no error.
+        let hits = idx.search("g1", "3:30", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].node_id, "n1");
+        // An all-punctuation query yields no usable tokens → empty, not error,
+        // and crucially NOT every doc in the graph.
+        assert!(
+            idx.search("g1", "!!! ??? :::", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn field_prefix_in_query_does_not_inject_a_filter() {
+        let (_d, idx) = open_tmp();
+        // A Document and a Note, neither containing the literal words below.
+        idx.upsert("g1", "Document", "d1", &fields(&[("body", "common")]))
+            .unwrap();
+        idx.upsert("g1", "Note", "x1", &fields(&[("body", "common")]))
+            .unwrap();
+        idx.commit().unwrap();
+
+        // `node_type:Note` is treated as the text tokens node/type/note, NOT as
+        // a filter on the internal node_type field. No body contains those
+        // words, so the result is empty (the old QueryParser path would have
+        // returned the Note via field injection).
+        assert!(
+            idx.search("g1", "node_type:Note", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        // The legitimate node_type PARAMETER still filters correctly.
+        let docs = idx.search("g1", "common", Some("Note"), 10).unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].node_id, "x1");
     }
 
     #[test]
@@ -437,14 +509,6 @@ mod tests {
         let hits = idx.search("g1", "persistent", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].node_id, "n1");
-    }
-
-    #[test]
-    fn invalid_query_is_a_clean_error() {
-        let (_d, idx) = open_tmp();
-        // Unbalanced quote / parser-level failure surfaces as QueryParse, not a panic.
-        let err = idx.search("g1", "title:(unbalanced", None, 10).unwrap_err();
-        assert!(matches!(err, TextError::QueryParse(_)));
     }
 
     #[test]

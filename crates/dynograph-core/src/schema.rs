@@ -402,18 +402,30 @@ impl Schema {
         }
         // `fulltext: true` is only meaningful on string-valued properties:
         // the full-text index tokenizes text. Reject it on any other type at
-        // load time (fail loud) rather than silently ignoring it later.
-        for (node_name, node_def) in &self.node_types {
-            for (prop_name, prop_def) in &node_def.properties {
+        // load time (fail loud) rather than silently ignoring it later. Node
+        // and edge properties share `PropertyDef`, so check both — an inert
+        // non-string `fulltext` flag on an edge property should still fail loud.
+        let check_fulltext = |kind: &str,
+                              owner: &str,
+                              props: &HashMap<String, PropertyDef>|
+         -> Result<(), DynoError> {
+            for (prop_name, prop_def) in props {
                 if prop_def.fulltext && prop_def.prop_type != PropertyType::String {
                     return Err(DynoError::Schema(format!(
-                        "property '{prop_name}' on node type '{node_name}' declares \
-                         fulltext: true but has type {:?}; full-text indexing is only \
-                         supported on string properties",
+                        "property '{prop_name}' on {kind} '{owner}' declares fulltext: \
+                             true but has type {:?}; full-text indexing is only supported \
+                             on string properties",
                         prop_def.prop_type,
                     )));
                 }
             }
+            Ok(())
+        };
+        for (node_name, node_def) in &self.node_types {
+            check_fulltext("node type", node_name, &node_def.properties)?;
+        }
+        for (edge_name, edge_def) in &self.edge_types {
+            check_fulltext("edge type", edge_name, &edge_def.properties)?;
         }
         Ok(())
     }
@@ -1155,6 +1167,32 @@ schema:
         // Error names the offending property and rejects the non-string type.
         assert!(msg.contains("word_count"), "got: {msg}");
         assert!(msg.contains("fulltext"), "got: {msg}");
+    }
+
+    #[test]
+    fn fulltext_on_non_string_edge_property_rejected_at_load() {
+        // The full-text index is node-only, but a non-string `fulltext` flag on
+        // an EDGE property must still fail loud rather than being silently
+        // accepted (validation covers node and edge properties symmetrically).
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Document:
+      properties:
+        title: { type: string }
+  edge_types:
+    LINKS:
+      from: Document
+      to: Document
+      properties:
+        weight: { type: float, fulltext: true }
+"#;
+        let err = Schema::from_yaml(yaml).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("weight"), "got: {msg}");
+        assert!(msg.contains("edge type"), "got: {msg}");
     }
 
     #[test]
