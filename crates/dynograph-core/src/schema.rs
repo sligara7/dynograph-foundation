@@ -113,6 +113,14 @@ pub struct PropertyDef {
     pub required: bool,
     #[serde(default)]
     pub indexed: bool,
+    /// When `true`, this property's string value is mirrored into the
+    /// full-text (inverted) index for tokenized, BM25-ranked keyword
+    /// search. Only valid on `PropertyType::String` — `validate()` rejects
+    /// it on any other type. Independent of `indexed` (which drives the
+    /// exact-match/range reverse index): a property may be one, both, or
+    /// neither.
+    #[serde(default)]
+    pub fulltext: bool,
     #[serde(default)]
     pub nullable: bool,
     #[serde(default)]
@@ -391,6 +399,21 @@ impl Schema {
         for (edge_name, edge_def) in &self.edge_types {
             self.check_endpoint(edge_name, "from", &edge_def.from)?;
             self.check_endpoint(edge_name, "to", &edge_def.to)?;
+        }
+        // `fulltext: true` is only meaningful on string-valued properties:
+        // the full-text index tokenizes text. Reject it on any other type at
+        // load time (fail loud) rather than silently ignoring it later.
+        for (node_name, node_def) in &self.node_types {
+            for (prop_name, prop_def) in &node_def.properties {
+                if prop_def.fulltext && prop_def.prop_type != PropertyType::String {
+                    return Err(DynoError::Schema(format!(
+                        "property '{prop_name}' on node type '{node_name}' declares \
+                         fulltext: true but has type {:?}; full-text indexing is only \
+                         supported on string properties",
+                        prop_def.prop_type,
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -671,6 +694,35 @@ impl Schema {
         self.node_types
             .get(node_type)
             .is_some_and(|def| def.properties.values().any(|p| p.indexed))
+    }
+
+    /// Names of properties on this node type that carry `fulltext: true` in
+    /// the schema. Used by the storage layer to decide which string values
+    /// to forward into the full-text index on create/update/delete.
+    ///
+    /// Returns an empty vec if the node type isn't in the schema — callers
+    /// that hit an unknown type would already be blocked by `validate_node`,
+    /// so no-op is the right behaviour here (mirrors `indexed_properties`).
+    pub fn fulltext_properties(&self, node_type: &str) -> Vec<&str> {
+        self.node_types
+            .get(node_type)
+            .map(|def| {
+                def.properties
+                    .iter()
+                    .filter(|(_, p)| p.fulltext)
+                    .map(|(name, _)| name.as_str())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Cheap check for whether a node type has ANY full-text property. Used
+    /// by write paths to skip full-text index work entirely when there can't
+    /// be anything to mirror.
+    pub fn has_fulltext_properties(&self, node_type: &str) -> bool {
+        self.node_types
+            .get(node_type)
+            .is_some_and(|def| def.properties.values().any(|p| p.fulltext))
     }
 
     /// All edge-type names that carry an `inference_category`, sorted for
@@ -1023,6 +1075,86 @@ schema:
         assert_eq!(char_indexed, vec!["name"]);
         assert!(schema.indexed_properties("Location").is_empty());
         assert!(schema.indexed_properties("UnknownType").is_empty());
+    }
+
+    /// Self-contained fixture for the full-text helpers/validation: a
+    /// `Document` type with two `fulltext` string props (`title`, `body`),
+    /// one plain `indexed` prop (`author`), and one untouched prop (`status`),
+    /// plus a `Tag` type with no full-text props at all.
+    fn fulltext_schema_yaml() -> &'static str {
+        r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Document:
+      properties:
+        title:  { type: string, fulltext: true }
+        body:   { type: string, fulltext: true }
+        author: { type: string, indexed: true }
+        status: { type: string }
+    Tag:
+      properties:
+        name: { type: string, indexed: true }
+  edge_types: {}
+"#
+    }
+
+    #[test]
+    fn fulltext_properties_returns_only_fulltext() {
+        let schema = Schema::from_yaml(fulltext_schema_yaml()).unwrap();
+        let mut doc_ft = schema.fulltext_properties("Document");
+        doc_ft.sort_unstable(); // HashMap iteration order isn't stable
+        assert_eq!(doc_ft, vec!["body", "title"]);
+        // `author` is indexed but NOT fulltext, and vice versa: the two index
+        // declarations are independent.
+        assert_eq!(schema.indexed_properties("Document"), vec!["author"]);
+        // A type with no full-text props, and an unknown type, both yield empty.
+        assert!(schema.fulltext_properties("Tag").is_empty());
+        assert!(schema.fulltext_properties("UnknownType").is_empty());
+    }
+
+    #[test]
+    fn has_fulltext_properties_reflects_declaration() {
+        let schema = Schema::from_yaml(fulltext_schema_yaml()).unwrap();
+        assert!(schema.has_fulltext_properties("Document"));
+        assert!(!schema.has_fulltext_properties("Tag"));
+        assert!(!schema.has_fulltext_properties("UnknownType"));
+    }
+
+    #[test]
+    fn fulltext_flag_round_trips_and_defaults_false() {
+        let schema = Schema::from_yaml(fulltext_schema_yaml()).unwrap();
+        let props = &schema.node_types["Document"].properties;
+        assert!(props["title"].fulltext);
+        // Omitted `fulltext` defaults to false.
+        assert!(!props["status"].fulltext);
+        assert!(!props["author"].fulltext);
+
+        // Survives serialize → reparse (structural round-trip).
+        let serialized = serde_yaml::to_string(&schema).unwrap();
+        let reparsed: Schema = serde_yaml::from_str(&serialized).unwrap();
+        assert!(reparsed.node_types["Document"].properties["body"].fulltext);
+        assert!(!reparsed.node_types["Document"].properties["status"].fulltext);
+    }
+
+    #[test]
+    fn fulltext_on_non_string_rejected_at_load() {
+        let yaml = r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Document:
+      properties:
+        word_count: { type: int, fulltext: true }
+  edge_types: {}
+"#;
+        let err = Schema::from_yaml(yaml).unwrap_err();
+        let msg = err.to_string();
+        // Error names the offending property and rejects the non-string type.
+        assert!(msg.contains("word_count"), "got: {msg}");
+        assert!(msg.contains("fulltext"), "got: {msg}");
     }
 
     #[test]
