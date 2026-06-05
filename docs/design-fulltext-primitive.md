@@ -1,9 +1,15 @@
 # Design: Domain-Neutral Full-Text / BM25 Index Primitive
 
-> Status: design / not yet implemented.
+> Status: in progress.
 > Scope decision (locked): **new `dynograph-text` crate**, backed by **Tantivy**,
 > **lexical search only** in the first cut (no built-in vector fusion).
 > Background and rationale: see `document-queryability-discussion.md`.
+>
+> Progress:
+> - [x] Step 1 — `dynograph-core` `fulltext` flag + helpers + validation.
+> - [x] Step 2 — `dynograph-text` crate (`TextIndex` over Tantivy 0.26).
+> - [ ] Step 3 — `dynograph-storage` feature-gated write-path hooks + reindex.
+> - [ ] Step 4 — `dynograph-service` `search:text` endpoint + OpenAPI.
 
 ## Goal
 
@@ -89,10 +95,18 @@ pub struct TextIndex { /* tantivy::Index + IndexWriter + schema fields */ }
 pub struct TextHit { pub node_id: String, pub node_type: String, pub score: f32 }
 
 impl TextIndex {
-    /// Open or create the index at `path` (one dir per graph). The Tantivy
-    /// document schema is fixed: stored fields `graph_id`, `node_type`,
-    /// `node_id` (all string/keyword, used for filtering + retrieval) plus one
-    /// dynamic TEXT field per indexed property name, tokenized + BM25.
+    /// Open or create the index at `path`. The Tantivy document schema is
+    /// fixed: stored keyword fields `graph_id`, `node_type`, `node_id` (for
+    /// filtering + retrieval), a non-stored composite key `uid` =
+    /// `graph_id\0node_id` (for correct delete-by-term even if graphs share a
+    /// dir), and one combined `text` TEXT field (tokenized + BM25).
+    ///
+    /// IMPLEMENTED (step 2): all full-text property values are concatenated
+    /// into the single `text` field. Per-property field targeting (e.g.
+    /// `title:foo`) is intentionally out of the first cut — a Tantivy schema is
+    /// fixed at creation, so dynamic per-property fields across many node types
+    /// would couple the index schema to the dynograph schema. Future extension:
+    /// a Tantivy JSON field to recover per-key search without that coupling.
     pub fn open(path: &Path) -> Result<Self, TextError>;
 
     /// Index (or replace) the full-text fields of one node. `fields` is the
@@ -127,9 +141,11 @@ impl TextIndex {
 ```
 
 ### Tokenization / analyzer
-Default Tantivy `en_stem` analyzer (lowercase + stemming) for the TEXT fields.
-Keep it a single fixed analyzer in the first cut — no per-property analyzer config.
-(Future extension: an optional `analyzer:` key on the property.)
+IMPLEMENTED (step 2): the `text` field uses Tantivy's `default` tokenizer
+(simple tokenizer + lowercasing, **no stemming**). Predictable for a first cut:
+exact-token-after-lowercasing matching. A single fixed analyzer — no per-property
+config. Future extensions: switch to `en_stem` for stemmed recall, and/or an
+optional `analyzer:` key on the property.
 
 ## 3. `dynograph-storage` — write-path hooks
 
