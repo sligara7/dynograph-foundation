@@ -547,30 +547,45 @@ impl StorageEngine {
                 };
             }
         };
-        ti.delete_graph(graph_id)
-            .map_err(|e| DynoError::Storage(format!("full-text reindex clear failed: {e}")))?;
-        // Snapshot the fulltext node types first — `scan_nodes` borrows &self.
-        let node_types: Vec<String> = self
-            .schema
-            .node_types
-            .keys()
-            .filter(|nt| self.schema.has_fulltext_properties(nt))
-            .cloned()
-            .collect();
-        let mut count = 0usize;
-        for node_type in node_types {
-            for node in self.scan_nodes(graph_id, &node_type)? {
-                let fields = self.fulltext_fields(&node_type, &node.properties);
-                ti.upsert(graph_id, &node_type, &node.node_id, &fields)
-                    .map_err(|e| {
-                        DynoError::Storage(format!("full-text reindex upsert failed: {e}"))
-                    })?;
-                count += 1;
+        // Clear-then-rebuild buffers a `delete_graph` plus a series of
+        // `upsert`s into the Tantivy writer before the final `commit()`. If any
+        // step fails partway through, the half-built batch must be rolled back
+        // before returning — otherwise those ops stay queued in the shared
+        // writer and a later unrelated `commit()` (e.g. from a node write)
+        // would flush a *partial* rebuild, silently dropping the graph's prior
+        // index contents and leaving hard-to-debug drift.
+        let rebuild = || -> Result<usize, DynoError> {
+            ti.delete_graph(graph_id)
+                .map_err(|e| DynoError::Storage(format!("full-text reindex clear failed: {e}")))?;
+            // Snapshot the fulltext node types first — `scan_nodes` borrows &self.
+            let node_types: Vec<String> = self
+                .schema
+                .node_types
+                .keys()
+                .filter(|nt| self.schema.has_fulltext_properties(nt))
+                .cloned()
+                .collect();
+            let mut count = 0usize;
+            for node_type in node_types {
+                for node in self.scan_nodes(graph_id, &node_type)? {
+                    let fields = self.fulltext_fields(&node_type, &node.properties);
+                    ti.upsert(graph_id, &node_type, &node.node_id, &fields)
+                        .map_err(|e| {
+                            DynoError::Storage(format!("full-text reindex upsert failed: {e}"))
+                        })?;
+                    count += 1;
+                }
             }
-        }
-        ti.commit()
-            .map_err(|e| DynoError::Storage(format!("full-text reindex commit failed: {e}")))?;
-        Ok(count)
+            ti.commit()
+                .map_err(|e| DynoError::Storage(format!("full-text reindex commit failed: {e}")))?;
+            Ok(count)
+        };
+        // Best-effort rollback to drop the uncommitted batch on failure;
+        // surface the original rebuild error regardless of the rollback result.
+        rebuild().map_err(|e| {
+            let _ = ti.rollback();
+            e
+        })
     }
 
     // =========================================================================

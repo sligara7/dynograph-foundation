@@ -9,9 +9,9 @@
 > - [x] Step 1 — `dynograph-core` `fulltext` flag + helpers + validation.
 > - [x] Step 2 — `dynograph-text` crate (`TextIndex` over Tantivy 0.26).
 > - [x] Step 3 — `dynograph-storage` feature-gated write-path hooks + reindex.
-> - [ ] Step 4 — `dynograph-service` `search:text` endpoint + OpenAPI.
+> - [x] Step 4 — `dynograph-service` `search:text` / `search:reindex` endpoints + OpenAPI.
 >
-> As-built notes (steps 1–3):
+> As-built notes (steps 1–4):
 > - Commit cadence: a non-batched node write commits the index immediately;
 >   batched writes become visible at `commit_batch` and are reverted by
 >   `discard_batch` (via `TextIndex::rollback`). RocksDB stays authoritative.
@@ -20,13 +20,19 @@
 >   RAM index (`TextIndex::open_in_ram`); RocksDB uses a `fulltext/` subdir of
 >   the data dir.
 > - `reindex_fulltext` is clear-then-rebuild (`TextIndex::delete_graph` then
->   re-upsert every fulltext node from the authoritative store).
+>   re-upsert every fulltext node from the authoritative store). It rolls the
+>   Tantivy writer back on any mid-rebuild error so a failed reindex can't leave
+>   a partial batch queued for a later unrelated `commit()` to flush.
+> - Step 4 exposes `POST /v1/graphs/{id}/search:text` (BM25 keyword search) and
+>   `POST /v1/graphs/{id}/search:reindex` (admin rebuild). Both routes are
+>   registered unconditionally and return **501** when the `fulltext` feature is
+>   off, so the API surface and OpenAPI spec are identical across builds.
 > - `librocksdb-sys` needs `clang`/`libclang-dev` at build time (storage tests).
 
 ## Goal
 
 Give the foundation a true full-text search capability — tokenized, BM25-ranked
-keyword/phrase search over declared text properties — as a **domain-neutral**
+keyword search (conjunction of terms) over declared text properties — as a **domain-neutral**
 primitive. No `Fragment`, `story_id`, chunking, or narrative semantics anywhere
 in the foundation. Consumers opt in per-property via the schema, exactly as they
 already do for `indexed: true`.
@@ -137,8 +143,11 @@ impl TextIndex {
     pub fn delete(&self, graph_id: &str, node_id: &str) -> Result<(), TextError>;
 
     /// BM25 search. `node_type` optionally restricts results to one type.
-    /// `query` is parsed by Tantivy's QueryParser over the TEXT fields
-    /// (supports terms, phrases, AND/OR). Returns top-k by BM25 score.
+    /// `query` is tokenized with the index analyzer and matched as a
+    /// conjunction of terms (every token must occur) — it is NOT parsed as a
+    /// query grammar. Punctuation and `field:value` input are treated as plain
+    /// text, deliberately avoiding query-syntax / field-injection surprises.
+    /// Returns top-k by BM25 score.
     pub fn search(
         &self,
         graph_id: &str,
@@ -241,8 +250,8 @@ startup reconcile. This is the FTS analogue of the embedding rehydrate helper at
 - **Core:** `fulltext` round-trips through schema YAML/JSON; validation rejects
   `fulltext` on non-string types; `fulltext_properties` helper correctness.
 - **Text crate:** upsert → search returns the doc; delete removes it; replace
-  semantics (re-upsert doesn't duplicate); phrase vs term queries; `node_type`
-  filter; BM25 ordering sanity (more term hits ranks higher).
+  semantics (re-upsert doesn't duplicate); multi-token conjunction (every token
+  must occur); `node_type` filter; BM25 ordering sanity (more term hits ranks higher).
 - **Storage integration:** create_node indexes; delete_node de-indexes; update
   replaces; **index survives RocksDB reopen + reindex** (mirror the existing
   `index_survives_through_rocksdb_reopen` test at `engine.rs:2360`).

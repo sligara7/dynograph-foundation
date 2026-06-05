@@ -1838,6 +1838,12 @@ struct SearchTextBody {
     #[serde(default)]
     node_type: Option<String>,
     /// Max hits to return (1..=MAX_LIMIT). Defaults to 10.
+    // `usize` defaults to `minimum: 0` in the generated schema, which
+    // contradicts the `validate_limit` 1..=MAX_LIMIT runtime bound. Pin the
+    // advertised bounds so the OpenAPI contract matches the endpoint. The
+    // literal `10_000` mirrors `validation::MAX_LIMIT` — utoipa's `#[schema]`
+    // can't reference a const, so keep the two in sync by hand.
+    #[schema(minimum = 1, maximum = 10_000)]
     #[serde(default = "default_search_limit")]
     limit: usize,
 }
