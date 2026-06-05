@@ -8,8 +8,20 @@
 > Progress:
 > - [x] Step 1 — `dynograph-core` `fulltext` flag + helpers + validation.
 > - [x] Step 2 — `dynograph-text` crate (`TextIndex` over Tantivy 0.26).
-> - [ ] Step 3 — `dynograph-storage` feature-gated write-path hooks + reindex.
+> - [x] Step 3 — `dynograph-storage` feature-gated write-path hooks + reindex.
 > - [ ] Step 4 — `dynograph-service` `search:text` endpoint + OpenAPI.
+>
+> As-built notes (steps 1–3):
+> - Commit cadence: a non-batched node write commits the index immediately;
+>   batched writes become visible at `commit_batch` and are reverted by
+>   `discard_batch` (via `TextIndex::rollback`). RocksDB stays authoritative.
+> - The index is built only when `Schema::has_any_fulltext_properties()` — no
+>   writer arena for schemas that don't use full-text. In-memory engine uses a
+>   RAM index (`TextIndex::open_in_ram`); RocksDB uses a `fulltext/` subdir of
+>   the data dir.
+> - `reindex_fulltext` is clear-then-rebuild (`TextIndex::delete_graph` then
+>   re-upsert every fulltext node from the authoritative store).
+> - `librocksdb-sys` needs `clang`/`libclang-dev` at build time (storage tests).
 
 ## Goal
 

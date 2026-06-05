@@ -23,6 +23,12 @@ jsonwebtoken = { workspace = true }
 uuid = { workspace = true }
 utoipa = { workspace = true }
 
+[features]
+# Enable the full-text search endpoints (`search:text` / `search:reindex`).
+# Turns on `dynograph-storage/fulltext` (which compiles Tantivy); without it
+# the routes still exist but return 501 Not Implemented.
+fulltext = ["dynograph-storage/fulltext"]
+
 [[bin]]
 name = "dynograph"
 path = "src/bin/dynograph.rs"

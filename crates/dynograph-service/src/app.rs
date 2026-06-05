@@ -111,6 +111,8 @@ use crate::{
         get_embedding,
         delete_embedding,
         similar,
+        search_text,
+        search_reindex,
         // util
         util_cosine_similarity,
         util_dot_product,
@@ -146,6 +148,10 @@ use crate::{
         SimilarBody,
         SimilarHit,
         SimilarResponse,
+        SearchTextBody,
+        SearchTextHit,
+        SearchTextResponse,
+        SearchReindexResponse,
         // batch
         BatchRequest,
         BatchOp,
@@ -359,6 +365,8 @@ pub fn app(state: AppState) -> Router {
                 .delete(delete_embedding),
         )
         .route("/v1/graphs/{id}/similar", post(similar))
+        .route("/v1/graphs/{id}/search:text", post(search_text))
+        .route("/v1/graphs/{id}/search:reindex", post(search_reindex))
         .route("/v1/util/cosine_similarity", post(util_cosine_similarity))
         .route("/v1/util/dot_product", post(util_dot_product))
         .route("/v1/util/euclidean_distance", post(util_euclidean_distance))
@@ -1801,6 +1809,174 @@ async fn similar(
         )
         .await?;
     Ok(Json(response).into_response())
+}
+
+// =========================================================================
+// /v1/graphs/{id}/search:* — full-text (BM25) search.
+//
+// Behind the `fulltext` cargo feature. The routes are always registered; when
+// the feature is off the handlers return 501 so the API surface is stable and
+// the OpenAPI spec is identical across builds.
+// =========================================================================
+
+fn default_search_limit() -> usize {
+    10
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+// In a build without the `fulltext` feature the handler returns 501 and never
+// reads these fields — but they're still deserialized from the request and are
+// part of the published wire/OpenAPI contract, so the "unread" lint is a false
+// positive there.
+#[cfg_attr(not(feature = "fulltext"), allow(dead_code))]
+struct SearchTextBody {
+    /// Raw keyword query. Tokenized with the index analyzer and matched as a
+    /// conjunction (every token must occur). Punctuation and `field:value`
+    /// input are treated as plain text, not query syntax.
+    query: String,
+    /// Optional node-type filter; omit to search all types in the graph.
+    #[serde(default)]
+    node_type: Option<String>,
+    /// Max hits to return (1..=MAX_LIMIT). Defaults to 10.
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct SearchTextHit {
+    node_id: String,
+    node_type: String,
+    score: f32,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct SearchTextResponse {
+    results: Vec<SearchTextHit>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+struct SearchReindexResponse {
+    indexed: usize,
+}
+
+/// BM25 keyword search over the graph's full-text index. Scoped to the graph,
+/// optionally to one `node_type`. Returns hits highest-score-first. Requires
+/// the `fulltext` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/search:text",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = SearchTextBody,
+    responses(
+        (status = 200, description = "BM25 keyword hits", body = SearchTextResponse),
+        (status = 400, description = "invalid request"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "full-text feature not enabled in this build"),
+    ),
+    tag = "search",
+)]
+async fn search_text(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SearchTextBody>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    search_text_impl(entry, id, body).await
+}
+
+#[cfg(feature = "fulltext")]
+async fn search_text_impl(
+    entry: Arc<GraphEntry>,
+    id: String,
+    body: SearchTextBody,
+) -> Result<Response, RegistryError> {
+    // Cap `limit` like every other result-bearing route — an unbounded limit
+    // is a DoS/OOM vector (the search collects up to that many hits).
+    validate_limit(body.limit, "limit")?;
+    let SearchTextBody {
+        query,
+        node_type,
+        limit,
+    } = body;
+    let response = entry
+        .with_engine_read(move |engine| -> Result<SearchTextResponse, RegistryError> {
+            let hits = engine.search_fulltext(&id, &query, node_type.as_deref(), limit)?;
+            Ok(SearchTextResponse {
+                results: hits
+                    .into_iter()
+                    .map(|h| SearchTextHit {
+                        node_id: h.node_id,
+                        node_type: h.node_type,
+                        score: h.score,
+                    })
+                    .collect(),
+            })
+        })
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+#[cfg(not(feature = "fulltext"))]
+async fn search_text_impl(
+    _entry: Arc<GraphEntry>,
+    _id: String,
+    _body: SearchTextBody,
+) -> Result<Response, RegistryError> {
+    Err(RegistryError::NotImplemented(
+        "full-text search is not enabled in this build (compile with --features fulltext)"
+            .to_string(),
+    ))
+}
+
+/// Rebuild the graph's full-text index from the authoritative node store. Admin
+/// op — clears then re-indexes every `fulltext` node. Requires the `fulltext`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/search:reindex",
+    params(("id" = String, Path, description = "graph id")),
+    responses(
+        (status = 200, description = "nodes reindexed", body = SearchReindexResponse),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "full-text feature not enabled in this build"),
+    ),
+    tag = "search",
+)]
+async fn search_reindex(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    search_reindex_impl(entry, id).await
+}
+
+#[cfg(feature = "fulltext")]
+async fn search_reindex_impl(
+    entry: Arc<GraphEntry>,
+    id: String,
+) -> Result<Response, RegistryError> {
+    // Write lock: serializes the rebuild against node writes and any concurrent
+    // reindex so the clear-then-rebuild can't interleave.
+    let response = entry
+        .with_engine_write(
+            move |engine| -> Result<SearchReindexResponse, RegistryError> {
+                let indexed = engine.reindex_fulltext(&id)?;
+                Ok(SearchReindexResponse { indexed })
+            },
+        )
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+#[cfg(not(feature = "fulltext"))]
+async fn search_reindex_impl(
+    _entry: Arc<GraphEntry>,
+    _id: String,
+) -> Result<Response, RegistryError> {
+    Err(RegistryError::NotImplemented(
+        "full-text reindex is not enabled in this build (compile with --features fulltext)"
+            .to_string(),
+    ))
 }
 
 // =========================================================================

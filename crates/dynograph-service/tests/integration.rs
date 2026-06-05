@@ -5576,3 +5576,153 @@ async fn openapi_json_is_served_and_covers_every_route() {
         served_paths.len()
     );
 }
+
+// =========================================================================
+// Full-text search endpoints (`search:text` / `search:reindex`).
+// =========================================================================
+
+fn json_post(uri: &str, body: &Value) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// Schema with two full-text string properties on `Document`.
+fn fulltext_graph_body() -> Value {
+    json!({
+        "id": "g1",
+        "schema": {
+            "name": "demo",
+            "version": 1,
+            "node_types": {
+                "Document": { "properties": {
+                    "title": { "type": "string", "fulltext": true },
+                    "body":  { "type": "string", "fulltext": true }
+                }}
+            },
+            "edge_types": {}
+        }
+    })
+}
+
+#[cfg(feature = "fulltext")]
+#[tokio::test]
+async fn search_text_endpoint_round_trip() {
+    let app = build_app();
+
+    let res = app
+        .clone()
+        .oneshot(json_post("/v1/graphs", &fulltext_graph_body()))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // Index a node.
+    let node = json!({
+        "node_type": "Document",
+        "node_id": "n1",
+        "properties": { "title": "Rust Graphs", "body": "embedded full text search" }
+    });
+    let res = app
+        .clone()
+        .oneshot(json_post("/v1/graphs/g1/nodes", &node))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // Found by a token from either full-text field.
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            "/v1/graphs/g1/search:text",
+            &json!({ "query": "graphs" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    let results = v["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["node_id"], "n1");
+    assert_eq!(results[0]["node_type"], "Document");
+    assert!(results[0]["score"].as_f64().unwrap() > 0.0);
+
+    // A `field:value`-looking query is treated as plain text, not an injected
+    // filter on the internal node_type field → no document contains it.
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            "/v1/graphs/g1/search:text",
+            &json!({ "query": "node_type:Other" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["results"].as_array().unwrap().len(), 0);
+
+    // Reindex rebuilds from the node store: idempotent, one document.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/search:reindex")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["indexed"], 1);
+}
+
+#[cfg(feature = "fulltext")]
+#[tokio::test]
+async fn search_text_rejects_zero_limit() {
+    let app = build_app();
+    app.clone()
+        .oneshot(json_post("/v1/graphs", &fulltext_graph_body()))
+        .await
+        .unwrap();
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            "/v1/graphs/g1/search:text",
+            &json!({ "query": "x", "limit": 0 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+/// In a build without the `fulltext` feature the routes still exist but answer
+/// 501 — the API surface (and OpenAPI spec) is identical across builds.
+#[cfg(not(feature = "fulltext"))]
+#[tokio::test]
+async fn search_text_returns_501_when_feature_disabled() {
+    let app = build_app();
+    let res = app
+        .clone()
+        .oneshot(json_post("/v1/graphs", &fulltext_graph_body()))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            "/v1/graphs/g1/search:text",
+            &json!({ "query": "x" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
+}
