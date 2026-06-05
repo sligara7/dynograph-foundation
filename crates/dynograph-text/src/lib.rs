@@ -90,14 +90,7 @@ impl TextIndex {
     /// The Tantivy document schema is fixed by this crate; reopening a
     /// directory written by an incompatible schema returns [`TextError::Open`].
     pub fn open(path: &Path) -> Result<Self, TextError> {
-        let mut builder = Schema::builder();
-        let uid = builder.add_text_field("uid", STRING);
-        let graph_id = builder.add_text_field("graph_id", STRING | STORED);
-        let node_type = builder.add_text_field("node_type", STRING | STORED);
-        let node_id = builder.add_text_field("node_id", STRING | STORED);
-        let text = builder.add_text_field("text", TEXT);
-        let schema = builder.build();
-
+        let (schema, fields) = Self::build_schema();
         let map_open = |source: tantivy::TantivyError| TextError::Open {
             path: path.display().to_string(),
             source,
@@ -112,25 +105,52 @@ impl TextIndex {
             source: tantivy::TantivyError::from(e),
         })?;
         let index = Index::open_or_create(dir, schema).map_err(map_open)?;
+        Self::finish(index, fields)
+    }
 
-        let writer: IndexWriter = index.writer(WRITER_HEAP_BYTES).map_err(map_open)?;
-        let reader = index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
-            .try_into()
-            .map_err(map_open)?;
+    /// Open an ephemeral, RAM-backed index. Nothing is persisted — intended for
+    /// the in-memory storage backend and tests. Identical API and semantics to
+    /// [`open`](Self::open) otherwise.
+    pub fn open_in_ram() -> Result<Self, TextError> {
+        let (schema, fields) = Self::build_schema();
+        let index = Index::create_in_ram(schema);
+        Self::finish(index, fields)
+    }
 
-        Ok(Self {
-            index,
-            reader,
-            writer: Mutex::new(writer),
-            fields: Fields {
+    /// Build the fixed document schema and the field handles for it. The field
+    /// set and order are stable so an on-disk index reopens without a schema
+    /// mismatch.
+    fn build_schema() -> (Schema, Fields) {
+        let mut builder = Schema::builder();
+        let uid = builder.add_text_field("uid", STRING);
+        let graph_id = builder.add_text_field("graph_id", STRING | STORED);
+        let node_type = builder.add_text_field("node_type", STRING | STORED);
+        let node_id = builder.add_text_field("node_id", STRING | STORED);
+        let text = builder.add_text_field("text", TEXT);
+        (
+            builder.build(),
+            Fields {
                 uid,
                 graph_id,
                 node_type,
                 node_id,
                 text,
             },
+        )
+    }
+
+    /// Build the writer + reader over an opened index.
+    fn finish(index: Index, fields: Fields) -> Result<Self, TextError> {
+        let writer: IndexWriter = index.writer(WRITER_HEAP_BYTES)?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()?;
+        Ok(Self {
+            index,
+            reader,
+            writer: Mutex::new(writer),
+            fields,
         })
     }
 
@@ -187,6 +207,15 @@ impl TextIndex {
         Ok(())
     }
 
+    /// Remove every document belonging to `graph_id`. Used to drop a graph's
+    /// index when the graph is deleted, and to clear before a full rebuild.
+    /// Idempotent. Buffered until [`commit`](Self::commit).
+    pub fn delete_graph(&self, graph_id: &str) -> Result<(), TextError> {
+        let writer = self.writer.lock().unwrap();
+        writer.delete_term(Term::from_field_text(self.fields.graph_id, graph_id));
+        Ok(())
+    }
+
     /// Commit buffered writes and make them visible to [`search`](Self::search).
     /// Forces a reader reload so results are consistent immediately on return.
     pub fn commit(&self) -> Result<(), TextError> {
@@ -194,6 +223,15 @@ impl TextIndex {
         writer.commit()?;
         drop(writer);
         self.reader.reload()?;
+        Ok(())
+    }
+
+    /// Discard buffered (uncommitted) writes, reverting to the last commit.
+    /// Mirrors a storage-layer batch rollback so a discarded batch leaves no
+    /// stray full-text entries.
+    pub fn rollback(&self) -> Result<(), TextError> {
+        let mut writer = self.writer.lock().unwrap();
+        writer.rollback()?;
         Ok(())
     }
 
@@ -509,6 +547,51 @@ mod tests {
         let hits = idx.search("g1", "persistent", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].node_id, "n1");
+    }
+
+    #[test]
+    fn open_in_ram_indexes_and_searches() {
+        let idx = TextIndex::open_in_ram().unwrap();
+        idx.upsert("g1", "Document", "n1", &fields(&[("body", "ephemeral ram index")]))
+            .unwrap();
+        idx.commit().unwrap();
+        let hits = idx.search("g1", "ram", None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node_id, "n1");
+    }
+
+    #[test]
+    fn rollback_discards_uncommitted_writes() {
+        let (_d, idx) = open_tmp();
+        idx.upsert("g1", "Document", "n1", &fields(&[("body", "committed")]))
+            .unwrap();
+        idx.commit().unwrap();
+        // Buffer a second write, then roll back before committing it.
+        idx.upsert("g1", "Document", "n2", &fields(&[("body", "transient")]))
+            .unwrap();
+        idx.rollback().unwrap();
+        idx.commit().unwrap();
+
+        // The committed doc survives; the rolled-back one never appears.
+        assert_eq!(idx.search("g1", "committed", None, 10).unwrap().len(), 1);
+        assert!(idx.search("g1", "transient", None, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_graph_removes_only_that_graph() {
+        let (_d, idx) = open_tmp();
+        idx.upsert("g1", "Document", "n1", &fields(&[("body", "term")]))
+            .unwrap();
+        idx.upsert("g1", "Document", "n2", &fields(&[("body", "term")]))
+            .unwrap();
+        idx.upsert("g2", "Document", "n3", &fields(&[("body", "term")]))
+            .unwrap();
+        idx.commit().unwrap();
+
+        idx.delete_graph("g1").unwrap();
+        idx.commit().unwrap();
+        assert!(idx.search("g1", "term", None, 10).unwrap().is_empty());
+        assert_eq!(idx.search("g2", "term", None, 10).unwrap().len(), 1);
     }
 
     #[test]

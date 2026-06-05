@@ -737,6 +737,15 @@ impl Schema {
             .is_some_and(|def| def.properties.values().any(|p| p.fulltext))
     }
 
+    /// Whether ANY node type in the schema declares a `fulltext` property.
+    /// Lets the storage layer avoid building a full-text index at all for
+    /// schemas that don't use one (each index reserves a writer arena).
+    pub fn has_any_fulltext_properties(&self) -> bool {
+        self.node_types
+            .values()
+            .any(|def| def.properties.values().any(|p| p.fulltext))
+    }
+
     /// All edge-type names that carry an `inference_category`, sorted for
     /// deterministic output. Replaces the hardcoded `ALL_INFERENCE_TYPES`
     /// list that query endpoints used to maintain by hand.
@@ -1132,6 +1141,28 @@ schema:
         assert!(schema.has_fulltext_properties("Document"));
         assert!(!schema.has_fulltext_properties("Tag"));
         assert!(!schema.has_fulltext_properties("UnknownType"));
+        // Schema-wide check: this fixture has at least one fulltext property.
+        assert!(schema.has_any_fulltext_properties());
+    }
+
+    #[test]
+    fn has_any_fulltext_properties_false_when_none_declared() {
+        // No `fulltext` anywhere → schema-wide check is false (storage skips
+        // building an index entirely).
+        let schema = Schema::from_yaml(
+            r#"
+schema:
+  name: t
+  version: 1
+  node_types:
+    Tag:
+      properties:
+        name: { type: string, indexed: true }
+  edge_types: {}
+"#,
+        )
+        .unwrap();
+        assert!(!schema.has_any_fulltext_properties());
     }
 
     #[test]

@@ -7,11 +7,19 @@ publish.workspace = true
 
 [dependencies]
 dynograph-core = { path = "../dynograph-core" }
+# Optional full-text sidecar. Pulled in (and Tantivy compiled) only when the
+# `fulltext` feature is enabled; the default build has no inverted index.
+dynograph-text = { path = "../dynograph-text", optional = true }
 serde = { workspace = true }
 rmp-serde = { workspace = true }
 rocksdb = { workspace = true }
 lru = "0.18"
 tracing = { workspace = true }
+
+[features]
+# Mirror schema-declared `fulltext` properties into an embedded inverted index
+# on node writes, and expose `search_fulltext` / `reindex_fulltext`.
+fulltext = ["dep:dynograph-text"]
 
 [dev-dependencies]
 tempfile = "3"
