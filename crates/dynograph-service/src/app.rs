@@ -1900,6 +1900,18 @@ async fn search_text_impl(
     } = body;
     let response = entry
         .with_engine_read(move |engine| -> Result<SearchTextResponse, RegistryError> {
+            // Fail loud on a node_type filter that can never match — an unknown
+            // type, or a known type with no `fulltext` property. Mirrors
+            // `similar` / `nodes_scan` rather than masking a client typo as an
+            // empty result.
+            if let Some(nt) = &node_type
+                && !engine.schema().has_fulltext_properties(nt)
+            {
+                return Err(RegistryError::BadRequest(format!(
+                    "node type '{nt}' is not full-text searchable \
+                     (unknown type, or it declares no fulltext properties)"
+                )));
+            }
             let hits = engine.search_fulltext(&id, &query, node_type.as_deref(), limit)?;
             Ok(SearchTextResponse {
                 results: hits

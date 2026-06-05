@@ -5703,6 +5703,27 @@ async fn search_text_rejects_zero_limit() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
+#[cfg(feature = "fulltext")]
+#[tokio::test]
+async fn search_text_rejects_unsearchable_node_type() {
+    let app = build_app();
+    app.clone()
+        .oneshot(json_post("/v1/graphs", &fulltext_graph_body()))
+        .await
+        .unwrap();
+    // A node_type that can never match (unknown / no fulltext property) is a 400,
+    // not a silent empty 200 — mirrors `similar` / `nodes_scan`.
+    let res = app
+        .clone()
+        .oneshot(json_post(
+            "/v1/graphs/g1/search:text",
+            &json!({ "query": "x", "node_type": "Nope" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
 /// In a build without the `fulltext` feature the routes still exist but answer
 /// 501 — the API surface (and OpenAPI spec) is identical across builds.
 #[cfg(not(feature = "fulltext"))]

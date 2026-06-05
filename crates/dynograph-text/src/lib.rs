@@ -35,9 +35,25 @@ use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Te
 /// key segments before writing), so the composite is unambiguous.
 const UID_SEP: char = '\u{0}';
 
-/// Tantivy writer heap budget. Tantivy requires a minimum per-index arena;
-/// 50 MB is comfortably above the floor and bounds memory before an auto-flush.
-const WRITER_HEAP_BYTES: usize = 50_000_000;
+/// Default Tantivy writer-arena budget, in MB. The arena is reserved up front
+/// per index, so on a multi-graph host this is the dominant fixed memory cost.
+/// Override at runtime with `DYNOGRAPH_FULLTEXT_WRITER_HEAP_MB`.
+const DEFAULT_WRITER_HEAP_MB: usize = 50;
+/// Tantivy's practical per-writer floor; smaller arenas make `writer()` error.
+const MIN_WRITER_HEAP_BYTES: usize = 15_000_000;
+
+/// Resolve the writer-arena size in bytes: `DYNOGRAPH_FULLTEXT_WRITER_HEAP_MB`
+/// when set and parseable, else [`DEFAULT_WRITER_HEAP_MB`] — floored at the
+/// Tantivy minimum either way so a too-small value can't break index open.
+/// Read once per index open (not on any hot path).
+fn writer_heap_bytes() -> usize {
+    std::env::var("DYNOGRAPH_FULLTEXT_WRITER_HEAP_MB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_WRITER_HEAP_MB)
+        .saturating_mul(1_000_000)
+        .max(MIN_WRITER_HEAP_BYTES)
+}
 
 /// Errors surfaced by [`TextIndex`].
 #[derive(Debug, thiserror::Error)]
@@ -141,7 +157,7 @@ impl TextIndex {
 
     /// Build the writer + reader over an opened index.
     fn finish(index: Index, fields: Fields) -> Result<Self, TextError> {
-        let writer: IndexWriter = index.writer(WRITER_HEAP_BYTES)?;
+        let writer: IndexWriter = index.writer(writer_heap_bytes())?;
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
@@ -552,8 +568,13 @@ mod tests {
     #[test]
     fn open_in_ram_indexes_and_searches() {
         let idx = TextIndex::open_in_ram().unwrap();
-        idx.upsert("g1", "Document", "n1", &fields(&[("body", "ephemeral ram index")]))
-            .unwrap();
+        idx.upsert(
+            "g1",
+            "Document",
+            "n1",
+            &fields(&[("body", "ephemeral ram index")]),
+        )
+        .unwrap();
         idx.commit().unwrap();
         let hits = idx.search("g1", "ram", None, 10).unwrap();
         assert_eq!(hits.len(), 1);
