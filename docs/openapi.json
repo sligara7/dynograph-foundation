@@ -1395,6 +1395,101 @@
         }
       }
     },
+    "/v1/graphs/{id}/search:reindex": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Rebuild the graph's full-text index from the authoritative node store. Admin\nop — clears then re-indexes every `fulltext` node. Requires the `fulltext`\nbuild feature; otherwise 501.",
+        "operationId": "search_reindex",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "nodes reindexed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchReindexResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "full-text feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/search:text": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "BM25 keyword search over the graph's full-text index. Scoped to the graph,\noptionally to one `node_type`. Returns hits highest-score-first. Requires\nthe `fulltext` build feature; otherwise 501.",
+        "operationId": "search_text",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchTextBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "BM25 keyword hits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchTextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid request"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "full-text feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/similar": {
       "post": {
         "tags": [
@@ -2874,6 +2969,77 @@
           },
           "value": {
             "type": "object"
+          }
+        }
+      },
+      "SearchReindexResponse": {
+        "type": "object",
+        "required": [
+          "indexed"
+        ],
+        "properties": {
+          "indexed": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "SearchTextBody": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Max hits to return (1..=MAX_LIMIT). Defaults to 10.",
+            "maximum": 10000,
+            "minimum": 1
+          },
+          "node_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional node-type filter; omit to search all types in the graph."
+          },
+          "query": {
+            "type": "string",
+            "description": "Raw keyword query. Tokenized with the index analyzer and matched as a\nconjunction (every token must occur). Punctuation and `field:value`\ninput are treated as plain text, not query syntax."
+          }
+        }
+      },
+      "SearchTextHit": {
+        "type": "object",
+        "required": [
+          "node_id",
+          "node_type",
+          "score"
+        ],
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "float"
+          }
+        }
+      },
+      "SearchTextResponse": {
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchTextHit"
+            }
           }
         }
       },

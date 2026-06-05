@@ -282,11 +282,26 @@ pub struct StorageEngine {
     /// here instead of hitting the backend. `commit_batch` flushes
     /// atomically; `discard_batch` drops them.
     write_buffer: Option<Vec<BufferedOp>>,
+    /// Optional sidecar full-text index (only with the `fulltext` feature).
+    /// `Some` only when the schema declares at least one `fulltext` property —
+    /// otherwise there's nothing to mirror and we skip the writer arena. RocksDB
+    /// stays the source of truth; this index is derived and rebuildable via
+    /// `reindex_fulltext`.
+    #[cfg(feature = "fulltext")]
+    text_index: Option<dynograph_text::TextIndex>,
 }
 
 impl StorageEngine {
     /// Create an in-memory storage engine (for testing).
     pub fn new_in_memory(schema: Schema) -> Self {
+        // RAM-backed full-text index when the schema uses `fulltext`. Creation
+        // can only fail on OOM, so `expect` here keeps the infallible
+        // constructor signature; the ephemeral backend is test-oriented anyway.
+        #[cfg(feature = "fulltext")]
+        let text_index = schema.has_any_fulltext_properties().then(|| {
+            dynograph_text::TextIndex::open_in_ram()
+                .expect("in-memory full-text index creation should not fail")
+        });
         Self {
             schema: Arc::new(schema),
             backend: Backend::Memory {
@@ -299,6 +314,8 @@ impl StorageEngine {
             },
             read_cache: Mutex::new(ReadCache::new(CacheConfig::default())),
             write_buffer: None,
+            #[cfg(feature = "fulltext")]
+            text_index,
         }
     }
 
@@ -317,11 +334,26 @@ impl StorageEngine {
             DynoError::Storage(format!("Failed to open RocksDB at {}: {}", path, e))
         })?;
 
+        // The full-text index lives in a sibling subdir of the RocksDB store, so
+        // it travels with the data dir. Built only when the schema uses it.
+        #[cfg(feature = "fulltext")]
+        let text_index = if schema.has_any_fulltext_properties() {
+            let ft_dir = Path::new(path).join("fulltext");
+            Some(
+                dynograph_text::TextIndex::open(&ft_dir)
+                    .map_err(|e| DynoError::Storage(format!("full-text index open failed: {e}")))?,
+            )
+        } else {
+            None
+        };
+
         Ok(Self {
             schema: Arc::new(schema),
             backend: Backend::Rocks { db },
             read_cache: Mutex::new(ReadCache::new(CacheConfig::default())),
             write_buffer: None,
+            #[cfg(feature = "fulltext")]
+            text_index,
         })
     }
 
@@ -342,6 +374,218 @@ impl StorageEngine {
     /// garbage; cleaning them up is a future-slice concern.
     pub fn replace_schema(&mut self, new_schema: Schema) {
         self.schema = Arc::new(new_schema);
+    }
+
+    // =========================================================================
+    // Full-text index sidecar (optional `fulltext` feature)
+    // =========================================================================
+    //
+    // RocksDB is authoritative; the Tantivy index is a derived, rebuildable
+    // view. Node writes mirror into it (`fulltext_upsert` / `fulltext_delete`),
+    // and visibility follows the same boundary as RocksDB durability: a
+    // non-batched write commits the index immediately, a batched write becomes
+    // visible at `commit_batch` (and is rolled back by `discard_batch`).
+    //
+    // Error contract: the authoritative RocksDB write lands BEFORE the index is
+    // mirrored, so a node-write method can return `Err` (an index commit failed)
+    // *after* the node is already durable in RocksDB. RocksDB stays correct; the
+    // index may lag and is recoverable with `reindex_fulltext`. Likewise
+    // `commit_batch` can leave RocksDB ahead of the index if the index commit
+    // fails after the batch write — the next `begin_batch` re-commits any pending
+    // index ops to re-establish a clean baseline (see `begin_batch`).
+    //
+    // The index is built once, when the engine opens (it needs the schema and,
+    // for RocksDB, the data path). Enabling `fulltext` on an existing graph via
+    // `replace_schema` therefore does NOT build an index for the live engine;
+    // `search_fulltext` / `reindex_fulltext` fail loud in that state rather than
+    // silently returning empty / `Ok(0)`. Reopen the engine (restart) to build it.
+
+    /// `Some(err)` when the schema declares full-text but no index exists — i.e.
+    /// full-text was enabled on a live engine (via `replace_schema`) that opened
+    /// without one. Lets `search_fulltext` / `reindex_fulltext` fail loud instead
+    /// of silently returning empty results or a bogus `Ok(0)`. `None` when the
+    /// index is present, or when the schema genuinely declares no full-text (a
+    /// real "nothing to do").
+    #[cfg(feature = "fulltext")]
+    fn fulltext_unavailable(&self) -> Option<DynoError> {
+        if self.text_index.is_none() && self.schema.has_any_fulltext_properties() {
+            Some(DynoError::Storage(
+                "full-text index unavailable: it is built when the engine opens, so enabling \
+                 full-text on an existing graph requires reopening the engine (restart) before \
+                 search or reindex"
+                    .to_string(),
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Extract `(name, value)` pairs for this node type's `fulltext` string
+    /// properties. Non-string values are skipped — schema validation already
+    /// rejects `fulltext` on non-string types, so this is belt-and-braces.
+    #[cfg(feature = "fulltext")]
+    fn fulltext_fields(
+        &self,
+        node_type: &str,
+        properties: &HashMap<String, Value>,
+    ) -> Vec<(String, String)> {
+        self.schema
+            .fulltext_properties(node_type)
+            .into_iter()
+            .filter_map(|name| match properties.get(name) {
+                Some(Value::String(s)) => Some((name.to_string(), s.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Mirror a node write into the full-text index. No-op when the index is
+    /// absent or the type declares no `fulltext` properties. Commits outside a
+    /// batch; buffers inside one.
+    #[cfg(feature = "fulltext")]
+    fn fulltext_upsert(
+        &self,
+        graph_id: &str,
+        node_type: &str,
+        node_id: &str,
+        properties: &HashMap<String, Value>,
+    ) -> Result<(), DynoError> {
+        let Some(ti) = &self.text_index else {
+            return Ok(());
+        };
+        if !self.schema.has_fulltext_properties(node_type) {
+            return Ok(());
+        }
+        let fields = self.fulltext_fields(node_type, properties);
+        ti.upsert(graph_id, node_type, node_id, &fields)
+            .map_err(|e| DynoError::Storage(format!("full-text upsert failed: {e}")))?;
+        if self.write_buffer.is_none() {
+            ti.commit()
+                .map_err(|e| DynoError::Storage(format!("full-text commit failed: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// Mirror a node delete into the full-text index. See `fulltext_upsert` for
+    /// commit cadence. A type that lost its `fulltext` flag via schema evolution
+    /// won't be cleaned up here — tolerable derived-index garbage, same posture
+    /// as `replace_schema`; a `reindex_fulltext` rebuild clears it.
+    #[cfg(feature = "fulltext")]
+    fn fulltext_delete(
+        &self,
+        graph_id: &str,
+        node_type: &str,
+        node_id: &str,
+    ) -> Result<(), DynoError> {
+        let Some(ti) = &self.text_index else {
+            return Ok(());
+        };
+        if !self.schema.has_fulltext_properties(node_type) {
+            return Ok(());
+        }
+        ti.delete(graph_id, node_id)
+            .map_err(|e| DynoError::Storage(format!("full-text delete failed: {e}")))?;
+        if self.write_buffer.is_none() {
+            ti.commit()
+                .map_err(|e| DynoError::Storage(format!("full-text commit failed: {e}")))?;
+        }
+        Ok(())
+    }
+
+    /// BM25 keyword search over the full-text index, scoped to `graph_id` and
+    /// optionally one `node_type`. Returns up to `limit` hits, highest score
+    /// first. Empty when the schema declares no `fulltext` property. Fails loud
+    /// if full-text was enabled on a live engine that opened without an index
+    /// (see `fulltext_unavailable`).
+    #[cfg(feature = "fulltext")]
+    pub fn search_fulltext(
+        &self,
+        graph_id: &str,
+        query: &str,
+        node_type: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<dynograph_text::TextHit>, DynoError> {
+        if let Some(ti) = &self.text_index {
+            return ti
+                .search(graph_id, query, node_type, limit)
+                .map_err(|e| DynoError::Storage(format!("full-text search failed: {e}")));
+        }
+        match self.fulltext_unavailable() {
+            Some(err) => Err(err),
+            None => Ok(Vec::new()),
+        }
+    }
+
+    /// Rebuild the full-text index for `graph_id` from the authoritative node
+    /// store: drop the graph's existing documents, then re-index every
+    /// `fulltext` node. Use to recover from drift. Returns the number of nodes
+    /// indexed; `Ok(0)` only when the schema genuinely declares no full-text.
+    ///
+    /// Fails loud (not `Ok(0)`) if full-text was enabled on a live engine that
+    /// opened without an index — reopen the engine to build it first.
+    ///
+    /// Cost: materializes every full-text node and rebuilds in a single pass
+    /// under the caller's lock (the service holds the per-graph write lock), so
+    /// a reindex of a large graph blocks its reads and writes for the duration.
+    /// An incremental / double-buffered rebuild is tracked as a follow-up.
+    #[cfg(feature = "fulltext")]
+    pub fn reindex_fulltext(&self, graph_id: &str) -> Result<usize, DynoError> {
+        // A rebuild can't run inside an open batch: `scan_nodes` would see
+        // uncommitted node state, and the final `ti.commit()` would flush the
+        // batch's buffered text ops, breaking its all-or-nothing semantics.
+        if self.is_batching() {
+            return Err(DynoError::Storage(
+                "reindex_fulltext cannot run inside an open batch".to_string(),
+            ));
+        }
+        let ti = match &self.text_index {
+            Some(ti) => ti,
+            None => {
+                return match self.fulltext_unavailable() {
+                    Some(err) => Err(err),
+                    None => Ok(0),
+                };
+            }
+        };
+        // Clear-then-rebuild buffers a `delete_graph` plus a series of
+        // `upsert`s into the Tantivy writer before the final `commit()`. If any
+        // step fails partway through, the half-built batch must be rolled back
+        // before returning — otherwise those ops stay queued in the shared
+        // writer and a later unrelated `commit()` (e.g. from a node write)
+        // would flush a *partial* rebuild, silently dropping the graph's prior
+        // index contents and leaving hard-to-debug drift.
+        let rebuild = || -> Result<usize, DynoError> {
+            ti.delete_graph(graph_id)
+                .map_err(|e| DynoError::Storage(format!("full-text reindex clear failed: {e}")))?;
+            // Snapshot the fulltext node types first — `scan_nodes` borrows &self.
+            let node_types: Vec<String> = self
+                .schema
+                .node_types
+                .keys()
+                .filter(|nt| self.schema.has_fulltext_properties(nt))
+                .cloned()
+                .collect();
+            let mut count = 0usize;
+            for node_type in node_types {
+                for node in self.scan_nodes(graph_id, &node_type)? {
+                    let fields = self.fulltext_fields(&node_type, &node.properties);
+                    ti.upsert(graph_id, &node_type, &node.node_id, &fields)
+                        .map_err(|e| {
+                            DynoError::Storage(format!("full-text reindex upsert failed: {e}"))
+                        })?;
+                    count += 1;
+                }
+            }
+            ti.commit()
+                .map_err(|e| DynoError::Storage(format!("full-text reindex commit failed: {e}")))?;
+            Ok(count)
+        };
+        // Best-effort rollback to drop the uncommitted batch on failure;
+        // surface the original rebuild error regardless of the rollback result.
+        rebuild().map_err(|e| {
+            let _ = ti.rollback();
+            e
+        })
     }
 
     // =========================================================================
@@ -873,6 +1117,8 @@ impl StorageEngine {
         if has_indexed {
             self.write_index_entries(graph_id, node_type, node_id, &properties)?;
         }
+        #[cfg(feature = "fulltext")]
+        self.fulltext_upsert(graph_id, node_type, node_id, &properties)?;
 
         Ok(StoredNode {
             graph_id: graph_id.to_string(),
@@ -983,6 +1229,13 @@ impl StorageEngine {
         let emb_key = crate::keys::node_key(graph_id, node_type, node_id);
         self.delete(CF_EMBEDDINGS, &emb_key)?;
 
+        // Step 6: drop the full-text document if the node existed (skipping the
+        // commit cost when there was nothing to delete).
+        #[cfg(feature = "fulltext")]
+        if existed {
+            self.fulltext_delete(graph_id, node_type, node_id)?;
+        }
+
         Ok(existed)
     }
 
@@ -1040,6 +1293,10 @@ impl StorageEngine {
             self.delete_index_entries(graph_id, node_type, node_id, &old)?;
             self.write_index_entries(graph_id, node_type, node_id, &properties)?;
         }
+        // Re-mirror full-text: `upsert` has replace semantics, so the prior
+        // document (if any) is overwritten with the new property values.
+        #[cfg(feature = "fulltext")]
+        self.fulltext_upsert(graph_id, node_type, node_id, &properties)?;
 
         Ok(Some(StoredNode {
             graph_id: graph_id.to_string(),
@@ -1364,6 +1621,20 @@ impl StorageEngine {
             );
             let _ = self.commit_batch();
         }
+        // Establish a clean full-text baseline before the batch buffers its own
+        // ops. `discard_batch` reverts via a writer-global `rollback()`, which is
+        // only correct if the writer holds *exactly* this batch's ops. A prior
+        // non-batched write whose index commit failed (the node is in RocksDB,
+        // its index op left uncommitted) would otherwise be dropped by that
+        // rollback — silent, permanent drift. Committing here flushes any such
+        // stranded op (it matches a durable RocksDB write, so committing is the
+        // correct heal) and guarantees the writer is clean when buffering starts.
+        #[cfg(feature = "fulltext")]
+        if let Some(ti) = &self.text_index
+            && let Err(e) = ti.commit()
+        {
+            tracing::error!("full-text commit at begin_batch failed: {e}");
+        }
         self.write_buffer = Some(Vec::new());
     }
 
@@ -1496,12 +1767,31 @@ impl StorageEngine {
             }
         }
 
+        // Make this batch's buffered full-text writes visible now that the
+        // authoritative backend write has landed. Reached only when count > 0
+        // (the empty-buffer case returns early above), and any full-text op in
+        // the batch rode alongside a node put/delete that's part of `count`.
+        #[cfg(feature = "fulltext")]
+        if let Some(ti) = &self.text_index {
+            ti.commit()
+                .map_err(|e| DynoError::Storage(format!("full-text batch commit failed: {e}")))?;
+        }
+
         Ok(count)
     }
 
     /// Discard all buffered writes without committing.
     pub fn discard_batch(&mut self) {
         self.write_buffer = None;
+        // Revert the batch's buffered full-text writes too. Best-effort: a
+        // rollback failure can't be surfaced through this infallible signature,
+        // and the index is rebuildable via `reindex_fulltext` regardless.
+        #[cfg(feature = "fulltext")]
+        if let Some(ti) = &self.text_index
+            && let Err(e) = ti.rollback()
+        {
+            tracing::error!("full-text rollback after discard_batch failed: {e}");
+        }
     }
 
     // =========================================================================
@@ -1517,6 +1807,17 @@ impl StorageEngine {
         let prefix = crate::keys::graph_prefix(graph_id);
         for cf in ALL_CFS {
             self.prefix_delete(cf, &prefix)?;
+        }
+        // Drop the graph's full-text documents too, so they don't outlive the
+        // nodes. Commit cadence follows the batch state, as for node writes.
+        #[cfg(feature = "fulltext")]
+        if let Some(ti) = &self.text_index {
+            ti.delete_graph(graph_id)
+                .map_err(|e| DynoError::Storage(format!("full-text clear failed: {e}")))?;
+            if self.write_buffer.is_none() {
+                ti.commit()
+                    .map_err(|e| DynoError::Storage(format!("full-text commit failed: {e}")))?;
+            }
         }
         Ok(())
     }
@@ -3335,5 +3636,424 @@ schema:
         assert_eq!(g2_out.len(), 1);
         assert_eq!(g1_out[0].to_id, "bob");
         assert_eq!(g2_out[0].to_id, "bob");
+    }
+}
+
+#[cfg(all(test, feature = "fulltext"))]
+mod fulltext_tests {
+    use super::*;
+    use dynograph_core::{Schema, props};
+
+    /// A schema with one full-text node type (`Document` with `title`/`body`
+    /// fulltext) and one without (`Tag`).
+    fn ft_schema() -> Schema {
+        Schema::from_yaml(
+            r#"
+schema:
+  name: ft
+  version: 1
+  node_types:
+    Document:
+      properties:
+        title: { type: string, fulltext: true }
+        body:  { type: string, fulltext: true }
+        author: { type: string, indexed: true }
+    Tag:
+      properties:
+        name: { type: string, indexed: true }
+  edge_types: {}
+"#,
+        )
+        .unwrap()
+    }
+
+    /// RocksDB engine over a fresh temp dir (leaked — the engine holds it open
+    /// for the test, mirroring `test_engine`'s rocksdb arm).
+    fn rocks_engine(schema: Schema) -> StorageEngine {
+        let dir = tempfile::tempdir().expect("temp dir").keep();
+        let path = dir.to_str().expect("utf-8 temp path");
+        StorageEngine::new_rocksdb(schema, path).expect("open rocksdb engine")
+    }
+
+    #[test]
+    fn no_index_built_when_schema_has_no_fulltext() {
+        // Schema with no fulltext property → search is a clean empty, never an
+        // error, and no index is constructed.
+        let schema = Schema::from_yaml(
+            r#"
+schema:
+  name: plain
+  version: 1
+  node_types:
+    Tag:
+      properties:
+        name: { type: string, indexed: true }
+  edge_types: {}
+"#,
+        )
+        .unwrap();
+        let engine = StorageEngine::new_in_memory(schema);
+        assert!(
+            engine
+                .search_fulltext("g1", "anything", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn create_indexes_and_delete_clears_in_memory() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n1",
+                props! { "title" => "Rust Graphs", "body" => "embedded full text search" },
+            )
+            .unwrap();
+
+        // Findable by a token from either fulltext field.
+        let hits = engine.search_fulltext("g1", "graphs", None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node_id, "n1");
+        assert_eq!(hits[0].node_type, "Document");
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "search", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Delete clears the document.
+        engine.delete_node("g1", "Document", "n1").unwrap();
+        assert!(
+            engine
+                .search_fulltext("g1", "graphs", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn replace_properties_reindexes() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n1",
+                props! { "title" => "alpha", "body" => "first" },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "alpha", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        engine
+            .replace_node_properties(
+                "g1",
+                "Document",
+                "n1",
+                props! { "title" => "beta", "body" => "second" },
+            )
+            .unwrap();
+        // Old token gone, new token present — replace semantics held.
+        assert!(
+            engine
+                .search_fulltext("g1", "alpha", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "beta", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn node_type_with_no_fulltext_is_not_searchable() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+        engine
+            .create_node("g1", "Tag", "t1", props! { "name" => "important" })
+            .unwrap();
+        // Tag has no fulltext property → never indexed.
+        assert!(
+            engine
+                .search_fulltext("g1", "important", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn batch_commit_makes_writes_visible_and_discard_rolls_back() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+
+        // Committed batch → searchable.
+        engine.begin_batch();
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n1",
+                props! { "title" => "committed", "body" => "x" },
+            )
+            .unwrap();
+        // Buffered: not yet visible.
+        assert!(
+            engine
+                .search_fulltext("g1", "committed", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        engine.commit_batch().unwrap();
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "committed", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Discarded batch → rolled back, never visible.
+        engine.begin_batch();
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n2",
+                props! { "title" => "transient", "body" => "y" },
+            )
+            .unwrap();
+        engine.discard_batch();
+        assert!(
+            engine
+                .search_fulltext("g1", "transient", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        // The earlier committed doc is untouched by the rollback.
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "committed", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn reindex_rebuilds_and_survives_rocksdb_reopen() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().to_str().expect("utf-8 temp path").to_string();
+
+        {
+            let mut engine =
+                StorageEngine::new_rocksdb(ft_schema(), &path).expect("open rocksdb engine");
+            engine
+                .create_node(
+                    "g1",
+                    "Document",
+                    "n1",
+                    props! { "title" => "persistent", "body" => "z" },
+                )
+                .unwrap();
+            assert_eq!(
+                engine
+                    .search_fulltext("g1", "persistent", None, 10)
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+
+        // Reopen the same dir: the on-disk Tantivy index reloads and the doc is
+        // still searchable without re-indexing.
+        let engine = StorageEngine::new_rocksdb(ft_schema(), &path).expect("reopen rocksdb engine");
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "persistent", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // reindex_fulltext is idempotent: rebuild from RocksDB, still one hit.
+        let n = engine.reindex_fulltext("g1").unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "persistent", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn scoped_by_graph_and_node_type() {
+        let mut engine = rocks_engine(ft_schema());
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "d1",
+                props! { "title" => "common", "body" => "a" },
+            )
+            .unwrap();
+        engine
+            .create_node(
+                "g2",
+                "Document",
+                "d2",
+                props! { "title" => "common", "body" => "b" },
+            )
+            .unwrap();
+        engine
+            .create_node("g1", "Tag", "t1", props! { "name" => "common" })
+            .unwrap();
+
+        // Graph scoping.
+        let g1 = engine.search_fulltext("g1", "common", None, 10).unwrap();
+        assert_eq!(g1.len(), 1);
+        assert_eq!(g1[0].node_id, "d1");
+        // node_type filter (Tag isn't indexed anyway, so only Document matches).
+        let docs = engine
+            .search_fulltext("g1", "common", Some("Document"), 10)
+            .unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].node_id, "d1");
+    }
+
+    #[test]
+    fn clear_graph_drops_fulltext_documents() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n1",
+                props! { "title" => "scrubme", "body" => "a" },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "scrubme", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        engine.clear_graph("g1").unwrap();
+        assert!(
+            engine
+                .search_fulltext("g1", "scrubme", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// #1 regression guard: a discarded batch must not drop a prior committed
+    /// full-text document (the writer is clean at begin_batch, so the rollback
+    /// only reverts the batch's own ops).
+    #[test]
+    fn discard_batch_preserves_prior_committed_fulltext() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n1",
+                props! { "title" => "keepme", "body" => "a" },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "keepme", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        engine.begin_batch();
+        engine
+            .create_node(
+                "g1",
+                "Document",
+                "n2",
+                props! { "title" => "dropme", "body" => "b" },
+            )
+            .unwrap();
+        engine.discard_batch();
+
+        // Prior committed doc survives; the discarded batch's doc never appears.
+        assert_eq!(
+            engine
+                .search_fulltext("g1", "keepme", None, 10)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            engine
+                .search_fulltext("g1", "dropme", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    /// #2: enabling full-text on a live engine (via replace_schema) doesn't
+    /// build an index, so search/reindex fail loud instead of silently empty /
+    /// Ok(0).
+    #[test]
+    fn fulltext_enabled_at_runtime_fails_loud_until_reopen() {
+        let plain = Schema::from_yaml(
+            r#"
+schema:
+  name: p
+  version: 1
+  node_types:
+    Document:
+      properties:
+        title: { type: string }
+  edge_types: {}
+"#,
+        )
+        .unwrap();
+        let mut engine = StorageEngine::new_in_memory(plain);
+        // Genuinely no full-text → clean empty, no error.
+        assert!(
+            engine
+                .search_fulltext("g1", "x", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(engine.reindex_fulltext("g1").unwrap(), 0);
+
+        // Enable full-text at runtime; no index is built for the live engine.
+        engine.replace_schema(ft_schema());
+        assert!(engine.search_fulltext("g1", "x", None, 10).is_err());
+        assert!(engine.reindex_fulltext("g1").is_err());
+    }
+
+    /// #6: a rebuild can't run inside an open batch.
+    #[test]
+    fn reindex_inside_batch_errors() {
+        let mut engine = StorageEngine::new_in_memory(ft_schema());
+        engine.begin_batch();
+        let err = engine.reindex_fulltext("g1").unwrap_err();
+        engine.discard_batch();
+        match err {
+            DynoError::Storage(msg) => assert!(msg.contains("batch"), "got: {msg}"),
+            other => panic!("expected Storage error, got {other:?}"),
+        }
     }
 }

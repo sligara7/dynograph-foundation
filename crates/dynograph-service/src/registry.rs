@@ -55,6 +55,8 @@ pub enum RegistryError {
     InvalidId(String),
     #[error("bad request: {0}")]
     BadRequest(String),
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
     #[error("filesystem error: {0}")]
     Filesystem(String),
     #[error("rehydration failed: {0}")]
@@ -74,6 +76,7 @@ impl IntoResponse for RegistryError {
             Self::InvalidId(_) | Self::BadRequest(_) | Self::EmbeddingDimMismatch { .. } => {
                 StatusCode::BAD_REQUEST
             }
+            Self::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
             Self::Filesystem(_) | Self::Rehydration(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Storage(inner) => status_for_dyno_error(inner),
         };
