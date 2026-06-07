@@ -47,6 +47,7 @@ full annotated shape. The three sections:
 | Key | Default | Description |
 |---|---|---|
 | `bind` | `127.0.0.1:8080` | Listen address. `0.0.0.0:8080` for non-localhost. The Docker image overrides via `ENV DYNOGRAPH_BIND`. |
+| `uds_path` | _(absent)_ | Optional Unix-socket path served *in addition to* `bind` — the full `/v1` API on a faster same-host transport for co-located consumers. Absent means TCP only. A stale socket from a prior run is reclaimed on start; an existing non-socket file at the path is a startup error. |
 
 ### `[storage]`
 
@@ -77,6 +78,7 @@ Exactly one of `secret` or `secret_env` must be set when
 | Variable | Overrides |
 |---|---|
 | `DYNOGRAPH_BIND` | `[server].bind` |
+| `DYNOGRAPH_UDS_PATH` | `[server].uds_path` |
 | `DYNOGRAPH_STORAGE_ROOT` | `[storage].root` (creates the dir if absent) |
 | `RUST_LOG` | tracing filter for stderr logs (e.g. `info`, `debug`, `dynograph_service=trace`) |
 

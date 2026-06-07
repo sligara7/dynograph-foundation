@@ -4,6 +4,19 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## Unreleased
+
+### Added (service)
+
+- **Unix-domain-socket transport** — set `[server].uds_path` (or
+  `DYNOGRAPH_UDS_PATH`) to serve the full `/v1` API on a Unix socket
+  *in addition to* the TCP `bind` address. Same router, auth, limits,
+  and OpenAPI on both transports; a faster path for co-located
+  consumers (e.g. storyflow) with no TCP/IP stack overhead. TCP-only
+  remains the default. A stale socket left by a crashed prior run is
+  reclaimed on start; an existing non-socket file at the path is a
+  hard startup error rather than something silently overwritten.
+
 ## v0.5.6 — 2026-05-10
 
 Tier-3 primitives exposed over HTTP; Tier-2 primitives wrapped in

@@ -8,8 +8,9 @@
 //! 4. Call `rehydrate()` on the on-disk path; the readiness signal
 //!    flips to ready only after rehydrate succeeds. In-memory mode
 //!    is ready immediately.
-//! 5. Serve on `server.bind` until SIGINT or SIGTERM. Graceful
-//!    shutdown lets in-flight requests drain.
+//! 5. Serve on `server.bind` (and, when `server.uds_path` is set, on
+//!    that Unix socket too) until SIGINT or SIGTERM. Graceful
+//!    shutdown lets in-flight requests drain across every transport.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -18,7 +19,7 @@ use std::sync::Arc;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing::{error, info, warn};
 
-use dynograph_service::{AppState, Config, GraphRegistry, Readiness, app};
+use dynograph_service::{AppState, Config, GraphRegistry, Readiness, app, bind_uds};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -79,13 +80,73 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         readiness.mark_ready();
     }
 
-    let listener = tokio::net::TcpListener::bind(&cfg.server.bind).await?;
-    info!(bind = %cfg.server.bind, "dynograph listening");
-    axum::serve(listener, app(state))
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // Build the router once and serve it on every configured transport.
+    // axum's Router is Clone, so the TCP and (optional) UDS listeners
+    // share one handler stack — same routes, auth, limits, OpenAPI.
+    let router = app(state);
+
+    // One shutdown signal fans out to all listeners via a watch channel:
+    // a single task awaits SIGINT/SIGTERM and flips it; every listener's
+    // `with_graceful_shutdown` future (`shutdown_on`) resolves when it
+    // changes. Without this, only one listener would observe the signal.
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(true);
+    });
+
+    // Each transport runs as its own task; both are already running by
+    // the time we await them below, so the awaits don't serialize them.
+    let mut servers = Vec::new();
+
+    let tcp = tokio::net::TcpListener::bind(&cfg.server.bind).await?;
+    info!(bind = %cfg.server.bind, "dynograph listening (tcp)");
+    servers.push(tokio::spawn({
+        let router = router.clone();
+        let rx = shutdown_rx.clone();
+        async move {
+            axum::serve(tcp, router)
+                .with_graceful_shutdown(shutdown_on(rx))
+                .await
+        }
+    }));
+
+    // Optional Unix-domain-socket listener, bound alongside TCP.
+    if let Some(path) = &cfg.server.uds_path {
+        let listener = bind_uds(path)?;
+        info!(uds_path = %path.display(), "dynograph listening (uds)");
+        let path = path.clone();
+        let router = router.clone();
+        let rx = shutdown_rx.clone();
+        servers.push(tokio::spawn(async move {
+            let result = axum::serve(listener, router)
+                .with_graceful_shutdown(shutdown_on(rx))
+                .await;
+            // Best-effort unlink so a clean shutdown doesn't leave a
+            // stale socket that blocks the next bind. A failure here
+            // can't fail the process, but it must not be silent.
+            if let Err(e) = std::fs::remove_file(&path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                warn!(uds_path = %path.display(), "failed to remove socket on shutdown: {e}");
+            }
+            result
+        }));
+    }
+
+    // Surface a listener failure (not just shutdown) from any task.
+    for server in servers {
+        server.await??;
+    }
     info!("shutdown complete");
     Ok(())
+}
+
+/// Graceful-shutdown future shared by every listener: resolves once the
+/// shutdown watch channel flips, so a single SIGINT/SIGTERM drains all
+/// transports together.
+async fn shutdown_on(mut rx: tokio::sync::watch::Receiver<bool>) {
+    let _ = rx.changed().await;
 }
 
 /// Parse `--config <path>` from argv. Anything else is rejected.
@@ -105,6 +166,7 @@ fn parse_config_arg() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
                 println!();
                 println!("Env vars (override TOML):");
                 println!("  DYNOGRAPH_BIND          server bind address (default 127.0.0.1:8080)");
+                println!("  DYNOGRAPH_UDS_PATH      extra Unix-socket path to serve on (default: TCP only)");
                 println!("  DYNOGRAPH_STORAGE_ROOT  RocksDB root dir; absent = in-memory");
                 println!("  RUST_LOG                tracing filter (e.g. info, debug)");
                 std::process::exit(0);

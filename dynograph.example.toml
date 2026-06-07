@@ -3,6 +3,7 @@
 # All sections are optional; omitted ones use defaults. Env vars
 # override TOML values at startup:
 #   DYNOGRAPH_BIND          — overrides [server].bind
+#   DYNOGRAPH_UDS_PATH      — overrides [server].uds_path
 #   DYNOGRAPH_STORAGE_ROOT  — overrides [storage].root
 #
 # Typical patterns:
@@ -16,6 +17,13 @@
 # Docker image overrides to 0.0.0.0:8080 via env var so the host's
 # port mapping is the access boundary.
 bind = "0.0.0.0:8080"
+
+# Optional Unix-domain socket, served *in addition to* `bind`. A
+# faster transport for a co-located consumer (no TCP/IP stack
+# overhead) — point the client at the socket path instead of a URL.
+# Absent → TCP only. A stale socket from a prior run is reclaimed on
+# start; an existing non-socket file at this path is a hard error.
+# uds_path = "/run/dynograph/dynograph.sock"
 
 # Ingress hardening (all optional; defaults shown). Tune for your
 # deployment's request sizes and load profile.

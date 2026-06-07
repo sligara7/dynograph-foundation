@@ -479,6 +479,8 @@ dependencies = [
  "dynograph-storage",
  "dynograph-vector",
  "http-body-util",
+ "hyper",
+ "hyper-util",
  "jsonwebtoken",
  "serde",
  "serde_json",
