@@ -175,9 +175,9 @@ pub struct ServerConfig {
     pub bind: String,
     /// Optional Unix-domain-socket path. When set, the service binds a
     /// `UnixListener` here *in addition to* the TCP `bind` address and
-    /// serves the same router on both — a faster same-host transport
-    /// for co-located consumers (e.g. storyflow) with no TCP/IP stack
-    /// overhead. `None` (the default) means TCP only.
+    /// serves the same router on both — a faster same-host transport for
+    /// co-located consumers with no TCP/IP stack overhead. `None` (the
+    /// default) means TCP only.
     #[serde(default)]
     pub uds_path: Option<PathBuf>,
     /// Max request body size in bytes (413 above it).
