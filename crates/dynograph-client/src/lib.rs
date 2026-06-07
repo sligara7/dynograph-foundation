@@ -1,23 +1,33 @@
 //! Async HTTP client for the dynograph-service `/v1/` API.
 //!
 //! Construct with [`DynographClient::new`] (a base URL like
-//! `http://localhost:8080`); attach a JWT via [`DynographClient::with_bearer`]
-//! when the server is configured with `provider = "bearer_jwt"`. Each
-//! method wraps one HTTP route, returning the corresponding wire
-//! type from [`wire`] or `()` for routes whose response carries no
-//! body. Errors surface as [`ClientError`] with three explicit
-//! shapes — see the error module's doc.
+//! `http://localhost:8080`) for TCP, or [`DynographClient::connect_unix`]
+//! (a socket path) to use foundation's faster same-host Unix-socket
+//! transport — both speak the identical JSON `/v1` API, so the methods
+//! are transport-agnostic. Attach a JWT via
+//! [`DynographClient::with_bearer`] when the server is configured with
+//! `provider = "bearer_jwt"`. Each method wraps one HTTP route, returning
+//! the corresponding wire type from [`wire`] or `()` for routes whose
+//! response carries no body. Errors surface as [`ClientError`] — see the
+//! error module's doc.
 
 mod error;
 mod wire;
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use dynograph_core::Schema;
-use reqwest::{Method, RequestBuilder, Response};
+use http_body_util::{BodyExt, Full};
+use hyper::body::Bytes;
+use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+/// Per-request wall-clock cap. Matches the reqwest TCP client's timeout
+/// so both transports shed a hung request the same way.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub use error::ClientError;
 pub use wire::{
@@ -51,95 +61,193 @@ pub struct CreateEdge<'a> {
 
 #[derive(Clone)]
 pub struct DynographClient {
-    http: reqwest::Client,
-    base_url: Arc<str>,
+    transport: Transport,
+    /// Human-readable endpoint for [`DynographClient::base_url`] and
+    /// logging: the base URL (TCP) or the socket path (UDS).
+    endpoint: Arc<str>,
     bearer: Option<Arc<str>>,
 }
 
+/// How the client reaches the service. `Tcp` keeps the original reqwest
+/// path (unchanged behavior). `Unix` adds a pooled hyper client over a
+/// Unix domain socket — the faster same-host transport foundation serves
+/// when `[server].uds_path` is set. Both speak the identical HTTP/1.1 +
+/// JSON `/v1` API, so the public methods don't care which is active.
+#[derive(Clone)]
+enum Transport {
+    Tcp {
+        http: reqwest::Client,
+        base_url: Arc<str>,
+    },
+    Unix {
+        client: hyper_util::client::legacy::Client<hyperlocal::UnixConnector, Full<Bytes>>,
+        socket: Arc<Path>,
+    },
+}
+
 impl DynographClient {
-    /// Build a client targeting `base_url` (e.g. `http://localhost:8080`).
-    /// The trailing slash is normalized away.
+    /// Build a client targeting `base_url` (e.g. `http://localhost:8080`)
+    /// over TCP. The trailing slash is normalized away.
     pub fn new(base_url: impl Into<String>) -> Self {
         let mut url = base_url.into();
         while url.ends_with('/') {
             url.pop();
         }
+        let base_url: Arc<str> = Arc::from(url);
         Self {
-            http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("default reqwest client"),
-            base_url: Arc::from(url),
+            transport: Transport::Tcp {
+                http: reqwest::Client::builder()
+                    .timeout(REQUEST_TIMEOUT)
+                    .build()
+                    .expect("default reqwest client"),
+                base_url: base_url.clone(),
+            },
+            endpoint: base_url,
             bearer: None,
         }
     }
 
-    /// Attach a bearer token. Sent on every request via reqwest's
-    /// `bearer_auth`.
+    /// Build a client that reaches the service over a Unix domain socket
+    /// at `socket_path` — the faster same-host transport foundation
+    /// serves when `[server].uds_path` is set. Connections are pooled and
+    /// reused (keep-alive), which is where the UDS win over TCP is
+    /// largest. The wire protocol is identical HTTP/1.1 + JSON, so every
+    /// method behaves exactly as it does over TCP.
+    pub fn connect_unix(socket_path: impl AsRef<Path>) -> Self {
+        let socket: Arc<Path> = Arc::from(socket_path.as_ref());
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build(hyperlocal::UnixConnector);
+        Self {
+            endpoint: Arc::from(socket.to_string_lossy().as_ref()),
+            transport: Transport::Unix { client, socket },
+            bearer: None,
+        }
+    }
+
+    /// Attach a bearer token. Sent on every request as
+    /// `Authorization: Bearer <token>`.
     pub fn with_bearer(mut self, token: impl Into<String>) -> Self {
         self.bearer = Some(Arc::from(token.into()));
         self
     }
 
-    /// Service base URL (with no trailing slash).
+    /// The endpoint this client targets: the base URL (TCP, no trailing
+    /// slash) or the socket path (UDS).
     pub fn base_url(&self) -> &str {
-        &self.base_url
+        &self.endpoint
     }
 
-    fn url(&self, path: &str) -> String {
+    fn request(&self, method: Method, path: &str) -> Pending {
         debug_assert!(path.starts_with('/'), "path must start with /");
-        format!("{}{}", self.base_url, path)
-    }
-
-    fn request(&self, method: Method, path: &str) -> RequestBuilder {
-        let mut req = self.http.request(method, self.url(path));
-        if let Some(token) = &self.bearer {
-            req = req.bearer_auth(token.as_ref());
+        Pending {
+            method,
+            path: path.to_string(),
+            query: Vec::new(),
+            body: Ok(None),
         }
-        req
     }
 
-    /// Fire the request and surface a `ClientError::Http { status,
-    /// body }` for any non-2xx — `body` is the server's error message.
-    /// 2xx responses pass through.
+    /// Execute a built request over the active transport, returning the
+    /// raw status + body bytes. This is the only transport-specific
+    /// method; everything above and below it is transport-agnostic.
+    async fn execute(
+        &self,
+        pending: Pending,
+    ) -> Result<(reqwest::StatusCode, Bytes), ClientError> {
+        let Pending {
+            method,
+            path,
+            query,
+            body,
+        } = pending;
+        // A request-body encode failure surfaces here rather than being
+        // swallowed at `.json()` time.
+        let body = body?;
+
+        match &self.transport {
+            Transport::Tcp { http, base_url } => {
+                let mut req = http.request(method, format!("{base_url}{path}"));
+                if !query.is_empty() {
+                    req = req.query(&query);
+                }
+                if let Some(bytes) = body {
+                    req = req
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(bytes);
+                }
+                if let Some(token) = &self.bearer {
+                    req = req.bearer_auth(token.as_ref());
+                }
+                let response = req.send().await?;
+                let status = response.status();
+                let bytes = response.bytes().await?;
+                Ok((status, bytes))
+            }
+            Transport::Unix { client, socket } => {
+                let uri: hyper::Uri =
+                    hyperlocal::Uri::new(socket.as_ref(), &path_and_query(&path, &query)).into();
+                let mut builder = hyper::Request::builder().method(method).uri(uri);
+                if body.is_some() {
+                    builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
+                }
+                if let Some(token) = &self.bearer {
+                    builder =
+                        builder.header(hyper::header::AUTHORIZATION, format!("Bearer {token}"));
+                }
+                let request = builder
+                    .body(Full::new(Bytes::from(body.unwrap_or_default())))
+                    .map_err(|e| ClientError::Unix(e.to_string()))?;
+                let response = tokio::time::timeout(REQUEST_TIMEOUT, client.request(request))
+                    .await
+                    .map_err(|_| ClientError::Unix("request timed out".into()))?
+                    .map_err(|e| ClientError::Unix(e.to_string()))?;
+                let status = response.status();
+                let bytes = response
+                    .into_body()
+                    .collect()
+                    .await
+                    .map_err(|e| ClientError::Unix(e.to_string()))?
+                    .to_bytes();
+                Ok((status, bytes))
+            }
+        }
+    }
+
+    /// Send and surface a `ClientError::Http { status, body }` for any
+    /// non-2xx — `body` is the server's error message. 2xx returns the
+    /// raw body bytes.
     ///
     /// The service returns errors as JSON `{ "error": "<message>" }`, so
-    /// we extract the `error` field for a clean message; a body that
-    /// isn't in that shape (e.g. from an upstream proxy) is passed
-    /// through verbatim.
-    async fn send_raw(&self, req: RequestBuilder) -> Result<Response, ClientError> {
-        let response = req.send().await?;
-        if response.status().is_success() {
-            return Ok(response);
+    /// we extract the `error` field; a body not in that shape (e.g. from
+    /// an upstream proxy) is passed through verbatim.
+    async fn send_raw(&self, pending: Pending) -> Result<Bytes, ClientError> {
+        let (status, bytes) = self.execute(pending).await?;
+        if status.is_success() {
+            return Ok(bytes);
         }
-        let status = response.status();
-        let raw = response.text().await.unwrap_or_default();
-        let body = serde_json::from_str::<ErrorBody>(&raw)
+        let body = serde_json::from_slice::<ErrorBody>(&bytes)
             .map(|e| e.error)
-            .unwrap_or(raw);
+            .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).into_owned());
         Err(ClientError::Http { status, body })
     }
 
     async fn send_json<T: for<'de> Deserialize<'de>>(
         &self,
-        req: RequestBuilder,
+        pending: Pending,
     ) -> Result<T, ClientError> {
-        let response = self.send_raw(req).await?;
-        let bytes = response.bytes().await?;
+        let bytes = self.send_raw(pending).await?;
         serde_json::from_slice(&bytes).map_err(ClientError::from)
     }
 
     /// For DELETE-style endpoints whose success status is 204.
-    async fn send_unit(&self, req: RequestBuilder) -> Result<(), ClientError> {
-        self.send_raw(req).await?;
+    async fn send_unit(&self, pending: Pending) -> Result<(), ClientError> {
+        self.send_raw(pending).await?;
         Ok(())
     }
 
     /// Shorthand for `POST <path>` + JSON body + JSON response, the
-    /// shape that dominates the v0.5.6 surface (and that many
-    /// pre-existing methods would benefit from migrating to too).
-    /// Existing methods unchanged for this PR — migrate
-    /// incrementally.
+    /// shape that dominates the v0.5.6 surface.
     async fn post_json<B: Serialize, T: for<'de> Deserialize<'de>>(
         &self,
         path: &str,
@@ -150,9 +258,9 @@ impl DynographClient {
     }
 
     /// For `/metrics` (Prometheus text) and `/health` / `/ready`.
-    async fn send_text(&self, req: RequestBuilder) -> Result<String, ClientError> {
-        let response = self.send_raw(req).await?;
-        Ok(response.text().await?)
+    async fn send_text(&self, pending: Pending) -> Result<String, ClientError> {
+        let bytes = self.send_raw(pending).await?;
+        Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
     // =========================================================================
@@ -713,6 +821,47 @@ impl DynographClient {
     }
 }
 
+/// A transport-agnostic request under construction. Mirrors the small
+/// slice of reqwest's builder the client actually uses (`.json()` /
+/// `.query()`) so `execute` can dispatch the same description to either
+/// transport.
+struct Pending {
+    method: Method,
+    path: String,
+    query: Vec<(String, String)>,
+    /// Serialized request body, or the encode error to surface at send
+    /// time (mirrors reqwest's eager-serialize-on-`.json()` behavior).
+    body: Result<Option<Vec<u8>>, serde_json::Error>,
+}
+
+impl Pending {
+    fn json<B: Serialize>(mut self, body: &B) -> Self {
+        self.body = serde_json::to_vec(body).map(Some);
+        self
+    }
+
+    fn query(mut self, query: &[(&str, &str)]) -> Self {
+        self.query = query
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        self
+    }
+}
+
+/// Build the `path[?query]` string for the UDS transport (the TCP path
+/// uses reqwest's own `.query()`). Both encode via `serde_urlencoded`, so
+/// the wire form matches across transports. String key/value pairs always
+/// encode, so the `expect` is an invariant check, not a runtime failure
+/// mode.
+fn path_and_query(path: &str, query: &[(String, String)]) -> String {
+    if query.is_empty() {
+        return path.to_string();
+    }
+    let encoded = serde_urlencoded::to_string(query).expect("string pairs always url-encode");
+    format!("{path}?{encoded}")
+}
+
 /// Body builder for the binary-vector `/v1/util/*` endpoints.
 /// `precision` is omitted from the JSON object when `None` (server
 /// defaults to f64) so the wire shape matches the
@@ -750,8 +899,21 @@ mod tests {
     }
 
     #[test]
-    fn url_joins_path_under_base() {
-        let c = DynographClient::new("http://example.com");
-        assert_eq!(c.url("/v1/graphs"), "http://example.com/v1/graphs");
+    fn connect_unix_reports_socket_path_as_endpoint() {
+        let c = DynographClient::connect_unix("/run/dynograph/dynograph.sock");
+        assert_eq!(c.base_url(), "/run/dynograph/dynograph.sock");
+    }
+
+    #[test]
+    fn path_and_query_appends_encoded_pairs() {
+        assert_eq!(path_and_query("/v1/graphs/g/nodes", &[]), "/v1/graphs/g/nodes");
+        let q = vec![
+            ("type".to_string(), "Item".to_string()),
+            ("value".to_string(), "a b".to_string()),
+        ];
+        assert_eq!(
+            path_and_query("/v1/graphs/g/nodes", &q),
+            "/v1/graphs/g/nodes?type=Item&value=a+b"
+        );
     }
 }

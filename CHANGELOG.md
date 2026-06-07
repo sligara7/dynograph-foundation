@@ -17,6 +17,22 @@ workspace `version` in `Cargo.toml`.
   reclaimed on start; an existing non-socket file at the path is a
   hard startup error rather than something silently overwritten.
 
+### Added (client)
+
+- **`DynographClient::connect_unix(path)`** — reach the service over its
+  Unix-socket transport. Connections are pooled/kept-alive (where the
+  UDS win over TCP is largest, per the `transport_bench` example).
+  Identical method surface to the TCP client (`new`) — every call
+  behaves the same; only the constructor differs. `base_url()` returns
+  the socket path for UDS clients.
+
+### Changed (client)
+
+- `ClientError` is now `#[non_exhaustive]` and gains a `Unix(String)`
+  variant for Unix-transport failures (connect / timeout / malformed
+  request), kept separate from the reqwest-backed `Network`. Downstream
+  `match`es need a wildcard arm.
+
 ## v0.5.6 — 2026-05-10
 
 Tier-3 primitives exposed over HTTP; Tier-2 primitives wrapped in
