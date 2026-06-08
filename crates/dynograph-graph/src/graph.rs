@@ -141,6 +141,15 @@ impl GraphBuilder {
             }
         }
 
+        // Sort each adjacency list by neighbor index. The edges were merged
+        // through a HashMap (random iteration order), so without this every
+        // algorithm that depends on neighbor order — e.g. which equal-cost
+        // shortest path is reconstructed, or which witness cycle is reported —
+        // would be non-reproducible across runs. Cheap for the small graphs here.
+        for adj in out_adj.iter_mut().chain(in_adj.iter_mut()) {
+            adj.sort_by_key(|&(neighbor, _)| neighbor);
+        }
+
         Graph {
             ids: self.ids,
             index: self.index,

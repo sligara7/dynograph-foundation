@@ -99,15 +99,11 @@ pub fn link_prediction_all(
         if nbr[u].contains(&v) {
             continue; // already an edge
         }
-        let score = match method {
-            LinkPredictionMethod::CommonNeighbors => common as f64,
-            LinkPredictionMethod::Jaccard => {
-                let union = nbr[u].len() + nbr[v].len() - common;
-                common as f64 / union as f64
-            }
-            LinkPredictionMethod::AdamicAdar => aa_sum,
-        };
-        out.push((u, v, score));
+        out.push((
+            u,
+            v,
+            score_from(method, common, nbr[u].len(), nbr[v].len(), aa_sum),
+        ));
     }
     out
 }
@@ -119,15 +115,33 @@ fn pair_score(
     b: &HashSet<usize>,
     nbr: &[HashSet<usize>],
 ) -> f64 {
+    // Only sum Adamic-Adar terms when that method is requested.
+    let aa_sum = if method == LinkPredictionMethod::AdamicAdar {
+        common.iter().map(|&w| adamic_adar_term(nbr[w].len())).sum()
+    } else {
+        0.0
+    };
+    score_from(method, common.len(), a.len(), b.len(), aa_sum)
+}
+
+/// Combine the resolved overlap quantities into the requested score. Single
+/// definition shared by the single-source and all-pairs paths so they can't
+/// drift. `aa_sum` is the pre-summed Adamic-Adar contribution (unused by the
+/// other methods).
+fn score_from(
+    method: LinkPredictionMethod,
+    common: usize,
+    degree_u: usize,
+    degree_v: usize,
+    aa_sum: f64,
+) -> f64 {
     match method {
-        LinkPredictionMethod::CommonNeighbors => common.len() as f64,
+        LinkPredictionMethod::CommonNeighbors => common as f64,
         LinkPredictionMethod::Jaccard => {
-            let union = a.len() + b.len() - common.len();
-            common.len() as f64 / union as f64
+            let union = degree_u + degree_v - common;
+            common as f64 / union as f64
         }
-        LinkPredictionMethod::AdamicAdar => {
-            common.iter().map(|&w| adamic_adar_term(nbr[w].len())).sum()
-        }
+        LinkPredictionMethod::AdamicAdar => aa_sum,
     }
 }
 

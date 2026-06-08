@@ -535,21 +535,7 @@ mod imp {
                 "personalized_pagerank requires at least one seed".to_string(),
             ));
         }
-        let mut config = PageRankConfig::default();
-        if let Some(d) = req.damping {
-            if !(0.0..=1.0).contains(&d) {
-                return Err(RegistryError::BadRequest(format!(
-                    "damping must be in [0, 1], got {d}"
-                )));
-            }
-            config.damping = d;
-        }
-        if let Some(t) = req.tolerance {
-            config.tolerance = validate_tolerance(t)?;
-        }
-        if let Some(m) = req.max_iterations {
-            config.max_iterations = validate_max_iterations(m)?;
-        }
+        let config = pagerank_config_from(req.damping, req.tolerance, req.max_iterations)?;
         let directed = req.direction == AlgoDirection::Directed;
         let graph = build_graph(
             engine,
@@ -740,21 +726,7 @@ mod imp {
         graph_id: &str,
         req: PageRankRequest,
     ) -> Result<ScoresResponse, RegistryError> {
-        let mut config = PageRankConfig::default();
-        if let Some(d) = req.damping {
-            if !(0.0..=1.0).contains(&d) {
-                return Err(RegistryError::BadRequest(format!(
-                    "damping must be in [0, 1], got {d}"
-                )));
-            }
-            config.damping = d;
-        }
-        if let Some(t) = req.tolerance {
-            config.tolerance = validate_tolerance(t)?;
-        }
-        if let Some(m) = req.max_iterations {
-            config.max_iterations = validate_max_iterations(m)?;
-        }
+        let config = pagerank_config_from(req.damping, req.tolerance, req.max_iterations)?;
         let directed = req.direction == AlgoDirection::Directed;
         let graph = build_graph(
             engine,
@@ -767,6 +739,32 @@ mod imp {
         Ok(ScoresResponse {
             scores: sorted_scores(&graph, raw),
         })
+    }
+
+    /// Build a [`PageRankConfig`] from optional request fields, validating
+    /// damping/tolerance/max_iterations. Shared by `run_pagerank` and
+    /// `run_personalized_pagerank`.
+    fn pagerank_config_from(
+        damping: Option<f64>,
+        tolerance: Option<f64>,
+        max_iterations: Option<usize>,
+    ) -> Result<PageRankConfig, RegistryError> {
+        let mut config = PageRankConfig::default();
+        if let Some(d) = damping {
+            if !(0.0..=1.0).contains(&d) {
+                return Err(RegistryError::BadRequest(format!(
+                    "damping must be in [0, 1], got {d}"
+                )));
+            }
+            config.damping = d;
+        }
+        if let Some(t) = tolerance {
+            config.tolerance = validate_tolerance(t)?;
+        }
+        if let Some(m) = max_iterations {
+            config.max_iterations = validate_max_iterations(m)?;
+        }
+        Ok(config)
     }
 
     /// `algo/eigenvector` — eigenvector centrality (weights = strength).

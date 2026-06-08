@@ -71,6 +71,11 @@ pub fn personalized_pagerank(
     let mut teleport = vec![0.0; n];
     let share = 1.0 / seeds.len() as f64;
     for &s in seeds {
+        if s >= n {
+            return Err(GraphError::InvalidParameter(format!(
+                "seed index {s} is out of range for a {n}-node graph"
+            )));
+        }
         teleport[s] += share;
     }
     power_iteration(graph, &teleport, config)
@@ -221,6 +226,18 @@ mod tests {
         let g = b.build(true);
         assert!(matches!(
             personalized_pagerank(&g, &[], &PageRankConfig::default()),
+            Err(GraphError::InvalidParameter(_))
+        ));
+    }
+
+    #[test]
+    fn personalized_pagerank_rejects_out_of_range_seed() {
+        let mut b = GraphBuilder::new();
+        b.add_edge("a", "b", 1.0).unwrap();
+        let g = b.build(true);
+        // Index 9 is out of range for a 2-node graph: fail loud, don't panic.
+        assert!(matches!(
+            personalized_pagerank(&g, &[9], &PageRankConfig::default()),
             Err(GraphError::InvalidParameter(_))
         ));
     }
