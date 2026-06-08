@@ -6064,6 +6064,49 @@ async fn algo_closeness_non_positive_weight_fails_loud() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
 }
 
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_cuts_finds_hub_and_bridges_in_star_component() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Story-A is a star around char-A1 (A2/loc/ev attach only through it); every
+    // such edge is a bridge and char-A1 is the cut vertex. Story-B is the single
+    // edge char-B1 - char-B2 (itself a bridge, no cut vertex).
+    let (status, resp) = post_algo(&app, "cuts", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+
+    let aps: Vec<&str> = resp["articulation_points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(aps, vec!["char-A1"], "body: {resp}");
+    // Story-A's 3 edges + story-B's 1 edge are all bridges.
+    let bridges = resp["bridges"].as_array().unwrap();
+    assert_eq!(bridges.len(), 4, "body: {resp}");
+    // Each bridge is an {a, b} pair with a < b.
+    for br in bridges {
+        assert!(br["a"].as_str().unwrap() < br["b"].as_str().unwrap());
+    }
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_scc_directed_tree_is_all_singletons() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // The seeded graph has no directed cycles, so every node is its own SCC.
+    let (status, resp) = post_algo(&app, "scc", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["count"], 6, "body: {resp}");
+    for comp in resp["components"].as_array().unwrap() {
+        assert_eq!(comp.as_array().unwrap().len(), 1, "body: {resp}");
+    }
+}
+
 #[cfg(not(feature = "graph"))]
 #[tokio::test]
 async fn algo_endpoints_return_501_without_graph_feature() {
@@ -6077,6 +6120,8 @@ async fn algo_endpoints_return_501_without_graph_feature() {
         "eigenvector",
         "closeness",
         "betweenness",
+        "cuts",
+        "scc",
     ] {
         let res = app
             .clone()

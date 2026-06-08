@@ -384,6 +384,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/cuts": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Articulation points and bridges of the scoped subgraph (treated undirected).\nRead-only; runs under one `with_engine_read` lock. Requires the `graph` build\nfeature; otherwise 501.",
+        "operationId": "algo_cuts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CutsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "articulation points + bridges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CutsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/degree": {
       "post": {
         "tags": [
@@ -533,6 +587,60 @@
           },
           "400": {
             "description": "validation error / did not converge"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/scc": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Strongly-connected components of the scoped directed subgraph. Read-only;\nruns under one `with_engine_read` lock. Requires the `graph` build feature;\notherwise 501.",
+        "operationId": "algo_scc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SccRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "strongly-connected components",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
           },
           "401": {
             "description": "missing or invalid credentials (when bearer auth is enabled)"
@@ -3397,7 +3505,7 @@
       },
       "ComponentsResponse": {
         "type": "object",
-        "description": "One (weakly-)connected component: the node ids it contains.",
+        "description": "One (weakly-)connected component: the node ids it contains. Also the response\nshape for strongly-connected components (`/algo/scc`).",
         "required": [
           "count",
           "components"
@@ -3411,7 +3519,7 @@
                 "type": "string"
               }
             },
-            "description": "Components as lists of node ids. Order is deterministic (by first node\nvisited); within a component, by node index."
+            "description": "Components as lists of node ids; each list sorted, and the lists ordered\ndeterministically by their smallest id."
           },
           "count": {
             "type": "integer",
@@ -3480,6 +3588,62 @@
           },
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "CutEdge": {
+        "type": "object",
+        "description": "One bridge (cut edge), as the unordered pair of node ids it connects\n(`a < b`).",
+        "required": [
+          "a",
+          "b"
+        ],
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          }
+        }
+      },
+      "CutsRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/cuts` (articulation points + bridges).\nPurely structural — treats the subgraph as undirected and ignores weights —\nso it carries only `scope`.",
+        "properties": {
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          }
+        }
+      },
+      "CutsResponse": {
+        "type": "object",
+        "description": "Articulation points and bridges of the (undirected) subgraph.",
+        "required": [
+          "articulation_points",
+          "bridges"
+        ],
+        "properties": {
+          "articulation_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids whose removal increases the number of connected components."
+          },
+          "bridges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CutEdge"
+            },
+            "description": "Edges whose removal increases the number of connected components."
           }
         }
       },
@@ -4257,6 +4421,22 @@
               "type": "number",
               "format": "double"
             }
+          }
+        }
+      },
+      "SccRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/scc` (strongly-connected components).\nPurely structural over the directed subgraph; carries only `scope`.",
+        "properties": {
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
           }
         }
       },

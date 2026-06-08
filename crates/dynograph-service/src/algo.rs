@@ -200,13 +200,50 @@ pub(crate) struct BetweennessRequest {
     pub normalized: Option<bool>,
 }
 
-/// One (weakly-)connected component: the node ids it contains.
+/// Request for `POST /v1/graphs/{id}/algo/cuts` (articulation points + bridges).
+/// Purely structural — treats the subgraph as undirected and ignores weights —
+/// so it carries only `scope`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct CutsRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/scc` (strongly-connected components).
+/// Purely structural over the directed subgraph; carries only `scope`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct SccRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+}
+
+/// One bridge (cut edge), as the unordered pair of node ids it connects
+/// (`a < b`).
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CutEdge {
+    pub a: String,
+    pub b: String,
+}
+
+/// Articulation points and bridges of the (undirected) subgraph.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CutsResponse {
+    /// Node ids whose removal increases the number of connected components.
+    pub articulation_points: Vec<String>,
+    /// Edges whose removal increases the number of connected components.
+    pub bridges: Vec<CutEdge>,
+}
+
+/// One (weakly-)connected component: the node ids it contains. Also the response
+/// shape for strongly-connected components (`/algo/scc`).
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ComponentsResponse {
     /// Number of components.
     pub count: usize,
-    /// Components as lists of node ids. Order is deterministic (by first node
-    /// visited); within a component, by node index.
+    /// Components as lists of node ids; each list sorted, and the lists ordered
+    /// deterministically by their smallest id.
     pub components: Vec<Vec<String>>,
 }
 
@@ -236,7 +273,8 @@ pub(crate) struct ScoresResponse {
 
 #[cfg(feature = "graph")]
 pub(crate) use imp::{
-    run_betweenness, run_closeness, run_components, run_degree, run_eigenvector, run_pagerank,
+    run_betweenness, run_closeness, run_components, run_cuts, run_degree, run_eigenvector,
+    run_pagerank, run_scc,
 };
 
 #[cfg(not(feature = "graph"))]
@@ -274,15 +312,19 @@ not_enabled_stub!(run_eigenvector, EigenvectorRequest, ScoresResponse);
 not_enabled_stub!(run_closeness, ClosenessRequest, ScoresResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_betweenness, BetweennessRequest, ScoresResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_cuts, CutsRequest, CutsResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_scc, SccRequest, ComponentsResponse);
 
 #[cfg(feature = "graph")]
 mod imp {
     use super::*;
 
     use dynograph_graph::{
-        DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError, PageRankConfig,
-        betweenness_centrality, closeness_centrality, connected_components, degree_centrality,
-        eigenvector_centrality, pagerank,
+        Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError, PageRankConfig,
+        betweenness_centrality, closeness_centrality, connected_components, cut_structure,
+        degree_centrality, eigenvector_centrality, pagerank, strongly_connected_components,
     };
     use dynograph_storage::{StorageEngine, StoredEdge};
 
@@ -316,21 +358,69 @@ mod imp {
         req: ComponentsRequest,
     ) -> Result<ComponentsResponse, RegistryError> {
         let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, true)?;
-        let comps = connected_components(&graph);
-        let components = comps
+        Ok(components_response(&graph, connected_components(&graph)))
+    }
+
+    /// `algo/scc` — strongly-connected components over the scoped directed graph.
+    pub(crate) fn run_scc(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: SccRequest,
+    ) -> Result<ComponentsResponse, RegistryError> {
+        let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, true)?;
+        Ok(components_response(
+            &graph,
+            strongly_connected_components(&graph),
+        ))
+    }
+
+    /// `algo/cuts` — articulation points and bridges over the scoped undirected
+    /// graph. Purely structural: built undirected, weights ignored.
+    pub(crate) fn run_cuts(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: CutsRequest,
+    ) -> Result<CutsResponse, RegistryError> {
+        let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, false)?;
+        let cuts = cut_structure(&graph);
+        Ok(CutsResponse {
+            articulation_points: cuts
+                .articulation_points
+                .into_iter()
+                .map(|idx| graph.id_of(idx).to_string())
+                .collect(),
+            bridges: cuts
+                .bridges
+                .into_iter()
+                .map(|(a, b)| CutEdge {
+                    a: graph.id_of(a).to_string(),
+                    b: graph.id_of(b).to_string(),
+                })
+                .collect(),
+        })
+    }
+
+    /// Map a [`Components`] partition to the wire response: each component a
+    /// sorted list of node ids, the lists ordered by their smallest id (so the
+    /// output is deterministic regardless of internal label assignment).
+    fn components_response(graph: &Graph, comps: Components) -> ComponentsResponse {
+        let mut components: Vec<Vec<String>> = comps
             .groups()
             .into_iter()
             .map(|group| {
-                group
+                let mut ids: Vec<String> = group
                     .into_iter()
                     .map(|idx| graph.id_of(idx).to_string())
-                    .collect()
+                    .collect();
+                ids.sort();
+                ids
             })
             .collect();
-        Ok(ComponentsResponse {
+        components.sort();
+        ComponentsResponse {
             count: comps.count,
             components,
-        })
+        }
     }
 
     /// `algo/degree` — degree centrality over the scoped graph.

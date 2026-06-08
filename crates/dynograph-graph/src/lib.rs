@@ -13,9 +13,11 @@
 //!
 //! Provides:
 //! - [`Graph`] / [`GraphBuilder`] with self-loop and parallel-edge policies
-//! - Connected / weakly-connected [`components`](connected_components)
+//! - Connected / weakly-connected [`components`](connected_components) and
+//!   strongly-connected components ([`strongly_connected_components`])
 //! - Centrality: [`degree_centrality`], [`pagerank`], [`eigenvector_centrality`],
 //!   [`closeness_centrality`], [`betweenness_centrality`]
+//! - Structure: articulation points & bridges ([`cut_structure`])
 //!
 //! Edge weights carry one of two meanings depending on the algorithm, and the
 //! caller must supply the right kind:
@@ -31,17 +33,21 @@ mod betweenness;
 mod centrality;
 mod closeness;
 mod components;
+mod cuts;
 mod eigenvector;
 mod error;
 mod graph;
 mod pagerank;
 mod paths;
+mod scc;
 
 pub use betweenness::betweenness_centrality;
 pub use centrality::{DegreeMode, degree_centrality};
 pub use closeness::closeness_centrality;
 pub use components::{Components, connected_components};
+pub use cuts::{Cuts, cut_structure};
 pub use eigenvector::{EigenvectorConfig, eigenvector_centrality};
 pub use error::GraphError;
 pub use graph::{Graph, GraphBuilder, ParallelEdgePolicy, SelfLoopPolicy};
 pub use pagerank::{PageRankConfig, pagerank};
+pub use scc::strongly_connected_components;

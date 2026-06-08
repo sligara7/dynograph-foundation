@@ -23,8 +23,8 @@ use dynograph_vector::HnswIndex;
 use crate::{
     algo::{
         AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ComponentsRequest,
-        ComponentsResponse, DegreeModeWire, DegreeRequest, EigenvectorRequest, NodeScore,
-        PageRankRequest, ScoresResponse, WeightSpec,
+        ComponentsResponse, CutEdge, CutsRequest, CutsResponse, DegreeModeWire, DegreeRequest,
+        EigenvectorRequest, NodeScore, PageRankRequest, SccRequest, ScoresResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
@@ -122,6 +122,8 @@ use crate::{
         algo_eigenvector,
         algo_closeness,
         algo_betweenness,
+        algo_cuts,
+        algo_scc,
         // embeddings + search
         set_embedding,
         get_embedding,
@@ -241,9 +243,13 @@ use crate::{
         EigenvectorRequest,
         ClosenessRequest,
         BetweennessRequest,
+        CutsRequest,
+        SccRequest,
         ComponentsResponse,
         ScoresResponse,
         NodeScore,
+        CutsResponse,
+        CutEdge,
         // welford
         WelfordUpdateRequest,
         WelfordUpdateResponse,
@@ -417,6 +423,8 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/algo/eigenvector", post(algo_eigenvector))
         .route("/v1/graphs/{id}/algo/closeness", post(algo_closeness))
         .route("/v1/graphs/{id}/algo/betweenness", post(algo_betweenness))
+        .route("/v1/graphs/{id}/algo/cuts", post(algo_cuts))
+        .route("/v1/graphs/{id}/algo/scc", post(algo_scc))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -1816,6 +1824,62 @@ async fn algo_betweenness(
     let entry = graph_entry(&state, &id)?;
     let response = entry
         .with_engine_read(move |engine| crate::algo::run_betweenness(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Articulation points and bridges of the scoped subgraph (treated undirected).
+/// Read-only; runs under one `with_engine_read` lock. Requires the `graph` build
+/// feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/cuts",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = CutsRequest,
+    responses(
+        (status = 200, description = "articulation points + bridges", body = CutsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_cuts(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<CutsRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_cuts(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Strongly-connected components of the scoped directed subgraph. Read-only;
+/// runs under one `with_engine_read` lock. Requires the `graph` build feature;
+/// otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/scc",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = SccRequest,
+    responses(
+        (status = 200, description = "strongly-connected components", body = ComponentsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_scc(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SccRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_scc(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
 }
