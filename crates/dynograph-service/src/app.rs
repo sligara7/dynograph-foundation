@@ -2894,7 +2894,14 @@ async fn util_centroid(Json(req): Json<VectorsRequest>) -> Result<Response, Regi
     tag = "util",
 )]
 async fn util_pairwise_cosine(Json(req): Json<VectorsRequest>) -> Result<Response, RegistryError> {
-    Ok(Json(run_pairwise_cosine(req)?).into_response())
+    // O(N²·dim) — offload to the blocking pool so a large matrix can't pin a
+    // tokio worker (the timeout layer can't preempt CPU-bound work). Mirrors how
+    // the storage/engine wrappers run their synchronous work; a panic in the
+    // task is re-raised here, a validation error becomes a 400.
+    let resp = tokio::task::spawn_blocking(move || run_pairwise_cosine(req))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Json(resp).into_response())
 }
 
 #[utoipa::path(
@@ -2910,7 +2917,11 @@ async fn util_pairwise_cosine(Json(req): Json<VectorsRequest>) -> Result<Respons
 async fn util_pairwise_distance(
     Json(req): Json<PairwiseDistanceRequest>,
 ) -> Result<Response, RegistryError> {
-    Ok(Json(run_pairwise_distance(req)?).into_response())
+    // O(N²·dim) — offload to the blocking pool (see `util_pairwise_cosine`).
+    let resp = tokio::task::spawn_blocking(move || run_pairwise_distance(req))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Json(resp).into_response())
 }
 
 #[utoipa::path(
