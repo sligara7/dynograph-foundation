@@ -95,12 +95,8 @@ async fn main() {
 
     // vector_post — reused connection (large request payload).
     let vb = vector_body.clone();
-    let tcp_vec = run_persistent(
-        || tcp(addr),
-        move || cosine_req(vb.clone()),
-        StatusCode::OK,
-    )
-    .await;
+    let tcp_vec =
+        run_persistent(|| tcp(addr), move || cosine_req(vb.clone()), StatusCode::OK).await;
     report("vector_post", "tcp", "keepalive", &tcp_vec);
     let vb = vector_body.clone();
     let uds_vec = run_persistent(
@@ -190,7 +186,11 @@ async fn seed(sender: &mut SendRequest<Full<Bytes>>) {
     let node = json!({ "node_type": "Item", "node_id": "n1", "properties": { "name": "first" } });
     call(
         sender,
-        req("POST", "/v1/graphs/bench/nodes", Bytes::from(node.to_string())),
+        req(
+            "POST",
+            "/v1/graphs/bench/nodes",
+            Bytes::from(node.to_string()),
+        ),
         StatusCode::CREATED,
     )
     .await;

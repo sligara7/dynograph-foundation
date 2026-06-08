@@ -151,10 +151,7 @@ impl DynographClient {
     /// Execute a built request over the active transport, returning the
     /// raw status + body bytes. This is the only transport-specific
     /// method; everything above and below it is transport-agnostic.
-    async fn execute(
-        &self,
-        pending: Pending,
-    ) -> Result<(reqwest::StatusCode, Bytes), ClientError> {
+    async fn execute(&self, pending: Pending) -> Result<(reqwest::StatusCode, Bytes), ClientError> {
         let Pending {
             method,
             path,
@@ -198,18 +195,26 @@ impl DynographClient {
                 let request = builder
                     .body(Full::new(Bytes::from(body.unwrap_or_default())))
                     .map_err(|e| ClientError::Unix(e.to_string()))?;
-                let response = tokio::time::timeout(REQUEST_TIMEOUT, client.request(request))
+                // One timeout over the whole exchange — header wait *and*
+                // body read — so a stalled response body is shed the same
+                // way the reqwest TCP client's wall-clock timeout sheds it.
+                let exchange = async {
+                    let response = client
+                        .request(request)
+                        .await
+                        .map_err(|e| ClientError::Unix(e.to_string()))?;
+                    let status = response.status();
+                    let bytes = response
+                        .into_body()
+                        .collect()
+                        .await
+                        .map_err(|e| ClientError::Unix(e.to_string()))?
+                        .to_bytes();
+                    Ok::<_, ClientError>((status, bytes))
+                };
+                tokio::time::timeout(REQUEST_TIMEOUT, exchange)
                     .await
                     .map_err(|_| ClientError::Unix("request timed out".into()))?
-                    .map_err(|e| ClientError::Unix(e.to_string()))?;
-                let status = response.status();
-                let bytes = response
-                    .into_body()
-                    .collect()
-                    .await
-                    .map_err(|e| ClientError::Unix(e.to_string()))?
-                    .to_bytes();
-                Ok((status, bytes))
             }
         }
     }
@@ -906,7 +911,10 @@ mod tests {
 
     #[test]
     fn path_and_query_appends_encoded_pairs() {
-        assert_eq!(path_and_query("/v1/graphs/g/nodes", &[]), "/v1/graphs/g/nodes");
+        assert_eq!(
+            path_and_query("/v1/graphs/g/nodes", &[]),
+            "/v1/graphs/g/nodes"
+        );
         let q = vec![
             ("type".to_string(), "Item".to_string()),
             ("value".to_string(), "a b".to_string()),

@@ -17,7 +17,11 @@ use serde_json::{Map, Value, json};
 /// client pointed at it. The `TempDir` and `JoinHandle` are returned so
 /// the caller keeps them alive for the test's duration (dropping the dir
 /// removes the socket; dropping the handle stops the server).
-async fn spawn_uds() -> (DynographClient, tempfile::TempDir, tokio::task::JoinHandle<()>) {
+async fn spawn_uds() -> (
+    DynographClient,
+    tempfile::TempDir,
+    tokio::task::JoinHandle<()>,
+) {
     let state = AppState::new(
         Arc::new(GraphRegistry::new()),
         Arc::new(NoAuth::new()),

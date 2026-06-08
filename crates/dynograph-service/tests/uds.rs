@@ -50,7 +50,12 @@ async fn send(
 
     let resp = sender.send_request(req).await.expect("send request");
     let status = resp.status();
-    let bytes = resp.into_body().collect().await.expect("read body").to_bytes();
+    let bytes = resp
+        .into_body()
+        .collect()
+        .await
+        .expect("read body")
+        .to_bytes();
     (status, bytes.to_vec())
 }
 

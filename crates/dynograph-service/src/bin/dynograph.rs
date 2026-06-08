@@ -95,21 +95,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let _ = shutdown_tx.send(true);
     });
 
-    // Each transport runs as its own task; both are already running by
-    // the time we await them below, so the awaits don't serialize them.
-    let mut servers = Vec::new();
+    // Each transport runs as its own task in a JoinSet so the *first* one
+    // to finish surfaces immediately — if the optional UDS listener errors
+    // while TCP keeps serving, we observe it at once rather than blocking
+    // on TCP. On graceful shutdown every task returns ~together and the
+    // loop drains them all.
+    let mut servers = tokio::task::JoinSet::new();
 
     let tcp = tokio::net::TcpListener::bind(&cfg.server.bind).await?;
     info!(bind = %cfg.server.bind, "dynograph listening (tcp)");
-    servers.push(tokio::spawn({
+    {
         let router = router.clone();
         let rx = shutdown_rx.clone();
-        async move {
+        servers.spawn(async move {
             axum::serve(tcp, router)
                 .with_graceful_shutdown(shutdown_on(rx))
                 .await
-        }
-    }));
+        });
+    }
 
     // Optional Unix-domain-socket listener, bound alongside TCP.
     if let Some(path) = &cfg.server.uds_path {
@@ -118,7 +121,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let path = path.clone();
         let router = router.clone();
         let rx = shutdown_rx.clone();
-        servers.push(tokio::spawn(async move {
+        servers.spawn(async move {
             let result = axum::serve(listener, router)
                 .with_graceful_shutdown(shutdown_on(rx))
                 .await;
@@ -131,22 +134,26 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 warn!(uds_path = %path.display(), "failed to remove socket on shutdown: {e}");
             }
             result
-        }));
+        });
     }
 
-    // Surface a listener failure (not just shutdown) from any task.
-    for server in servers {
-        server.await??;
+    // Surface a listener failure (not just shutdown) from whichever task
+    // finishes first. Dropping the JoinSet on an early return aborts the
+    // still-running listeners.
+    while let Some(joined) = servers.join_next().await {
+        joined??;
     }
     info!("shutdown complete");
     Ok(())
 }
 
 /// Graceful-shutdown future shared by every listener: resolves once the
-/// shutdown watch channel flips, so a single SIGINT/SIGTERM drains all
-/// transports together.
+/// shutdown watch channel flips to `true`, so a single SIGINT/SIGTERM
+/// drains all transports together. `wait_for` checks the current value
+/// first, so a signal that arrives before this future is polled is still
+/// observed (no missed-edge hang).
 async fn shutdown_on(mut rx: tokio::sync::watch::Receiver<bool>) {
-    let _ = rx.changed().await;
+    let _ = rx.wait_for(|&signalled| signalled).await;
 }
 
 /// Parse `--config <path>` from argv. Anything else is rejected.
@@ -166,7 +173,9 @@ fn parse_config_arg() -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
                 println!();
                 println!("Env vars (override TOML):");
                 println!("  DYNOGRAPH_BIND          server bind address (default 127.0.0.1:8080)");
-                println!("  DYNOGRAPH_UDS_PATH      extra Unix-socket path to serve on (default: TCP only)");
+                println!(
+                    "  DYNOGRAPH_UDS_PATH      extra Unix-socket path to serve on (default: TCP only)"
+                );
                 println!("  DYNOGRAPH_STORAGE_ROOT  RocksDB root dir; absent = in-memory");
                 println!("  RUST_LOG                tracing filter (e.g. info, debug)");
                 std::process::exit(0);
