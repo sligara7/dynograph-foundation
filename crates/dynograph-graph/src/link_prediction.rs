@@ -23,20 +23,6 @@ pub enum LinkPredictionMethod {
     AdamicAdar,
 }
 
-/// Neighbor sets per node (undirected adjacency, self excluded).
-fn neighbor_sets(graph: &Graph) -> Vec<HashSet<usize>> {
-    (0..graph.node_count())
-        .map(|u| {
-            graph
-                .out_neighbors(u)
-                .iter()
-                .map(|&(v, _)| v)
-                .filter(|&v| v != u)
-                .collect()
-        })
-        .collect()
-}
-
 fn adamic_adar_term(degree: usize) -> f64 {
     1.0 / (degree as f64).ln()
 }
@@ -48,7 +34,7 @@ pub fn link_prediction_from(
     source: usize,
     method: LinkPredictionMethod,
 ) -> Vec<(usize, f64)> {
-    let nbr = neighbor_sets(graph);
+    let nbr = graph.neighbor_sets();
     let src = &nbr[source];
     let mut out = Vec::new();
     for (t, t_nbr) in nbr.iter().enumerate() {
@@ -72,7 +58,7 @@ pub fn link_prediction_all(
     graph: &Graph,
     method: LinkPredictionMethod,
 ) -> Vec<(usize, usize, f64)> {
-    let nbr = neighbor_sets(graph);
+    let nbr = graph.neighbor_sets();
     // Per unordered pair: (common-neighbor count, accumulated Adamic-Adar sum).
     let mut acc: HashMap<(usize, usize), (usize, f64)> = HashMap::new();
     for w_nbr in &nbr {

@@ -10,7 +10,7 @@
 //! service layer scans storage, projects each edge to a finite `f64` weight, and
 //! feeds `(from, to, weight)` triples in. This crate never touches storage.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::error::GraphError;
 
@@ -215,6 +215,21 @@ impl Graph {
     /// undirected) as `(neighbor_index, weight)`.
     pub fn in_neighbors(&self, idx: usize) -> &[(usize, f64)] {
         &self.in_adj[idx]
+    }
+
+    /// The set of each node's neighbor indices (from out-adjacency, self
+    /// excluded) — the undirected neighborhood when built undirected. Shared by
+    /// the neighborhood-overlap measures (clustering, link prediction).
+    pub(crate) fn neighbor_sets(&self) -> Vec<HashSet<usize>> {
+        (0..self.node_count())
+            .map(|u| {
+                self.out_neighbors(u)
+                    .iter()
+                    .map(|&(v, _)| v)
+                    .filter(|&v| v != u)
+                    .collect()
+            })
+            .collect()
     }
 }
 

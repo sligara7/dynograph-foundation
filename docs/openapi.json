@@ -730,7 +730,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MaxFlowRequest"
+                "$ref": "#/components/schemas/SourceTargetRequest"
               }
             }
           },
@@ -946,7 +946,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ShortestPathRequest"
+                "$ref": "#/components/schemas/SourceTargetRequest"
               }
             }
           },
@@ -4294,7 +4294,7 @@
       },
       "FlowEdge": {
         "type": "object",
-        "description": "One min-cut edge crossing from the source side to the sink side.",
+        "description": "One min-cut edge crossing from the source side to the sink side. For an\nundirected graph `from` is always the source-side endpoint (there is no\nstored edge direction).",
         "required": [
           "from",
           "to"
@@ -4406,49 +4406,6 @@
           "vector_merge",
           "created_new"
         ]
-      },
-      "MaxFlowRequest": {
-        "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/max_flow`. Edge weights are\n**capacities** (non-negative); omit `weight` for unit capacities.",
-        "properties": {
-          "direction": {
-            "$ref": "#/components/schemas/AlgoDirection"
-          },
-          "scope": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/AlgoScope"
-              }
-            ]
-          },
-          "source": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Flow source node id (required)."
-          },
-          "target": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Flow sink node id (required)."
-          },
-          "weight": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/WeightSpec"
-              }
-            ]
-          }
-        }
       },
       "MaxFlowResponse": {
         "type": "object",
@@ -5197,49 +5154,6 @@
           }
         }
       },
-      "ShortestPathRequest": {
-        "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/shortest_path`. Edge weights are path\n**costs** (strictly positive); omit `weight` for hop-count distance.",
-        "properties": {
-          "direction": {
-            "$ref": "#/components/schemas/AlgoDirection"
-          },
-          "scope": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/AlgoScope"
-              }
-            ]
-          },
-          "source": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Start node id (required)."
-          },
-          "target": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "End node id (required)."
-          },
-          "weight": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/WeightSpec"
-              }
-            ]
-          }
-        }
-      },
       "ShortestPathResponse": {
         "type": "object",
         "description": "A shortest path between two nodes. `found` is false (with an empty `path`)\nwhen the target is unreachable from the source.",
@@ -5338,6 +5252,49 @@
           },
           "type": {
             "$ref": "#/components/schemas/SourceTypeFilter"
+          }
+        }
+      },
+      "SourceTargetRequest": {
+        "type": "object",
+        "description": "A request carrying a `source`/`target` node pair plus the usual scope, weight,\nand direction — shared by `/algo/shortest_path` (weight = path cost) and\n`/algo/max_flow` (weight = capacity). The two `source`/`target` ids are\nrequired; the per-endpoint weight semantics are documented on each route.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Start node id (required)."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "End node id (required)."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
           }
         }
       },

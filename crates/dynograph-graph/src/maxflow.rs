@@ -53,6 +53,16 @@ pub fn max_flow_min_cut(graph: &Graph, source: usize, target: usize) -> Result<M
                     "max-flow capacities must be non-negative, got {c}"
                 )));
             }
+            // A positive capacity below the residual-zero tolerance would be
+            // silently treated as no edge (BFS skips it), under-reporting the
+            // flow. Reject it loudly rather than return a wrong-but-successful
+            // answer — the caller should rescale such capacities.
+            if c > 0.0 && c < EPS {
+                return Err(GraphError::InvalidWeight(format!(
+                    "max-flow capacity {c} is positive but below the {EPS} numerical \
+                     resolution; rescale capacities"
+                )));
+            }
             *res[u].entry(v).or_insert(0.0) += c;
             res[v].entry(u).or_insert(0.0);
         }
@@ -210,6 +220,18 @@ mod tests {
         assert!(matches!(
             max_flow_min_cut(&g, s, s),
             Err(GraphError::InvalidParameter(_))
+        ));
+    }
+
+    #[test]
+    fn sub_resolution_capacity_rejected() {
+        // A positive-but-tiny capacity would silently read as zero flow; reject it.
+        let mut b = GraphBuilder::new();
+        b.add_edge("s", "t", 1e-12).unwrap();
+        let g = b.build(true);
+        assert!(matches!(
+            max_flow_min_cut(&g, g.idx_of("s").unwrap(), g.idx_of("t").unwrap()),
+            Err(GraphError::InvalidWeight(_))
         ));
     }
 

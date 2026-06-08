@@ -271,11 +271,13 @@ pub(crate) struct PersonalizedPageRankRequest {
     pub max_iterations: Option<usize>,
 }
 
-/// Request for `POST /v1/graphs/{id}/algo/shortest_path`. Edge weights are path
-/// **costs** (strictly positive); omit `weight` for hop-count distance.
+/// A request carrying a `source`/`target` node pair plus the usual scope, weight,
+/// and direction — shared by `/algo/shortest_path` (weight = path cost) and
+/// `/algo/max_flow` (weight = capacity). The two `source`/`target` ids are
+/// required; the per-endpoint weight semantics are documented on each route.
 #[derive(Debug, Deserialize, ToSchema)]
 #[cfg_attr(not(feature = "graph"), allow(dead_code))]
-pub(crate) struct ShortestPathRequest {
+pub(crate) struct SourceTargetRequest {
     #[serde(default)]
     pub scope: Option<AlgoScope>,
     /// Start node id (required).
@@ -374,26 +376,9 @@ pub(crate) struct ToposortResponse {
     pub order: Vec<String>,
 }
 
-/// Request for `POST /v1/graphs/{id}/algo/max_flow`. Edge weights are
-/// **capacities** (non-negative); omit `weight` for unit capacities.
-#[derive(Debug, Deserialize, ToSchema)]
-#[cfg_attr(not(feature = "graph"), allow(dead_code))]
-pub(crate) struct MaxFlowRequest {
-    #[serde(default)]
-    pub scope: Option<AlgoScope>,
-    /// Flow source node id (required).
-    #[serde(default)]
-    pub source: Option<String>,
-    /// Flow sink node id (required).
-    #[serde(default)]
-    pub target: Option<String>,
-    #[serde(default)]
-    pub weight: Option<WeightSpec>,
-    #[serde(default)]
-    pub direction: AlgoDirection,
-}
-
-/// One min-cut edge crossing from the source side to the sink side.
+/// One min-cut edge crossing from the source side to the sink side. For an
+/// undirected graph `from` is always the source-side endpoint (there is no
+/// stored edge direction).
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct FlowEdge {
     pub from: String,
@@ -474,7 +459,7 @@ not_enabled_stub!(
     ScoresResponse
 );
 #[cfg(not(feature = "graph"))]
-not_enabled_stub!(run_shortest_path, ShortestPathRequest, ShortestPathResponse);
+not_enabled_stub!(run_shortest_path, SourceTargetRequest, ShortestPathResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(
     run_link_prediction,
@@ -486,7 +471,7 @@ not_enabled_stub!(run_clustering, ScopedRequest, ClusteringResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_toposort, ScopedRequest, ToposortResponse);
 #[cfg(not(feature = "graph"))]
-not_enabled_stub!(run_max_flow, MaxFlowRequest, MaxFlowResponse);
+not_enabled_stub!(run_max_flow, SourceTargetRequest, MaxFlowResponse);
 
 #[cfg(feature = "graph")]
 mod imp {
@@ -623,7 +608,7 @@ mod imp {
     pub(crate) fn run_shortest_path(
         engine: &StorageEngine,
         graph_id: &str,
-        req: ShortestPathRequest,
+        req: SourceTargetRequest,
     ) -> Result<ShortestPathResponse, RegistryError> {
         let source = required_node(&req.source, "source")?;
         let target = required_node(&req.target, "target")?;
@@ -765,7 +750,7 @@ mod imp {
     pub(crate) fn run_max_flow(
         engine: &StorageEngine,
         graph_id: &str,
-        req: MaxFlowRequest,
+        req: SourceTargetRequest,
     ) -> Result<MaxFlowResponse, RegistryError> {
         let source = required_node(&req.source, "source")?;
         let target = required_node(&req.target, "target")?;

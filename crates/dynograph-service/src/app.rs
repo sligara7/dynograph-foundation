@@ -25,9 +25,9 @@ use crate::{
         AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ClusteringResponse,
         ComponentsResponse, CutEdge, CutsResponse, CyclesResponse, DegreeModeWire, DegreeRequest,
         EigenvectorRequest, FlowEdge, LinkPredictionMethodWire, LinkPredictionRequest,
-        LinkPredictionResponse, MaxFlowRequest, MaxFlowResponse, NodeScore, PageRankRequest,
+        LinkPredictionResponse, MaxFlowResponse, NodeScore, PageRankRequest,
         PersonalizedPageRankRequest, PredictedLink, ScopedRequest, ScoresResponse,
-        ShortestPathRequest, ShortestPathResponse, ToposortResponse, WeightSpec,
+        ShortestPathResponse, SourceTargetRequest, ToposortResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
@@ -254,10 +254,9 @@ use crate::{
         ClosenessRequest,
         BetweennessRequest,
         PersonalizedPageRankRequest,
-        ShortestPathRequest,
+        SourceTargetRequest,
         LinkPredictionRequest,
         LinkPredictionMethodWire,
-        MaxFlowRequest,
         ComponentsResponse,
         ScoresResponse,
         NodeScore,
@@ -1983,7 +1982,7 @@ async fn algo_personalized_pagerank(
     post,
     path = "/v1/graphs/{id}/algo/shortest_path",
     params(("id" = String, Path, description = "graph id")),
-    request_body = ShortestPathRequest,
+    request_body = SourceTargetRequest,
     responses(
         (status = 200, description = "shortest path + distance", body = ShortestPathResponse),
         (status = 400, description = "validation error"),
@@ -1995,7 +1994,7 @@ async fn algo_personalized_pagerank(
 async fn algo_shortest_path(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<ShortestPathRequest>,
+    Json(req): Json<SourceTargetRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry
@@ -2095,7 +2094,7 @@ async fn algo_toposort(
     post,
     path = "/v1/graphs/{id}/algo/max_flow",
     params(("id" = String, Path, description = "graph id")),
-    request_body = MaxFlowRequest,
+    request_body = SourceTargetRequest,
     responses(
         (status = 200, description = "max flow value + min cut", body = MaxFlowResponse),
         (status = 400, description = "validation error"),
@@ -2107,7 +2106,7 @@ async fn algo_toposort(
 async fn algo_max_flow(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<MaxFlowRequest>,
+    Json(req): Json<SourceTargetRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry

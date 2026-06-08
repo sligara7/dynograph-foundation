@@ -8,8 +8,6 @@
 //! - **Transitivity** (global clustering): `3·triangles / connected-triples`,
 //!   i.e. the fraction of length-2 paths that close into a triangle.
 
-use std::collections::HashSet;
-
 use crate::graph::Graph;
 
 /// Per-node local clustering plus the two global summaries.
@@ -23,24 +21,10 @@ pub struct Clustering {
     pub average: f64,
 }
 
-/// Undirected neighbor sets (self excluded).
-fn neighbor_sets(graph: &Graph) -> Vec<HashSet<usize>> {
-    (0..graph.node_count())
-        .map(|u| {
-            graph
-                .out_neighbors(u)
-                .iter()
-                .map(|&(v, _)| v)
-                .filter(|&v| v != u)
-                .collect()
-        })
-        .collect()
-}
-
 /// Compute local clustering, average clustering, and global transitivity.
 pub fn clustering(graph: &Graph) -> Clustering {
     let n = graph.node_count();
-    let nbr = neighbor_sets(graph);
+    let nbr = graph.neighbor_sets();
     let mut local = vec![0.0; n];
 
     // `closed` accumulates Σ_v |N(i)∩N(v)| over neighbors i of v = 2·(edges among
