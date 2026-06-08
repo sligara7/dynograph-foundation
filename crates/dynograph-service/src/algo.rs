@@ -353,6 +353,63 @@ pub(crate) struct CyclesResponse {
     pub cycle: Vec<String>,
 }
 
+/// Response for `POST /v1/graphs/{id}/algo/clustering` (undirected). Per-node
+/// local clustering scores plus the two global summaries.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ClusteringResponse {
+    /// Local clustering coefficient per node, highest first.
+    pub scores: Vec<NodeScore>,
+    /// Global transitivity: 3·triangles / connected-triples.
+    pub transitivity: f64,
+    /// Mean local clustering coefficient over all nodes.
+    pub average_clustering: f64,
+}
+
+/// Response for `POST /v1/graphs/{id}/algo/toposort` (directed). `acyclic` is
+/// true for a DAG, with `order` a topological ordering; otherwise `order` is
+/// empty (the graph has a cycle).
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ToposortResponse {
+    pub acyclic: bool,
+    pub order: Vec<String>,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/max_flow`. Edge weights are
+/// **capacities** (non-negative); omit `weight` for unit capacities.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct MaxFlowRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    /// Flow source node id (required).
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Flow sink node id (required).
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+}
+
+/// One min-cut edge crossing from the source side to the sink side.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct FlowEdge {
+    pub from: String,
+    pub to: String,
+}
+
+/// Response for `POST /v1/graphs/{id}/algo/max_flow`. The max flow value equals
+/// the min-cut capacity; `source_side` is the node partition on the source side
+/// of that cut, and `cut_edges` the crossing edges.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct MaxFlowResponse {
+    pub max_flow: f64,
+    pub source_side: Vec<String>,
+    pub cut_edges: Vec<FlowEdge>,
+}
+
 // ---- Algorithm entry points ----
 //
 // Every `run_*` shares one signature `(&StorageEngine, &str, Req) ->
@@ -364,9 +421,9 @@ pub(crate) struct CyclesResponse {
 
 #[cfg(feature = "graph")]
 pub(crate) use imp::{
-    run_betweenness, run_closeness, run_components, run_cuts, run_cycles, run_degree,
-    run_eigenvector, run_link_prediction, run_pagerank, run_personalized_pagerank, run_scc,
-    run_shortest_path,
+    run_betweenness, run_closeness, run_clustering, run_components, run_cuts, run_cycles,
+    run_degree, run_eigenvector, run_link_prediction, run_max_flow, run_pagerank,
+    run_personalized_pagerank, run_scc, run_shortest_path, run_toposort,
 };
 
 #[cfg(not(feature = "graph"))]
@@ -424,6 +481,12 @@ not_enabled_stub!(
     LinkPredictionRequest,
     LinkPredictionResponse
 );
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_clustering, ScopedRequest, ClusteringResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_toposort, ScopedRequest, ToposortResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_max_flow, MaxFlowRequest, MaxFlowResponse);
 
 #[cfg(feature = "graph")]
 mod imp {
@@ -432,9 +495,9 @@ mod imp {
     use dynograph_graph::{
         Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError,
         LinkPredictionMethod, PageRankConfig, betweenness_centrality, closeness_centrality,
-        connected_components, cut_structure, degree_centrality, eigenvector_centrality, find_cycle,
-        link_prediction_all, link_prediction_from, pagerank, personalized_pagerank, shortest_path,
-        strongly_connected_components,
+        clustering, connected_components, cut_structure, degree_centrality, eigenvector_centrality,
+        find_cycle, link_prediction_all, link_prediction_from, max_flow_min_cut, pagerank,
+        personalized_pagerank, shortest_path, strongly_connected_components, topological_sort,
     };
     use dynograph_storage::{StorageEngine, StoredEdge};
 
@@ -658,6 +721,81 @@ mod imp {
                 cycle: Vec::new(),
             }),
         }
+    }
+
+    /// `algo/clustering` — local clustering + global transitivity (undirected).
+    pub(crate) fn run_clustering(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: ScopedRequest,
+    ) -> Result<ClusteringResponse, RegistryError> {
+        let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, false)?;
+        let c = clustering(&graph);
+        Ok(ClusteringResponse {
+            scores: sorted_scores(&graph, c.local),
+            transitivity: c.transitivity,
+            average_clustering: c.average,
+        })
+    }
+
+    /// `algo/toposort` — topological order of the directed subgraph, or a
+    /// not-acyclic flag if it has a cycle.
+    pub(crate) fn run_toposort(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: ScopedRequest,
+    ) -> Result<ToposortResponse, RegistryError> {
+        let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, true)?;
+        match topological_sort(&graph) {
+            Some(order) => Ok(ToposortResponse {
+                acyclic: true,
+                order: order
+                    .into_iter()
+                    .map(|idx| graph.id_of(idx).to_string())
+                    .collect(),
+            }),
+            None => Ok(ToposortResponse {
+                acyclic: false,
+                order: Vec::new(),
+            }),
+        }
+    }
+
+    /// `algo/max_flow` — max flow and min s-t cut (weights = capacities).
+    pub(crate) fn run_max_flow(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: MaxFlowRequest,
+    ) -> Result<MaxFlowResponse, RegistryError> {
+        let source = required_node(&req.source, "source")?;
+        let target = required_node(&req.target, "target")?;
+        let directed = req.direction == AlgoDirection::Directed;
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let s = node_index(&graph, source, "source")?;
+        let t = node_index(&graph, target, "target")?;
+        let cut = max_flow_min_cut(&graph, s, t).map_err(map_graph_err)?;
+        Ok(MaxFlowResponse {
+            max_flow: cut.max_flow,
+            source_side: cut
+                .source_side
+                .into_iter()
+                .map(|idx| graph.id_of(idx).to_string())
+                .collect(),
+            cut_edges: cut
+                .cut_edges
+                .into_iter()
+                .map(|(u, v)| FlowEdge {
+                    from: graph.id_of(u).to_string(),
+                    to: graph.id_of(v).to_string(),
+                })
+                .collect(),
+        })
     }
 
     /// Unwrap a required node-id field, failing loud if absent or blank.

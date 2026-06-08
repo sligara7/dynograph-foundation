@@ -18,9 +18,11 @@
 //! - Centrality: [`degree_centrality`], [`pagerank`], [`personalized_pagerank`],
 //!   [`eigenvector_centrality`], [`closeness_centrality`], [`betweenness_centrality`]
 //! - Structure: articulation points & bridges ([`cut_structure`]), directed
-//!   cycle detection ([`find_cycle`])
+//!   cycle detection ([`find_cycle`]), [`topological_sort`], clustering
+//!   coefficient & transitivity ([`clustering`])
 //! - Paths & prediction: single-pair [`shortest_path`], neighborhood-overlap
-//!   link prediction ([`link_prediction_from`] / [`link_prediction_all`])
+//!   link prediction ([`link_prediction_from`] / [`link_prediction_all`]),
+//!   max-flow / min-cut ([`max_flow_min_cut`])
 //!
 //! Edge weights carry one of two meanings depending on the algorithm, and the
 //! caller must supply the right kind:
@@ -35,6 +37,7 @@
 mod betweenness;
 mod centrality;
 mod closeness;
+mod clustering;
 mod components;
 mod cuts;
 mod cycles;
@@ -42,14 +45,17 @@ mod eigenvector;
 mod error;
 mod graph;
 mod link_prediction;
+mod maxflow;
 mod pagerank;
 mod paths;
 mod scc;
 mod shortest_path;
+mod toposort;
 
 pub use betweenness::betweenness_centrality;
 pub use centrality::{DegreeMode, degree_centrality};
 pub use closeness::closeness_centrality;
+pub use clustering::{Clustering, clustering};
 pub use components::{Components, connected_components};
 pub use cuts::{Cuts, cut_structure};
 pub use cycles::find_cycle;
@@ -57,6 +63,8 @@ pub use eigenvector::{EigenvectorConfig, eigenvector_centrality};
 pub use error::GraphError;
 pub use graph::{Graph, GraphBuilder, ParallelEdgePolicy, SelfLoopPolicy};
 pub use link_prediction::{LinkPredictionMethod, link_prediction_all, link_prediction_from};
+pub use maxflow::{MinCut, max_flow_min_cut};
 pub use pagerank::{PageRankConfig, pagerank, personalized_pagerank};
 pub use scc::strongly_connected_components;
 pub use shortest_path::{Path, shortest_path};
+pub use toposort::topological_sort;

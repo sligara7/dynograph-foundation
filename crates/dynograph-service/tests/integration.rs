@@ -6218,6 +6218,75 @@ async fn algo_link_prediction_from_source() {
     }
 }
 
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_clustering_star_has_zero_transitivity() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // Story-A is a star (leaves never connect to each other) and story-B a lone
+    // edge, so there are no triangles: transitivity 0, all local scores 0.
+    let (status, resp) = post_algo(&app, "clustering", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["transitivity"], 0.0, "body: {resp}");
+    assert_eq!(resp["average_clustering"], 0.0, "body: {resp}");
+    for s in resp["scores"].as_array().unwrap() {
+        assert_eq!(s["score"], 0.0, "body: {resp}");
+    }
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_toposort_orders_acyclic_seeded_graph() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // The seeded directed graph is acyclic, so a topological order over all 6
+    // nodes exists.
+    let (status, resp) = post_algo(&app, "toposort", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["acyclic"], true, "body: {resp}");
+    assert_eq!(resp["order"].as_array().unwrap().len(), 6, "body: {resp}");
+    // ev-A1 -> char-A1 (INVOLVES), so ev-A1 precedes char-A1 in the order.
+    let order: Vec<&str> = resp["order"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let pos = |id: &str| order.iter().position(|&x| x == id).unwrap();
+    assert!(pos("ev-A1") < pos("char-A1"), "order: {order:?}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_max_flow_bridge_edge_is_the_cut() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // Directed char-A1 --MENTIONS--> char-A2 is the only path; with unit
+    // capacities (no weight) the max flow is 1 and that edge is the min cut.
+    let (status, resp) = post_algo(
+        &app,
+        "max_flow",
+        json!({"source": "char-A1", "target": "char-A2"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["max_flow"], 1.0, "body: {resp}");
+    let cuts = resp["cut_edges"].as_array().unwrap();
+    assert_eq!(cuts.len(), 1, "body: {resp}");
+    assert_eq!(cuts[0]["from"], "char-A1");
+    assert_eq!(cuts[0]["to"], "char-A2");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_max_flow_missing_target_is_400() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(&app, "max_flow", json!({"source": "char-A1"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("target"), "body: {resp}");
+}
+
 #[cfg(not(feature = "graph"))]
 #[tokio::test]
 async fn algo_endpoints_return_501_without_graph_feature() {
@@ -6237,6 +6306,9 @@ async fn algo_endpoints_return_501_without_graph_feature() {
         "personalized_pagerank",
         "shortest_path",
         "link_prediction",
+        "clustering",
+        "toposort",
+        "max_flow",
     ] {
         let res = app
             .clone()

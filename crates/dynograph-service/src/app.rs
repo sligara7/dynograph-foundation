@@ -22,11 +22,12 @@ use dynograph_vector::HnswIndex;
 
 use crate::{
     algo::{
-        AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ComponentsResponse,
-        CutEdge, CutsResponse, CyclesResponse, DegreeModeWire, DegreeRequest, EigenvectorRequest,
-        LinkPredictionMethodWire, LinkPredictionRequest, LinkPredictionResponse, NodeScore,
-        PageRankRequest, PersonalizedPageRankRequest, PredictedLink, ScopedRequest, ScoresResponse,
-        ShortestPathRequest, ShortestPathResponse, WeightSpec,
+        AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ClusteringResponse,
+        ComponentsResponse, CutEdge, CutsResponse, CyclesResponse, DegreeModeWire, DegreeRequest,
+        EigenvectorRequest, FlowEdge, LinkPredictionMethodWire, LinkPredictionRequest,
+        LinkPredictionResponse, MaxFlowRequest, MaxFlowResponse, NodeScore, PageRankRequest,
+        PersonalizedPageRankRequest, PredictedLink, ScopedRequest, ScoresResponse,
+        ShortestPathRequest, ShortestPathResponse, ToposortResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
@@ -130,6 +131,9 @@ use crate::{
         algo_personalized_pagerank,
         algo_shortest_path,
         algo_link_prediction,
+        algo_clustering,
+        algo_toposort,
+        algo_max_flow,
         // embeddings + search
         set_embedding,
         get_embedding,
@@ -253,6 +257,7 @@ use crate::{
         ShortestPathRequest,
         LinkPredictionRequest,
         LinkPredictionMethodWire,
+        MaxFlowRequest,
         ComponentsResponse,
         ScoresResponse,
         NodeScore,
@@ -262,6 +267,10 @@ use crate::{
         ShortestPathResponse,
         PredictedLink,
         LinkPredictionResponse,
+        ClusteringResponse,
+        ToposortResponse,
+        MaxFlowResponse,
+        FlowEdge,
         // welford
         WelfordUpdateRequest,
         WelfordUpdateResponse,
@@ -450,6 +459,9 @@ pub fn app(state: AppState) -> Router {
             "/v1/graphs/{id}/algo/link_prediction",
             post(algo_link_prediction),
         )
+        .route("/v1/graphs/{id}/algo/clustering", post(algo_clustering))
+        .route("/v1/graphs/{id}/algo/toposort", post(algo_toposort))
+        .route("/v1/graphs/{id}/algo/max_flow", post(algo_max_flow))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -2016,6 +2028,90 @@ async fn algo_link_prediction(
     let entry = graph_entry(&state, &id)?;
     let response = entry
         .with_engine_read(move |engine| crate::algo::run_link_prediction(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Local clustering coefficients + global transitivity over the scoped
+/// (undirected) subgraph. Read-only; one `with_engine_read` lock. Requires the
+/// `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/clustering",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "clustering coefficients + transitivity", body = ClusteringResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_clustering(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_clustering(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Topological order of the scoped directed subgraph (or a not-acyclic flag).
+/// Read-only; one `with_engine_read` lock. Requires the `graph` build feature;
+/// otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/toposort",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "topological order", body = ToposortResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_toposort(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_toposort(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Maximum flow and minimum s-t cut over the scoped subgraph (edge weights =
+/// capacities). Read-only; one `with_engine_read` lock. Requires the `graph`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/max_flow",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = MaxFlowRequest,
+    responses(
+        (status = 200, description = "max flow value + min cut", body = MaxFlowResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_max_flow(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<MaxFlowRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_max_flow(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
 }

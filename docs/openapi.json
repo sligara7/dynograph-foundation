@@ -330,6 +330,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/clustering": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Local clustering coefficients + global transitivity over the scoped\n(undirected) subgraph. Read-only; one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_clustering",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "clustering coefficients + transitivity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusteringResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/components": {
       "post": {
         "tags": [
@@ -654,6 +708,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/max_flow": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Maximum flow and minimum s-t cut over the scoped subgraph (edge weights =\ncapacities). Read-only; one `with_engine_read` lock. Requires the `graph`\nbuild feature; otherwise 501.",
+        "operationId": "algo_max_flow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaxFlowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "max flow value + min cut",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaxFlowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/pagerank": {
       "post": {
         "tags": [
@@ -851,6 +959,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ShortestPathResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/toposort": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Topological order of the scoped directed subgraph (or a not-acyclic flag).\nRead-only; one `with_engine_read` lock. Requires the `graph` build feature;\notherwise 501.",
+        "operationId": "algo_toposort",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "topological order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToposortResponse"
                 }
               }
             }
@@ -3650,6 +3812,34 @@
           }
         }
       },
+      "ClusteringResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/clustering` (undirected). Per-node\nlocal clustering scores plus the two global summaries.",
+        "required": [
+          "scores",
+          "transitivity",
+          "average_clustering"
+        ],
+        "properties": {
+          "average_clustering": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean local clustering coefficient over all nodes."
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeScore"
+            },
+            "description": "Local clustering coefficient per node, highest first."
+          },
+          "transitivity": {
+            "type": "number",
+            "format": "double",
+            "description": "Global transitivity: 3·triangles / connected-triples."
+          }
+        }
+      },
       "CollectPropertyFilter": {
         "type": "object",
         "required": [
@@ -4102,6 +4292,22 @@
           }
         }
       },
+      "FlowEdge": {
+        "type": "object",
+        "description": "One min-cut edge crossing from the source side to the sink side.",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      },
       "GraphListResponse": {
         "type": "object",
         "required": [
@@ -4200,6 +4406,76 @@
           "vector_merge",
           "created_new"
         ]
+      },
+      "MaxFlowRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/max_flow`. Edge weights are\n**capacities** (non-negative); omit `weight` for unit capacities.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Flow source node id (required)."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Flow sink node id (required)."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
+      "MaxFlowResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/max_flow`. The max flow value equals\nthe min-cut capacity; `source_side` is the node partition on the source side\nof that cut, and `cut_edges` the crossing edges.",
+        "required": [
+          "max_flow",
+          "source_side",
+          "cut_edges"
+        ],
+        "properties": {
+          "cut_edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            }
+          },
+          "max_flow": {
+            "type": "number",
+            "format": "double"
+          },
+          "source_side": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "MergeEdgeBody": {
         "type": "object",
@@ -5110,6 +5386,25 @@
           },
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "ToposortResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/toposort` (directed). `acyclic` is\ntrue for a DAG, with `order` a topological ordering; otherwise `order` is\nempty (the graph has a cycle).",
+        "required": [
+          "acyclic",
+          "order"
+        ],
+        "properties": {
+          "acyclic": {
+            "type": "boolean"
+          },
+          "order": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
