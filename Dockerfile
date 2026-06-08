@@ -35,9 +35,13 @@ ENV DYNOGRAPH_BUILD_GIT_DIRTY=${GIT_DIRTY}
 # change skips the ~12-minute RocksDB recompile. The mount goes
 # away when the layer ends, so we copy the binary out to a stable
 # path the runtime stage can read.
+# `--features dynograph-service/fulltext` compiles the embedded Tantivy
+# full-text/BM25 index in (the `search:text` / `search:reindex` endpoints
+# return 501 without it). The feature is opt-in at the crate level but ON in
+# the shipped image so the published container has full-text search available.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --release --bin dynograph \
+    cargo build --release --bin dynograph --features dynograph-service/fulltext \
  && cp /build/target/release/dynograph /usr/local/bin/dynograph
 
 # ---------- runtime ----------

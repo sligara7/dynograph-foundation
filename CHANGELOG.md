@@ -4,6 +4,30 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## Unreleased
+
+Turn on full-text/BM25 search in the shipped artifact and cover it in CI. The
+full-text primitive itself — the `dynograph-text` embedded-Tantivy index, the
+`fulltext: true` property flag, and the `POST /v1/graphs/{id}/search:text` /
+`search:reindex` endpoints — shipped in v0.5.9 behind an opt-in `fulltext` cargo
+feature (off by default), but the published image was built without it, so those
+endpoints returned `501 Not Implemented` in the container.
+
+### Changed (packaging)
+
+- The release Docker image now builds with `--features
+  dynograph-service/fulltext`, so full-text search is live in the shipped
+  container instead of returning 501. The feature remains opt-in for source
+  builds; only the published artifact changes.
+
+### CI
+
+- New `fulltext` job builds, tests, and clippy-lints the workspace with the
+  `fulltext` feature on, exercising the `#[cfg(feature = "fulltext")]`
+  storage/service wiring that the default-feature legs skip. The `smoke-test`
+  job now builds the binary with the same feature, so it boots the exact
+  configuration the published image ships.
+
 ## v0.6.1 — 2026-06-07
 
 Domain-neutral vector/stats math: more distances, element-wise algebra,
