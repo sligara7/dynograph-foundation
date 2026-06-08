@@ -19,7 +19,7 @@ Three distinct pieces, in a clean layering (verified — not forks):
 | Component | Path | Role |
 |---|---|---|
 | **dynograph-foundation** | `git_projects/dynograph-foundation` | Domain-neutral, schema-driven graph storage base. Crates: `dynograph-core`, `dynograph-storage`, `dynograph-resolution`, `dynograph-vector`, `dynograph-service`, `dynograph-client`. Storage is RocksDB column families + per-(graph, node_type) in-memory HNSW. |
-| **storyflow `dynograph`** | `git_projects/storyflow/services/dynograph` | A **consumer** of the foundation (git dependency, `tag = "v0.5.9"`), adding domain crates: `dynograph-engine`, `dynograph-server`, `dynograph-extract`, `dynograph-context`, `dynograph-query`, `dynograph-self`. Carries the narrative domain (Story/Fragment/Character, `story_id` access control, GraphRAG endpoints). |
+| **storyflow `dynograph`** | `git_projects/storyflow/services/dynograph` | A **consumer** of the foundation (git dependency, `tag = "v0.6.0"`), adding domain crates: `dynograph-engine`, `dynograph-server`, `dynograph-extract`, `dynograph-context`, `dynograph-query`, `dynograph-self`. Carries the narrative domain (Story/Fragment/Character, `story_id` access control, GraphRAG endpoints). |
 | **embeddings-rs** | `git_projects/storyflow/services/embeddings-rs` | Stateless local embedding sidecar. Runs `nomic-embed-text-v1.5` (768-dim) via ONNX Runtime. `POST /embed`, `/embed-batch`, `/health`. No external API, no storage, no chunking. |
 
 Relationship confirmed via `Cargo.toml`: storyflow's dynograph **depends on** the
