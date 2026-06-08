@@ -582,9 +582,8 @@ impl StorageEngine {
         };
         // Best-effort rollback to drop the uncommitted batch on failure;
         // surface the original rebuild error regardless of the rollback result.
-        rebuild().map_err(|e| {
+        rebuild().inspect_err(|_| {
             let _ = ti.rollback();
-            e
         })
     }
 
