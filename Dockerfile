@@ -37,7 +37,7 @@ ENV DYNOGRAPH_BUILD_GIT_DIRTY=${GIT_DIRTY}
 # path the runtime stage can read.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/build/target \
-    cargo build --release --bin dynograph \
+    cargo build --release --bin dynograph --features graph \
  && cp /build/target/release/dynograph /usr/local/bin/dynograph
 
 # ---------- runtime ----------

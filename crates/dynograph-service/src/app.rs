@@ -21,6 +21,10 @@ use dynograph_core::{PropertyType, Schema, Value};
 use dynograph_vector::HnswIndex;
 
 use crate::{
+    algo::{
+        AlgoDirection, AlgoScope, ComponentsRequest, ComponentsResponse, DegreeModeWire,
+        DegreeRequest, DegreeResponse, NodeScore, WeightSpec,
+    },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
@@ -110,6 +114,9 @@ use crate::{
         nodes_scan,
         welford_update,
         traverse,
+        // graph-theory algorithms (behind the `graph` feature)
+        algo_components,
+        algo_degree,
         // embeddings + search
         set_embedding,
         get_embedding,
@@ -218,6 +225,16 @@ use crate::{
         ReturnFormat,
         TraversedNode,
         TraverseResponse,
+        // graph-theory algorithms
+        AlgoScope,
+        WeightSpec,
+        AlgoDirection,
+        DegreeModeWire,
+        ComponentsRequest,
+        DegreeRequest,
+        ComponentsResponse,
+        DegreeResponse,
+        NodeScore,
         // welford
         WelfordUpdateRequest,
         WelfordUpdateResponse,
@@ -246,6 +263,7 @@ use crate::{
         (name = "embeddings", description = "Per-node embeddings"),
         (name = "search", description = "Vector similarity search"),
         (name = "primitives", description = "Composite graph primitives (batch, resolve, edges:*, nodes:*, traverse, welford)"),
+        (name = "algo", description = "Graph-theory algorithms (components, centrality, ...). Requires the `graph` build feature; otherwise 501."),
         (name = "util", description = "Stateless pure-math utilities"),
         (name = "ops", description = "Health, readiness, metrics, build info"),
     )
@@ -384,6 +402,8 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/nodes:exists", post(nodes_exists))
         .route("/v1/graphs/{id}/nodes:scan", post(nodes_scan))
         .route("/v1/graphs/{id}/traverse", post(traverse))
+        .route("/v1/graphs/{id}/algo/components", post(algo_components))
+        .route("/v1/graphs/{id}/algo/degree", post(algo_degree))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -1618,6 +1638,103 @@ async fn traverse(
         .with_engine_read(move |engine| run_traverse(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
+}
+
+/// (Weakly-)connected components over the scoped subgraph. Read-only; the whole
+/// build + analysis runs under one `with_engine_read` lock. Requires the `graph`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/components",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ComponentsRequest,
+    responses(
+        (status = 200, description = "connected components", body = ComponentsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_components(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ComponentsRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    algo_components_impl(entry, id, req).await
+}
+
+#[cfg(feature = "graph")]
+async fn algo_components_impl(
+    entry: Arc<GraphEntry>,
+    id: String,
+    req: ComponentsRequest,
+) -> Result<Response, RegistryError> {
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_components(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+#[cfg(not(feature = "graph"))]
+async fn algo_components_impl(
+    _entry: Arc<GraphEntry>,
+    _id: String,
+    _req: ComponentsRequest,
+) -> Result<Response, RegistryError> {
+    Err(RegistryError::NotImplemented(
+        "graph algorithms are not enabled in this build (compile with --features graph)"
+            .to_string(),
+    ))
+}
+
+/// Degree centrality over the scoped subgraph. Read-only; runs under one
+/// `with_engine_read` lock. Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/degree",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = DegreeRequest,
+    responses(
+        (status = 200, description = "degree centrality scores", body = DegreeResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_degree(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<DegreeRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    algo_degree_impl(entry, id, req).await
+}
+
+#[cfg(feature = "graph")]
+async fn algo_degree_impl(
+    entry: Arc<GraphEntry>,
+    id: String,
+    req: DegreeRequest,
+) -> Result<Response, RegistryError> {
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_degree(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+#[cfg(not(feature = "graph"))]
+async fn algo_degree_impl(
+    _entry: Arc<GraphEntry>,
+    _id: String,
+    _req: DegreeRequest,
+) -> Result<Response, RegistryError> {
+    Err(RegistryError::NotImplemented(
+        "graph algorithms are not enabled in this build (compile with --features graph)"
+            .to_string(),
+    ))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

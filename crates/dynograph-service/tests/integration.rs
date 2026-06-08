@@ -5747,3 +5747,182 @@ async fn search_text_returns_501_when_feature_disabled() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
 }
+
+// ---------------------------------------------------------------------------
+// Graph-theory algorithm endpoints (`/v1/graphs/{id}/algo/*`).
+//
+// Gated on the `graph` build feature: with it, the algorithms run; without it,
+// the routes still exist and return 501 (asserted by the `not(feature)` test at
+// the bottom). The graph used is the two-story knowledge graph seeded by
+// `seed_two_story_graph`: story-A's {char-A1, char-A2, loc-A1, ev-A1} form one
+// weakly-connected component and story-B's {char-B1, char-B2} form another.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "graph")]
+async fn post_algo(app: &axum::Router, path: &str, body: Value) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(json_post(&format!("/v1/graphs/g1/algo/{path}"), &body))
+        .await
+        .unwrap();
+    let status = res.status();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes)
+        .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+    (status, parsed)
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_components_finds_two_disconnected_stories() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(&app, "components", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["count"], 2);
+
+    let comps = resp["components"].as_array().unwrap();
+    let as_sets: Vec<std::collections::BTreeSet<String>> = comps
+        .iter()
+        .map(|c| {
+            c.as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        })
+        .collect();
+
+    let story_a: std::collections::BTreeSet<String> = ["char-A1", "char-A2", "loc-A1", "ev-A1"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let story_b: std::collections::BTreeSet<String> = ["char-B1", "char-B2"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    assert!(
+        as_sets.contains(&story_a),
+        "story-A component missing: {resp}"
+    );
+    assert!(
+        as_sets.contains(&story_b),
+        "story-B component missing: {resp}"
+    );
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_components_scoped_to_one_edge_type_splits_further() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Only MENTIONS edges: char-A1<->char-A2 and char-B1<->char-B2 are linked;
+    // loc-A1 and ev-A1 become isolated singletons. 4 components total.
+    let (status, resp) = post_algo(
+        &app,
+        "components",
+        json!({"scope": {"edge_types": ["MENTIONS"]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["count"], 4, "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_degree_ranks_hub_node_first() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Total degree, directed (default). char-A1 has out MENTIONS+VISITS and in
+    // INVOLVES => degree 3; every other node has degree 1.
+    let (status, resp) = post_algo(&app, "degree", json!({"mode": "total"})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+
+    let scores = resp["scores"].as_array().unwrap();
+    assert_eq!(scores.len(), 6);
+    assert_eq!(scores[0]["node"], "char-A1");
+    assert_eq!(scores[0]["score"], 3.0);
+    // Remaining nodes each have degree 1.
+    for s in &scores[1..] {
+        assert_eq!(s["score"], 1.0, "body: {resp}");
+    }
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_degree_out_mode_only_counts_successors() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(&app, "degree", json!({"mode": "out"})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let scores = resp["scores"].as_array().unwrap();
+    // char-A1 out-degree is 2 (MENTIONS + VISITS); INVOLVES is incoming.
+    assert_eq!(scores[0]["node"], "char-A1");
+    assert_eq!(scores[0]["score"], 2.0);
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_degree_missing_weight_property_fails_loud() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Edges carry no "weight" property — a weighted request must 400, not
+    // silently default the weight.
+    let (status, resp) = post_algo(&app, "degree", json!({"weight": {"property": "weight"}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("weight property"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_unknown_node_type_in_scope_returns_400() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(
+        &app,
+        "components",
+        json!({"scope": {"node_types": ["Nope"]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("unknown node type"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_unknown_graph_returns_404() {
+    let app = build_app_with_knowledge_graph().await;
+    let res = app
+        .clone()
+        .oneshot(json_post("/v1/graphs/missing/algo/components", &json!({})))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[cfg(not(feature = "graph"))]
+#[tokio::test]
+async fn algo_endpoints_return_501_without_graph_feature() {
+    // Create the graph first so the handler's graph_entry lookup succeeds and we
+    // reach the feature-gated 501 (not a 404).
+    let app = build_app_with_knowledge_graph().await;
+    for path in ["components", "degree"] {
+        let res = app
+            .clone()
+            .oneshot(json_post(&format!("/v1/graphs/g1/algo/{path}"), &json!({})))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::NOT_IMPLEMENTED,
+            "algo/{path} should be 501 without the graph feature"
+        );
+    }
+}

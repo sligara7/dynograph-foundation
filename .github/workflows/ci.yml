@@ -79,6 +79,24 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - run: cargo test -p dynograph-storage
 
+  graph-feature:
+    # The graph-theory algorithm endpoints (`/v1/graphs/{id}/algo/*`) live
+    # behind the optional `graph` feature, so the default `cargo test
+    # --workspace` never exercises the service-side algo path or its
+    # feature-gated integration tests. Run the service suite and clippy with
+    # the feature on so the algo wiring can't rot undetected. (The
+    # `dynograph-graph` crate's own unit tests already run in build-test as a
+    # workspace member.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - run: cargo test -p dynograph-service --features graph
+      - run: cargo clippy -p dynograph-service --features graph --all-targets -- -D warnings
+
   msrv-check:
     # Builds against the declared MSRV (Cargo.toml's `rust-version`).
     # Catches "we accidentally used a feature stabilized after MSRV"

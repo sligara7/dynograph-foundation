@@ -468,6 +468,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynograph-graph"
+version = "0.6.1"
+
+[[package]]
 name = "dynograph-resolution"
 version = "0.6.1"
 dependencies = [
@@ -481,6 +485,7 @@ version = "0.6.1"
 dependencies = [
  "axum",
  "dynograph-core",
+ "dynograph-graph",
  "dynograph-resolution",
  "dynograph-storage",
  "dynograph-vector",

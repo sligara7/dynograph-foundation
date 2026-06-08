@@ -32,10 +32,16 @@ impl fmt::Display for GraphError {
                 "edge ({from} -> {to}) has non-finite weight {weight}; weights must be finite"
             ),
             GraphError::EmptyGraph => {
-                write!(f, "algorithm requires at least one node but the graph is empty")
+                write!(
+                    f,
+                    "algorithm requires at least one node but the graph is empty"
+                )
             }
             GraphError::NotConverged { iterations } => {
-                write!(f, "iterative algorithm did not converge within {iterations} iterations")
+                write!(
+                    f,
+                    "iterative algorithm did not converge within {iterations} iterations"
+                )
             }
         }
     }

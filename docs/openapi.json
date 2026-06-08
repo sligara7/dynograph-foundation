@@ -222,6 +222,114 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/components": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "(Weakly-)connected components over the scoped subgraph. Read-only; the whole\nbuild + analysis runs under one `with_engine_read` lock. Requires the `graph`\nbuild feature; otherwise 501.",
+        "operationId": "algo_components",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComponentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "connected components",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/degree": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Degree centrality over the scoped subgraph. Read-only; runs under one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_degree",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DegreeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "degree centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DegreeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/batch": {
       "post": {
         "tags": [
@@ -2592,6 +2700,40 @@
           }
         }
       },
+      "AlgoDirection": {
+        "type": "string",
+        "description": "Whether edges are treated as one-way or symmetric.",
+        "enum": [
+          "directed",
+          "undirected"
+        ]
+      },
+      "AlgoScope": {
+        "type": "object",
+        "description": "Subgraph selection shared by every algorithm. Omitted fields mean \"all\":\nno `node_types` => every node type in the schema; no `edge_types` => every\nedge type.",
+        "properties": {
+          "edge_types": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Edge types to include. Omit for all types."
+          },
+          "node_types": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Node types to include. Omit for all types."
+          }
+        }
+      },
       "BatchOp": {
         "oneOf": [
           {
@@ -2956,6 +3098,47 @@
           }
         }
       },
+      "ComponentsRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/components`.",
+        "properties": {
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          }
+        }
+      },
+      "ComponentsResponse": {
+        "type": "object",
+        "description": "One (weakly-)connected component: the node ids it contains.",
+        "required": [
+          "count",
+          "components"
+        ],
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Components as lists of node ids. Order is deterministic (by first node\nvisited); within a component, by node index."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of components.",
+            "minimum": 0
+          }
+        }
+      },
       "CreateEdgeBody": {
         "type": "object",
         "required": [
@@ -3016,6 +3199,63 @@
           },
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "DegreeModeWire": {
+        "type": "string",
+        "description": "Which incident edges degree centrality counts. For an undirected graph all\nthree read the same symmetric adjacency.",
+        "enum": [
+          "in",
+          "out",
+          "total"
+        ]
+      },
+      "DegreeRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/degree`.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DegreeModeWire"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec",
+                "description": "Edge-weight projection. When present, scores are weighted degree\n(strength); when absent, scores are plain incident-edge counts."
+              }
+            ]
+          }
+        }
+      },
+      "DegreeResponse": {
+        "type": "object",
+        "description": "Degree-centrality scores, highest first (ties broken by node id).",
+        "required": [
+          "scores"
+        ],
+        "properties": {
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeScore"
+            }
           }
         }
       },
@@ -3296,6 +3536,23 @@
           },
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "NodeScore": {
+        "type": "object",
+        "description": "A single node's score.",
+        "required": [
+          "node",
+          "score"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -4070,6 +4327,33 @@
           }
         }
       },
+      "WeightSpec": {
+        "type": "object",
+        "description": "Edge-weight projection. With neither field set, edges are unweighted (every\nweight is `1.0`). `property` takes precedence over `edge_type_weights` if\nboth are given.",
+        "properties": {
+          "edge_type_weights": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Per-edge-type constant weights. An in-scope edge whose type is absent\nfrom this map is a 400.",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "property": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Read this numeric edge property as the weight. Missing or non-numeric on\nany in-scope edge is a 400 (fail loud)."
+          }
+        }
+      },
       "WelfordUpdateRequest": {
         "type": "object",
         "required": [
@@ -4169,6 +4453,10 @@
     {
       "name": "primitives",
       "description": "Composite graph primitives (batch, resolve, edges:*, nodes:*, traverse, welford)"
+    },
+    {
+      "name": "algo",
+      "description": "Graph-theory algorithms (components, centrality, ...). Requires the `graph` build feature; otherwise 501."
     },
     {
       "name": "util",

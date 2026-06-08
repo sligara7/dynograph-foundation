@@ -25,7 +25,7 @@ mod components;
 mod error;
 mod graph;
 
-pub use centrality::{degree_centrality, DegreeMode};
-pub use components::{connected_components, Components};
+pub use centrality::{DegreeMode, degree_centrality};
+pub use components::{Components, connected_components};
 pub use error::GraphError;
 pub use graph::{Graph, GraphBuilder, ParallelEdgePolicy, SelfLoopPolicy};
