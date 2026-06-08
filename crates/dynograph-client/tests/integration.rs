@@ -782,3 +782,180 @@ async fn util_pearson_too_few_samples_returns_400() {
         .unwrap_err();
     assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
 }
+
+// ---------------------------------------------------------------------
+// v0.6.x util additions
+// ---------------------------------------------------------------------
+
+#[tokio::test]
+async fn util_new_distances_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // squared euclidean of (0,0)->(3,4) = 25; manhattan = 7.
+    let sq = client
+        .util_squared_euclidean_distance(&[0.0, 0.0], &[3.0, 4.0], None)
+        .await
+        .unwrap();
+    assert!((sq.result - 25.0).abs() < 1e-9);
+    let man = client
+        .util_manhattan_distance(&[0.0, 0.0], &[3.0, 4.0], None)
+        .await
+        .unwrap();
+    assert!((man.result - 7.0).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_elementwise_algebra_round_trip() {
+    let (client, _server) = spawn_service().await;
+    assert_eq!(
+        client
+            .util_add(&[1.0, 2.0], &[3.0, 4.0], None)
+            .await
+            .unwrap()
+            .result,
+        vec![4.0, 6.0]
+    );
+    assert_eq!(
+        client
+            .util_subtract(&[3.0, 4.0], &[1.0, 2.0], None)
+            .await
+            .unwrap()
+            .result,
+        vec![2.0, 2.0]
+    );
+    assert_eq!(
+        client
+            .util_scale(&[1.0, -2.0], 2.0, None)
+            .await
+            .unwrap()
+            .result,
+        vec![2.0, -4.0]
+    );
+    assert_eq!(
+        client.util_negate(&[1.0, -2.0], None).await.unwrap().result,
+        vec![-1.0, 2.0]
+    );
+    assert_eq!(
+        client
+            .util_hadamard_division(&[6.0, 8.0], &[2.0, 4.0], None)
+            .await
+            .unwrap()
+            .result,
+        vec![3.0, 2.0]
+    );
+    assert_eq!(
+        client
+            .util_elementwise_power(&[2.0, 3.0], 2.0, None)
+            .await
+            .unwrap()
+            .result,
+        vec![4.0, 9.0]
+    );
+}
+
+#[tokio::test]
+async fn util_hadamard_division_zero_divisor_returns_400() {
+    let (client, _server) = spawn_service().await;
+    let err = client
+        .util_hadamard_division(&[1.0, 2.0], &[1.0, 0.0], None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn util_l2_normalize_round_trip_and_zero_400() {
+    let (client, _server) = spawn_service().await;
+    let n = client.util_l2_normalize(&[3.0, 4.0], None).await.unwrap();
+    let mag = (n.result[0] * n.result[0] + n.result[1] * n.result[1]).sqrt();
+    assert!((mag - 1.0).abs() < 1e-9);
+    let err = client
+        .util_l2_normalize(&[0.0, 0.0], None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn util_centroid_round_trip_and_ragged_400() {
+    let (client, _server) = spawn_service().await;
+    let c = client
+        .util_centroid(&[vec![1.0, 2.0], vec![3.0, 6.0]], None)
+        .await
+        .unwrap();
+    assert_eq!(c.result, vec![2.0, 4.0]);
+    let err = client
+        .util_centroid(&[vec![1.0, 2.0], vec![1.0]], None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn util_descriptive_stats_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let xs = [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
+    assert!((client.util_mean(&xs).await.unwrap().result - 5.0).abs() < 1e-9);
+    assert!((client.util_variance(&xs).await.unwrap().result - 32.0 / 7.0).abs() < 1e-9);
+    assert!(
+        (client.util_std_dev(&xs).await.unwrap().result - (32.0_f64 / 7.0).sqrt()).abs() < 1e-9
+    );
+    assert!(
+        (client
+            .util_median(&[1.0, 2.0, 3.0, 4.0])
+            .await
+            .unwrap()
+            .result
+            - 2.5)
+            .abs()
+            < 1e-9
+    );
+    assert!(
+        (client
+            .util_percentile(&[1.0, 2.0, 3.0, 4.0], 100.0)
+            .await
+            .unwrap()
+            .result
+            - 4.0)
+            .abs()
+            < 1e-9
+    );
+}
+
+#[tokio::test]
+async fn util_softmax_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let p = client.util_softmax(&[1.0, 2.0, 3.0]).await.unwrap().result;
+    let sum: f64 = p.iter().sum();
+    assert!((sum - 1.0).abs() < 1e-9);
+    assert!(p[0] < p[1] && p[1] < p[2]);
+}
+
+#[tokio::test]
+async fn util_spearman_round_trip_and_degenerate_400() {
+    let (client, _server) = spawn_service().await;
+    // Monotonic non-linear → 1.0
+    let x = [1.0, 2.0, 3.0, 4.0, 5.0];
+    let y = [1.0, 8.0, 27.0, 64.0, 125.0];
+    let r = client.util_spearman_correlation(&x, &y).await.unwrap();
+    assert!((r.result - 1.0).abs() < 1e-9);
+    // Constant input → undefined → 400
+    let err = client
+        .util_spearman_correlation(&[1.0, 2.0, 3.0], &[5.0, 5.0, 5.0])
+        .await
+        .unwrap_err();
+    assert_eq!(err.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+}
+
+#[tokio::test]
+async fn util_new_endpoints_f32_precision() {
+    let (client, _server) = spawn_service().await;
+    let r = client
+        .util_manhattan_distance(
+            &[0.0, 0.0],
+            &[3.0, 4.0],
+            Some(dynograph_client::Precision::F32),
+        )
+        .await
+        .unwrap();
+    assert!((r.result - 7.0).abs() < 1e-5);
+}

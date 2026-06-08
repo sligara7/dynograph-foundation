@@ -4,6 +4,42 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## Unreleased
+
+### Added (dynograph-vector)
+
+- **Distances:** `squared_euclidean_distance`, `manhattan_distance`
+  (each with an f64 variant). `euclidean_distance` now delegates to the
+  squared form.
+- **Element-wise algebra:** `add`, `subtract`, `scale`, `negate`,
+  `hadamard_division` (→ `None` on a zero divisor), `elementwise_power`
+  (each with an f64 variant).
+- **Transforms:** `l2_normalize` (→ `None` on zero/non-finite
+  magnitude), `centroid` (component-wise mean; `None` if empty/ragged),
+  each with an f64 variant.
+- **Descriptive statistics:** `mean`, `variance` / `std_dev` (sample,
+  `n-1`), `median`, `percentile` (linear interpolation), `softmax`
+  (numerically stable), `spearman_rank_correlation`. All return `None`
+  on degenerate input (no silent default).
+- **HNSW:** `HnswIndex::search_filtered(query, k, predicate)` — k-NN
+  with an id predicate (ACL / type / exclude-self), a post-filter over
+  the same beam `search` uses.
+
+### Added (service)
+
+- 17 new `POST /v1/util/*` endpoints exposing the stateless math above:
+  `squared_euclidean_distance`, `manhattan_distance`, `add`, `subtract`,
+  `scale`, `negate`, `hadamard_division`, `elementwise_power`,
+  `l2_normalize`, `centroid`, `mean`, `variance`, `std_dev`, `median`,
+  `percentile`, `softmax`, `spearman_correlation`. Vector ops honor the
+  `precision` field (f32/f64); statistics are f64-only. A degenerate
+  result (zero divisor, zero magnitude, out-of-range percentile,
+  constant input) is a loud 400, not a silent default.
+
+### Added (client)
+
+- `dynograph-client` methods for all 17 new util endpoints.
+
 ## v0.6.0 — 2026-06-07
 
 Optional Unix-domain-socket transport, served alongside TCP, with

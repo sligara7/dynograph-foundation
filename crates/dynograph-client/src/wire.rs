@@ -139,11 +139,15 @@ pub struct UtilResult<T> {
     pub result: T,
 }
 
-/// `T = f64` — cosine_similarity, dot_product, euclidean_distance,
-/// l2_norm, pearson_correlation, linear_regression_slope.
+/// `T = f64` — the scalar-returning util routes: cosine_similarity,
+/// dot_product, (squared_)euclidean_distance, manhattan_distance,
+/// l2_norm, pearson_correlation, spearman_correlation,
+/// linear_regression_slope, mean, variance, std_dev, median, percentile.
 pub type UtilScalarResponse = UtilResult<f64>;
 
-/// `T = Vec<f64>` — hadamard.
+/// `T = Vec<f64>` — the vector-returning util routes: hadamard,
+/// hadamard_division, add, subtract, scale, negate, elementwise_power,
+/// l2_normalize, centroid, softmax.
 pub type UtilVectorResponse = UtilResult<Vec<f64>>;
 
 /// `T = u32` (0..=100) — jaro_winkler, token_sort_ratio.

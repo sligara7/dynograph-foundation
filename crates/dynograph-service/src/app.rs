@@ -60,11 +60,15 @@ use crate::{
         run as run_traverse,
     },
     util::{
-        BinaryStringRequest, BinaryVectorRequest, PointsRequest, Precision, ScalarResponse,
-        TwoVectorF64Request, UnaryVectorRequest, VectorResponse, run_cosine_similarity,
-        run_dot_product, run_euclidean_distance, run_hadamard, run_jaro_winkler, run_l2_norm,
-        run_linear_regression_slope, run_pearson_correlation, run_token_sort_ratio,
-        validate_embedding_values,
+        BinaryStringRequest, BinaryVectorRequest, PercentileRequest, PointsRequest, PowerRequest,
+        Precision, SampleRequest, ScalarResponse, ScaleRequest, TwoVectorF64Request,
+        UnaryVectorRequest, VectorResponse, VectorsRequest, run_add, run_centroid,
+        run_cosine_similarity, run_dot_product, run_elementwise_power, run_euclidean_distance,
+        run_hadamard, run_hadamard_division, run_jaro_winkler, run_l2_norm, run_l2_normalize,
+        run_linear_regression_slope, run_manhattan_distance, run_mean, run_median, run_negate,
+        run_pearson_correlation, run_percentile, run_scale, run_softmax, run_spearman_correlation,
+        run_squared_euclidean_distance, run_std_dev, run_subtract, run_token_sort_ratio,
+        run_variance, validate_embedding_values,
     },
     validation::validate_limit,
     welford_update::{WelfordUpdateRequest, WelfordUpdateResponse, run as run_welford_update},
@@ -123,6 +127,23 @@ use crate::{
         util_linear_regression_slope,
         util_jaro_winkler,
         util_token_sort_ratio,
+        util_squared_euclidean_distance,
+        util_manhattan_distance,
+        util_add,
+        util_subtract,
+        util_scale,
+        util_negate,
+        util_hadamard_division,
+        util_elementwise_power,
+        util_l2_normalize,
+        util_centroid,
+        util_mean,
+        util_variance,
+        util_std_dev,
+        util_median,
+        util_percentile,
+        util_softmax,
+        util_spearman_correlation,
         // ops
         health,
         ready,
@@ -207,6 +228,11 @@ use crate::{
         TwoVectorF64Request,
         PointsRequest,
         BinaryStringRequest,
+        VectorsRequest,
+        ScaleRequest,
+        PowerRequest,
+        SampleRequest,
+        PercentileRequest,
         ScalarResponse<f64>,
         ScalarResponse<u32>,
         VectorResponse,
@@ -382,6 +408,29 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/v1/util/jaro_winkler", post(util_jaro_winkler))
         .route("/v1/util/token_sort_ratio", post(util_token_sort_ratio))
+        .route(
+            "/v1/util/squared_euclidean_distance",
+            post(util_squared_euclidean_distance),
+        )
+        .route("/v1/util/manhattan_distance", post(util_manhattan_distance))
+        .route("/v1/util/add", post(util_add))
+        .route("/v1/util/subtract", post(util_subtract))
+        .route("/v1/util/scale", post(util_scale))
+        .route("/v1/util/negate", post(util_negate))
+        .route("/v1/util/hadamard_division", post(util_hadamard_division))
+        .route("/v1/util/elementwise_power", post(util_elementwise_power))
+        .route("/v1/util/l2_normalize", post(util_l2_normalize))
+        .route("/v1/util/centroid", post(util_centroid))
+        .route("/v1/util/mean", post(util_mean))
+        .route("/v1/util/variance", post(util_variance))
+        .route("/v1/util/std_dev", post(util_std_dev))
+        .route("/v1/util/median", post(util_median))
+        .route("/v1/util/percentile", post(util_percentile))
+        .route("/v1/util/softmax", post(util_softmax))
+        .route(
+            "/v1/util/spearman_correlation",
+            post(util_spearman_correlation),
+        )
         // route_layer order is inner→outer in source order, so the
         // concurrency limit (added last) wraps auth — load is shed at
         // the door before any auth/handler work. Deliberately scoped to
@@ -2141,6 +2190,252 @@ async fn util_token_sort_ratio(
     Json(req): Json<BinaryStringRequest>,
 ) -> Result<Response, RegistryError> {
     Ok(Json(run_token_sort_ratio(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/squared_euclidean_distance",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "squared euclidean distance", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_squared_euclidean_distance(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_squared_euclidean_distance(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/manhattan_distance",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "manhattan (L1) distance", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_manhattan_distance(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_manhattan_distance(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/add",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "element-wise sum", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_add(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_add(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/subtract",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "element-wise difference", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_subtract(Json(req): Json<BinaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_subtract(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/scale",
+    request_body = ScaleRequest,
+    responses(
+        (status = 200, description = "scalar multiple", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_scale(Json(req): Json<ScaleRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_scale(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/negate",
+    request_body = UnaryVectorRequest,
+    responses(
+        (status = 200, description = "negated vector", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_negate(Json(req): Json<UnaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_negate(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/hadamard_division",
+    request_body = BinaryVectorRequest,
+    responses(
+        (status = 200, description = "element-wise quotient", body = VectorResponse),
+        (status = 400, description = "validation error / zero divisor"),
+    ),
+    tag = "util",
+)]
+async fn util_hadamard_division(
+    Json(req): Json<BinaryVectorRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_hadamard_division(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/elementwise_power",
+    request_body = PowerRequest,
+    responses(
+        (status = 200, description = "element-wise power", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_elementwise_power(Json(req): Json<PowerRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_elementwise_power(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/l2_normalize",
+    request_body = UnaryVectorRequest,
+    responses(
+        (status = 200, description = "unit-length vector", body = VectorResponse),
+        (status = 400, description = "validation error / zero magnitude"),
+    ),
+    tag = "util",
+)]
+async fn util_l2_normalize(Json(req): Json<UnaryVectorRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_l2_normalize(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/centroid",
+    request_body = VectorsRequest,
+    responses(
+        (status = 200, description = "component-wise mean vector", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_centroid(Json(req): Json<VectorsRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_centroid(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/mean",
+    request_body = SampleRequest,
+    responses(
+        (status = 200, description = "arithmetic mean", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_mean(Json(req): Json<SampleRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_mean(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/variance",
+    request_body = SampleRequest,
+    responses(
+        (status = 200, description = "sample variance (n-1)", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_variance(Json(req): Json<SampleRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_variance(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/std_dev",
+    request_body = SampleRequest,
+    responses(
+        (status = 200, description = "sample standard deviation", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_std_dev(Json(req): Json<SampleRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_std_dev(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/median",
+    request_body = SampleRequest,
+    responses(
+        (status = 200, description = "median (50th percentile)", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_median(Json(req): Json<SampleRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_median(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/percentile",
+    request_body = PercentileRequest,
+    responses(
+        (status = 200, description = "linear-interpolated percentile", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error / p out of range"),
+    ),
+    tag = "util",
+)]
+async fn util_percentile(Json(req): Json<PercentileRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_percentile(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/softmax",
+    request_body = SampleRequest,
+    responses(
+        (status = 200, description = "softmax distribution (sums to 1)", body = VectorResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_softmax(Json(req): Json<SampleRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_softmax(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/spearman_correlation",
+    request_body = TwoVectorF64Request,
+    responses(
+        (status = 200, description = "Spearman rank correlation", body = ScalarResponse<f64>),
+        (status = 400, description = "validation error / undefined"),
+    ),
+    tag = "util",
+)]
+async fn util_spearman_correlation(
+    Json(req): Json<TwoVectorF64Request>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_spearman_correlation(req)?).into_response())
 }
 
 #[cfg(test)]

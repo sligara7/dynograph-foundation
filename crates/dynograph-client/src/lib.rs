@@ -824,6 +824,192 @@ impl DynographClient {
         self.post_json("/v1/util/token_sort_ratio", &json!({ "a": a, "b": b }))
             .await
     }
+
+    // ---------------------------------------------------------------------
+    // v0.6.x util additions — distances, element-wise algebra, stats.
+    // ---------------------------------------------------------------------
+
+    /// `POST /v1/util/squared_euclidean_distance` — Euclidean distance
+    /// without the `sqrt` (order-preserving, cheaper for ranking).
+    pub async fn util_squared_euclidean_distance(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json(
+            "/v1/util/squared_euclidean_distance",
+            &binary_vec_body(a, b, precision),
+        )
+        .await
+    }
+
+    /// `POST /v1/util/manhattan_distance` — L1 / taxicab distance.
+    pub async fn util_manhattan_distance(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json(
+            "/v1/util/manhattan_distance",
+            &binary_vec_body(a, b, precision),
+        )
+        .await
+    }
+
+    /// `POST /v1/util/add` — element-wise sum `a + b`.
+    pub async fn util_add(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        self.post_json("/v1/util/add", &binary_vec_body(a, b, precision))
+            .await
+    }
+
+    /// `POST /v1/util/subtract` — element-wise difference `a - b`.
+    pub async fn util_subtract(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        self.post_json("/v1/util/subtract", &binary_vec_body(a, b, precision))
+            .await
+    }
+
+    /// `POST /v1/util/hadamard_division` — element-wise `a / b`. The
+    /// server returns 400 (`ClientError::Http`) if any component of `b`
+    /// is zero.
+    pub async fn util_hadamard_division(
+        &self,
+        a: &[f64],
+        b: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        self.post_json(
+            "/v1/util/hadamard_division",
+            &binary_vec_body(a, b, precision),
+        )
+        .await
+    }
+
+    /// `POST /v1/util/scale` — scalar multiple `c * v`.
+    pub async fn util_scale(
+        &self,
+        v: &[f64],
+        c: f64,
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "v": v, "c": c, "precision": p }),
+            None => json!({ "v": v, "c": c }),
+        };
+        self.post_json("/v1/util/scale", &body).await
+    }
+
+    /// `POST /v1/util/negate` — reverse direction (`-v`).
+    pub async fn util_negate(
+        &self,
+        v: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        self.post_json("/v1/util/negate", &unary_vec_body(v, precision))
+            .await
+    }
+
+    /// `POST /v1/util/elementwise_power` — each component raised to `p`.
+    pub async fn util_elementwise_power(
+        &self,
+        v: &[f64],
+        p: f64,
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        let body = match precision {
+            Some(prec) => json!({ "v": v, "p": p, "precision": prec }),
+            None => json!({ "v": v, "p": p }),
+        };
+        self.post_json("/v1/util/elementwise_power", &body).await
+    }
+
+    /// `POST /v1/util/l2_normalize` — unit-length copy of `v`. The server
+    /// returns 400 if `v` has zero magnitude.
+    pub async fn util_l2_normalize(
+        &self,
+        v: &[f64],
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        self.post_json("/v1/util/l2_normalize", &unary_vec_body(v, precision))
+            .await
+    }
+
+    /// `POST /v1/util/centroid` — component-wise mean of equal-length
+    /// `vectors`. 400 if empty or ragged.
+    pub async fn util_centroid(
+        &self,
+        vectors: &[Vec<f64>],
+        precision: Option<Precision>,
+    ) -> Result<UtilVectorResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "vectors": vectors, "precision": p }),
+            None => json!({ "vectors": vectors }),
+        };
+        self.post_json("/v1/util/centroid", &body).await
+    }
+
+    /// `POST /v1/util/mean` — arithmetic mean (f64-only). 400 on empty.
+    pub async fn util_mean(&self, values: &[f64]) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json("/v1/util/mean", &json!({ "values": values }))
+            .await
+    }
+
+    /// `POST /v1/util/variance` — sample variance (`n-1`). 400 for n<2.
+    pub async fn util_variance(&self, values: &[f64]) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json("/v1/util/variance", &json!({ "values": values }))
+            .await
+    }
+
+    /// `POST /v1/util/std_dev` — sample standard deviation. 400 for n<2.
+    pub async fn util_std_dev(&self, values: &[f64]) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json("/v1/util/std_dev", &json!({ "values": values }))
+            .await
+    }
+
+    /// `POST /v1/util/median` — 50th percentile. 400 on empty.
+    pub async fn util_median(&self, values: &[f64]) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json("/v1/util/median", &json!({ "values": values }))
+            .await
+    }
+
+    /// `POST /v1/util/percentile` — linear-interpolated percentile `p`
+    /// (`0..=100`). 400 on empty or out-of-range `p`.
+    pub async fn util_percentile(
+        &self,
+        values: &[f64],
+        p: f64,
+    ) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json("/v1/util/percentile", &json!({ "values": values, "p": p }))
+            .await
+    }
+
+    /// `POST /v1/util/softmax` — numerically-stable softmax distribution.
+    pub async fn util_softmax(&self, values: &[f64]) -> Result<UtilVectorResponse, ClientError> {
+        self.post_json("/v1/util/softmax", &json!({ "values": values }))
+            .await
+    }
+
+    /// `POST /v1/util/spearman_correlation` — rank correlation (f64-only,
+    /// n>=3). 400 on a constant input.
+    pub async fn util_spearman_correlation(
+        &self,
+        a: &[f64],
+        b: &[f64],
+    ) -> Result<UtilScalarResponse, ClientError> {
+        self.post_json("/v1/util/spearman_correlation", &json!({ "a": a, "b": b }))
+            .await
+    }
 }
 
 /// A transport-agnostic request under construction. Mirrors the small
