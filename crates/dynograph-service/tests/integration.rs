@@ -5832,6 +5832,102 @@ async fn algo_components_scoped_to_one_edge_type_splits_further() {
     assert_eq!(resp["count"], 4, "body: {resp}");
 }
 
+// `scope.where` (#23) — a property predicate that projects the algorithm onto
+// one logical subgraph partitioned by a node property (here `story_id`), the
+// storyflow multi-tenant shape. Mirrors the `nodes:scan` clause grammar.
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_where_scopes_degree_to_one_story() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // story-A has 4 nodes, story-B 2. A `where story_id = story-A` predicate
+    // must project onto story-A's 4 nodes only — story-B never enters.
+    let (status, resp) = post_algo(
+        &app,
+        "degree",
+        json!({"scope": {"where": [
+            {"property": "story_id", "op": "eq", "value": "story-A"}
+        ]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let scores = resp["scores"].as_array().unwrap();
+    let nodes: std::collections::BTreeSet<String> = scores
+        .iter()
+        .map(|s| s["node"].as_str().unwrap().to_string())
+        .collect();
+    let story_a: std::collections::BTreeSet<String> = ["char-A1", "char-A2", "loc-A1", "ev-A1"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(nodes, story_a, "only story-A nodes in scope: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_where_excludes_cross_partition_edges() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // A cross-story edge char-A1 -> char-B1. Unscoped, it welds the two stories
+    // into one component; under `where story_id = story-A` the edge leaves the
+    // subgraph (char-B1 is out of scope) and is dropped, so story-A stays whole
+    // and story-B is absent entirely.
+    create_typed_edge(
+        &app,
+        "MENTIONS",
+        "Character",
+        "char-A1",
+        "Character",
+        "char-B1",
+    )
+    .await;
+
+    let (status, resp) = post_algo(
+        &app,
+        "components",
+        json!({"scope": {"where": [
+            {"property": "story_id", "op": "eq", "value": "story-A"}
+        ]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["count"], 1, "story-A is one component: {resp}");
+    let comp: std::collections::BTreeSet<String> = resp["components"][0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let story_a: std::collections::BTreeSet<String> = ["char-A1", "char-A2", "loc-A1", "ev-A1"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        comp, story_a,
+        "cross-partition edge + node excluded: {resp}"
+    );
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_where_on_unindexed_property_fails_loud() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // `name` is declared but not `indexed` — same un-indexed rejection
+    // `nodes:scan` enforces, so a silent empty scope can't masquerade as
+    // "no matches".
+    let (status, resp) = post_algo(
+        &app,
+        "components",
+        json!({"scope": {"where": [
+            {"property": "name", "op": "eq", "value": "Alice"}
+        ]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+}
+
 #[cfg(feature = "graph")]
 #[tokio::test]
 async fn algo_degree_ranks_hub_node_first() {
