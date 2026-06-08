@@ -369,7 +369,9 @@ pub(crate) fn run(
     if vector_active {
         let nt = node_type.expect("node_type is required when the vector leg is active");
         if !engine.schema().node_types.contains_key(nt) {
-            return Err(RegistryError::BadRequest(format!("unknown node type: {nt}")));
+            return Err(RegistryError::BadRequest(format!(
+                "unknown node type: {nt}"
+            )));
         }
         let embedding = body
             .query_vector

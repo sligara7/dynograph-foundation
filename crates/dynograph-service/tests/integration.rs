@@ -5788,7 +5788,13 @@ async fn post_hybrid(app: &axum::Router, body: Value) -> (StatusCode, Value) {
 }
 
 #[cfg(feature = "fulltext")]
-async fn create_doc(app: &axum::Router, id: &str, title: &str, act: i64, embedding: Option<&[f32]>) {
+async fn create_doc(
+    app: &axum::Router,
+    id: &str,
+    title: &str,
+    act: i64,
+    embedding: Option<&[f32]>,
+) {
     let node = json!({
         "node_type": "Document",
         "node_id": id,
