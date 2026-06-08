@@ -503,7 +503,7 @@ mod imp {
     }
 
     /// Safety cap on subgraph size. Consumer graphs are small (10^2-10^3 nodes);
-    /// a scope that pulls far more is almost certainly a mis-scoped request, so
+    /// a scope that pulls far more is almost certainly a wrongly-scoped request, so
     /// fail loud rather than risk an OOM building the in-memory graph.
     const MAX_ALGO_NODES: usize = 100_000;
     /// Companion cap on edge count: a subgraph can stay under the node cap yet be

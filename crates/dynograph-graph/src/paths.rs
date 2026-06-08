@@ -135,17 +135,20 @@ fn dijkstra(g: &Graph, s: usize, track_paths: bool) -> Sssp {
         }
 
         for &(w, cost) in g.out_neighbors(v) {
-            let nd = d + cost;
-            if nd < dist[w] - EPS {
+            let new_dist = d + cost;
+            if new_dist < dist[w] - EPS {
                 // Strictly shorter path found: reset counts/preds.
-                dist[w] = nd;
+                dist[w] = new_dist;
                 if track_paths {
                     sigma[w] = sigma[v];
                     preds[w].clear();
                     preds[w].push(v);
                 }
-                heap.push(State { dist: nd, node: w });
-            } else if track_paths && (nd - dist[w]).abs() < EPS {
+                heap.push(State {
+                    dist: new_dist,
+                    node: w,
+                });
+            } else if track_paths && (new_dist - dist[w]).abs() < EPS {
                 // Tie: another shortest path to w through v. Because costs are
                 // strictly positive, dist[v] < dist[w], so v is already
                 // finalized — all of w's sigma is accumulated before it settles.
