@@ -120,13 +120,16 @@ pub fn validate_similarity_vector(v: &[f32]) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Euclidean distance between two f32 vectors.
+/// Squared Euclidean distance between two f32 vectors — Euclidean
+/// distance without the final `sqrt`.
 ///
-/// Same 8-wide unrolled accumulator structure as [`dot_product`] so it
-/// autovectorizes under the same `RUSTFLAGS` (see the module docstring);
-/// without those flags it is correct scalar code.
+/// Cheaper than [`euclidean_distance`] and order-preserving, so prefer it
+/// when you only need to *rank* or *compare* distances (kNN, nearest-
+/// centroid, clustering) rather than report a metric value. Same 8-wide
+/// unrolled accumulator as [`dot_product`], so it autovectorizes under
+/// the same `RUSTFLAGS` (see the module docstring).
 #[inline]
-pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
+pub fn squared_euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
     let mut sum = 0.0f32;
     let chunks = a.len() / 8;
@@ -160,7 +163,47 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
         sum += d * d;
     }
 
-    sum.sqrt()
+    sum
+}
+
+/// Euclidean distance between two f32 vectors — `sqrt` of
+/// [`squared_euclidean_distance`].
+#[inline]
+pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
+    squared_euclidean_distance(a, b).sqrt()
+}
+
+/// Manhattan (L1 / taxicab) distance between two f32 vectors: the sum of
+/// absolute per-component differences. More robust to a single large
+/// outlier component than Euclidean. Same 8-wide unrolled structure for
+/// autovectorization.
+#[inline]
+pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f32 {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    let mut sum = 0.0f32;
+    let chunks = a.len() / 8;
+    let remainder = a.len() % 8;
+
+    for i in 0..chunks {
+        let base = i * 8;
+        let mut local_sum = 0.0f32;
+        local_sum += (a[base] - b[base]).abs();
+        local_sum += (a[base + 1] - b[base + 1]).abs();
+        local_sum += (a[base + 2] - b[base + 2]).abs();
+        local_sum += (a[base + 3] - b[base + 3]).abs();
+        local_sum += (a[base + 4] - b[base + 4]).abs();
+        local_sum += (a[base + 5] - b[base + 5]).abs();
+        local_sum += (a[base + 6] - b[base + 6]).abs();
+        local_sum += (a[base + 7] - b[base + 7]).abs();
+        sum += local_sum;
+    }
+
+    let base = chunks * 8;
+    for i in 0..remainder {
+        sum += (a[base + i] - b[base + i]).abs();
+    }
+
+    sum
 }
 
 /// Element-wise (Hadamard) product of two f32 vectors.
@@ -170,6 +213,94 @@ pub fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
 pub fn hadamard(a: &[f32], b: &[f32]) -> Vec<f32> {
     debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
     a.iter().zip(b.iter()).map(|(x, y)| x * y).collect()
+}
+
+/// Return a unit-length (L2-normalized) copy of `v`: each component
+/// divided by the vector's magnitude. The standard preprocessing step
+/// before cosine / dot-product comparison.
+///
+/// Returns `None` when the vector has zero magnitude or a non-finite
+/// magnitude — the degenerate cases [`validate_similarity_vector`]
+/// rejects — so the caller makes the fallback explicit instead of
+/// dividing into `NaN`/`∞`.
+#[inline]
+pub fn l2_normalize(v: &[f32]) -> Option<Vec<f32>> {
+    let norm = l2_norm(v);
+    if norm == 0.0 || !norm.is_finite() {
+        return None;
+    }
+    Some(v.iter().map(|x| x / norm).collect())
+}
+
+/// Component-wise mean (centroid) of a set of equal-length vectors — the
+/// average vector, e.g. a cluster prototype or "average embedding."
+///
+/// Returns `None` if `vectors` is empty, the vectors are not all the same
+/// length, or that length is zero — an ambiguous centroid the caller
+/// should handle explicitly.
+pub fn centroid(vectors: &[&[f32]]) -> Option<Vec<f32>> {
+    let dim = vectors.first()?.len();
+    if dim == 0 || vectors.iter().any(|v| v.len() != dim) {
+        return None;
+    }
+    let mut acc = vec![0.0f32; dim];
+    for v in vectors {
+        for (a, x) in acc.iter_mut().zip(v.iter()) {
+            *a += *x;
+        }
+    }
+    let n = vectors.len() as f32;
+    for a in &mut acc {
+        *a /= n;
+    }
+    Some(acc)
+}
+
+/// Element-wise sum `a + b` of two equal-length f32 vectors.
+#[inline]
+pub fn add(a: &[f32], b: &[f32]) -> Vec<f32> {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    a.iter().zip(b.iter()).map(|(x, y)| x + y).collect()
+}
+
+/// Element-wise difference `a - b` of two equal-length f32 vectors.
+#[inline]
+pub fn subtract(a: &[f32], b: &[f32]) -> Vec<f32> {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    a.iter().zip(b.iter()).map(|(x, y)| x - y).collect()
+}
+
+/// Scalar multiplication: each component of `v` times `c`.
+#[inline]
+pub fn scale(v: &[f32], c: f32) -> Vec<f32> {
+    v.iter().map(|x| x * c).collect()
+}
+
+/// Negate a vector (reverse direction) — `scale(v, -1.0)`.
+#[inline]
+pub fn negate(v: &[f32]) -> Vec<f32> {
+    scale(v, -1.0)
+}
+
+/// Element-wise (Hadamard) division `a / b`.
+///
+/// Returns `None` if any component of `b` is zero — dividing would yield
+/// a silent `±∞`/`NaN`, so the caller makes the fallback explicit.
+#[inline]
+pub fn hadamard_division(a: &[f32], b: &[f32]) -> Option<Vec<f32>> {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    if b.contains(&0.0) {
+        return None;
+    }
+    Some(a.iter().zip(b.iter()).map(|(x, y)| x / y).collect())
+}
+
+/// Raise each component of `v` to the power `p`. Note a negative base
+/// with a non-integer `p` yields `NaN` (per IEEE `powf`); screen inputs
+/// upstream if that domain is reachable.
+#[inline]
+pub fn elementwise_power(v: &[f32], p: f32) -> Vec<f32> {
+    v.iter().map(|x| x.powf(p)).collect()
 }
 
 // =============================================================================
@@ -214,16 +345,33 @@ pub fn cosine_similarity_f64(a: &[f64], b: &[f64]) -> f64 {
     (dot / denom).clamp(-1.0, 1.0)
 }
 
-/// Euclidean distance between two f64 vectors.
+/// Squared Euclidean distance between two f64 vectors (no final `sqrt`).
+/// Order-preserving — prefer when ranking rather than reporting a metric.
+#[inline]
+pub fn squared_euclidean_distance_f64(a: &[f64], b: &[f64]) -> f64 {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| {
+            let d = x - y;
+            d * d
+        })
+        .sum()
+}
+
+/// Euclidean distance between two f64 vectors — `sqrt` of
+/// [`squared_euclidean_distance_f64`].
 #[inline]
 pub fn euclidean_distance_f64(a: &[f64], b: &[f64]) -> f64 {
+    squared_euclidean_distance_f64(a, b).sqrt()
+}
+
+/// Manhattan (L1 / taxicab) distance between two f64 vectors: the sum of
+/// absolute per-component differences.
+#[inline]
+pub fn manhattan_distance_f64(a: &[f64], b: &[f64]) -> f64 {
     debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
-    let mut sum = 0.0f64;
-    for i in 0..a.len() {
-        let d = a[i] - b[i];
-        sum += d * d;
-    }
-    sum.sqrt()
+    a.iter().zip(b.iter()).map(|(x, y)| (x - y).abs()).sum()
 }
 
 /// Element-wise (Hadamard) product of two f64 vectors.
@@ -231,6 +379,81 @@ pub fn euclidean_distance_f64(a: &[f64], b: &[f64]) -> f64 {
 pub fn hadamard_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
     debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
     a.iter().zip(b.iter()).map(|(x, y)| x * y).collect()
+}
+
+/// Unit-length (L2-normalized) copy of an f64 vector. `None` on zero or
+/// non-finite magnitude. See [`l2_normalize`].
+#[inline]
+pub fn l2_normalize_f64(v: &[f64]) -> Option<Vec<f64>> {
+    let norm = l2_norm_f64(v);
+    if norm == 0.0 || !norm.is_finite() {
+        return None;
+    }
+    Some(v.iter().map(|x| x / norm).collect())
+}
+
+/// Component-wise mean (centroid) of a set of equal-length f64 vectors.
+/// `None` if empty, ragged, or zero-dimension. See [`centroid`].
+pub fn centroid_f64(vectors: &[&[f64]]) -> Option<Vec<f64>> {
+    let dim = vectors.first()?.len();
+    if dim == 0 || vectors.iter().any(|v| v.len() != dim) {
+        return None;
+    }
+    let mut acc = vec![0.0f64; dim];
+    for v in vectors {
+        for (a, x) in acc.iter_mut().zip(v.iter()) {
+            *a += *x;
+        }
+    }
+    let n = vectors.len() as f64;
+    for a in &mut acc {
+        *a /= n;
+    }
+    Some(acc)
+}
+
+/// Element-wise sum `a + b` of two equal-length f64 vectors.
+#[inline]
+pub fn add_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    a.iter().zip(b.iter()).map(|(x, y)| x + y).collect()
+}
+
+/// Element-wise difference `a - b` of two equal-length f64 vectors.
+#[inline]
+pub fn subtract_f64(a: &[f64], b: &[f64]) -> Vec<f64> {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    a.iter().zip(b.iter()).map(|(x, y)| x - y).collect()
+}
+
+/// Scalar multiplication of an f64 vector by `c`.
+#[inline]
+pub fn scale_f64(v: &[f64], c: f64) -> Vec<f64> {
+    v.iter().map(|x| x * c).collect()
+}
+
+/// Negate an f64 vector — `scale_f64(v, -1.0)`.
+#[inline]
+pub fn negate_f64(v: &[f64]) -> Vec<f64> {
+    scale_f64(v, -1.0)
+}
+
+/// Element-wise (Hadamard) division `a / b`. `None` if any component of
+/// `b` is zero. See [`hadamard_division`].
+#[inline]
+pub fn hadamard_division_f64(a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
+    debug_assert_eq!(a.len(), b.len(), "vector dimensions must match");
+    if b.contains(&0.0) {
+        return None;
+    }
+    Some(a.iter().zip(b.iter()).map(|(x, y)| x / y).collect())
+}
+
+/// Raise each component of an f64 vector to the power `p`. See
+/// [`elementwise_power`].
+#[inline]
+pub fn elementwise_power_f64(v: &[f64], p: f64) -> Vec<f64> {
+    v.iter().map(|x| x.powf(p)).collect()
 }
 
 #[cfg(test)]
@@ -445,5 +668,109 @@ mod tests {
     fn l2_norm_f64_basic() {
         let v = vec![3.0_f64, 4.0];
         assert!((l2_norm_f64(&v) - 5.0).abs() < 1e-12);
+    }
+
+    // --- squared_euclidean / manhattan ---
+
+    #[test]
+    fn squared_euclidean_is_euclidean_without_sqrt() {
+        // Use 9 elements so both the 8-wide chunk and the remainder run.
+        let a: Vec<f32> = (0..9).map(|i| i as f32).collect();
+        let b: Vec<f32> = (0..9).map(|i| (i as f32) * 2.0).collect();
+        let sq = squared_euclidean_distance(&a, &b);
+        let e = euclidean_distance(&a, &b);
+        assert!((sq - e * e).abs() < 1e-3, "sq={sq} e^2={}", e * e);
+        assert!((squared_euclidean_distance_f64(&[0.0, 0.0], &[3.0, 4.0]) - 25.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn manhattan_known() {
+        // 9 elements to exercise chunk + remainder paths.
+        let a = vec![0.0f32, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let b = vec![1.0f32, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0, -8.0, 9.0];
+        // sum of |differences| = 1+2+3+4+5+6+7+8+9 = 45
+        assert!((manhattan_distance(&a, &b) - 45.0).abs() < 1e-4);
+        assert!((manhattan_distance_f64(&[1.0, 2.0], &[4.0, 6.0]) - 7.0).abs() < 1e-12);
+    }
+
+    // --- l2_normalize ---
+
+    #[test]
+    fn l2_normalize_yields_unit_vector() {
+        let n = l2_normalize(&[3.0f32, 4.0]).unwrap();
+        assert!((l2_norm(&n) - 1.0).abs() < 1e-6);
+        assert!((n[0] - 0.6).abs() < 1e-6 && (n[1] - 0.8).abs() < 1e-6);
+        let n64 = l2_normalize_f64(&[3.0, 4.0]).unwrap();
+        assert!((l2_norm_f64(&n64) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn l2_normalize_rejects_degenerate() {
+        assert_eq!(l2_normalize(&[0.0f32, 0.0]), None);
+        assert_eq!(l2_normalize(&[f32::NAN, 1.0]), None);
+        assert_eq!(l2_normalize_f64(&[0.0, 0.0]), None);
+    }
+
+    // --- centroid ---
+
+    #[test]
+    fn centroid_averages_componentwise() {
+        let a = vec![1.0f32, 2.0];
+        let b = vec![3.0f32, 6.0];
+        let c = centroid(&[&a, &b]).unwrap();
+        assert_eq!(c, vec![2.0, 4.0]);
+        let a64 = vec![0.0f64, 0.0];
+        let b64 = vec![2.0f64, 4.0];
+        assert_eq!(centroid_f64(&[&a64, &b64]).unwrap(), vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn centroid_rejects_empty_and_ragged() {
+        let empty: [&[f32]; 0] = [];
+        assert_eq!(centroid(&empty), None);
+        let a = vec![1.0f32, 2.0];
+        let short = vec![1.0f32];
+        assert_eq!(centroid(&[&a, &short]), None);
+    }
+
+    // --- element-wise algebra (Tier A) ---
+
+    #[test]
+    fn add_subtract_componentwise() {
+        assert_eq!(add(&[1.0f32, 2.0], &[3.0, 4.0]), vec![4.0, 6.0]);
+        assert_eq!(subtract(&[3.0f32, 4.0], &[1.0, 2.0]), vec![2.0, 2.0]);
+        assert_eq!(add_f64(&[1.0, 2.0], &[3.0, 4.0]), vec![4.0, 6.0]);
+        assert_eq!(subtract_f64(&[3.0, 4.0], &[1.0, 2.0]), vec![2.0, 2.0]);
+    }
+
+    #[test]
+    fn scale_and_negate() {
+        assert_eq!(scale(&[1.0f32, -2.0, 3.0], 2.0), vec![2.0, -4.0, 6.0]);
+        assert_eq!(negate(&[1.0f32, -2.0, 3.0]), vec![-1.0, 2.0, -3.0]);
+        assert_eq!(scale_f64(&[1.0, -2.0], 0.5), vec![0.5, -1.0]);
+        assert_eq!(negate_f64(&[1.0, -2.0]), vec![-1.0, 2.0]);
+    }
+
+    #[test]
+    fn hadamard_division_basic_and_zero_guard() {
+        assert_eq!(
+            hadamard_division(&[6.0f32, 8.0], &[2.0, 4.0]),
+            Some(vec![3.0, 2.0])
+        );
+        assert_eq!(hadamard_division(&[1.0f32, 2.0], &[1.0, 0.0]), None);
+        assert_eq!(
+            hadamard_division_f64(&[6.0, 9.0], &[3.0, 3.0]),
+            Some(vec![2.0, 3.0])
+        );
+        assert_eq!(hadamard_division_f64(&[1.0], &[0.0]), None);
+    }
+
+    #[test]
+    fn elementwise_power_basic() {
+        assert_eq!(
+            elementwise_power(&[2.0f32, 3.0, 4.0], 2.0),
+            vec![4.0, 9.0, 16.0]
+        );
+        assert_eq!(elementwise_power_f64(&[4.0, 9.0], 0.5), vec![2.0, 3.0]);
     }
 }

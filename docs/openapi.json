@@ -1593,6 +1593,78 @@
         }
       }
     },
+    "/v1/util/add": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "element-wise sum",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/centroid": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_centroid",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VectorsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "component-wise mean vector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/cosine_similarity": {
       "post": {
         "tags": [
@@ -1652,6 +1724,42 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/elementwise_power": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_elementwise_power",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PowerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "element-wise power",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
                 }
               }
             }
@@ -1737,6 +1845,42 @@
         }
       }
     },
+    "/v1/util/hadamard_division": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_hadamard_division",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "element-wise quotient",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / zero divisor"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/jaro_winkler": {
       "post": {
         "tags": [
@@ -1809,6 +1953,42 @@
         }
       }
     },
+    "/v1/util/l2_normalize": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_l2_normalize",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "unit-length vector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / zero magnitude"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/linear_regression_slope": {
       "post": {
         "tags": [
@@ -1838,6 +2018,150 @@
           },
           "400": {
             "description": "validation error / undefined"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/manhattan_distance": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_manhattan_distance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "manhattan (L1) distance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/mean": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_mean",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "arithmetic mean",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/median": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_median",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "median (50th percentile)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/negate": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_negate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "negated vector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
           },
           "401": {
             "description": "missing or invalid credentials (when bearer auth is enabled)"
@@ -1881,6 +2205,258 @@
         }
       }
     },
+    "/v1/util/percentile": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_percentile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PercentileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "linear-interpolated percentile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / p out of range"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/scale": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_scale",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "scalar multiple",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/softmax": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_softmax",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "softmax distribution (sums to 1)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/spearman_correlation": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_spearman_correlation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TwoVectorF64Request"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Spearman rank correlation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / undefined"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/squared_euclidean_distance": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_squared_euclidean_distance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "squared euclidean distance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/std_dev": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_std_dev",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "sample standard deviation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/subtract": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_subtract",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BinaryVectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "element-wise difference",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VectorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/token_sort_ratio": {
       "post": {
         "tags": [
@@ -1904,6 +2480,42 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ScalarResponse_u32"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/variance": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_variance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "sample variance (n-1)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalarResponse_f64"
                 }
               }
             }
@@ -2794,6 +3406,27 @@
           "lte"
         ]
       },
+      "PercentileRequest": {
+        "type": "object",
+        "description": "A sample plus the percentile `p` (in `0..=100`).",
+        "required": [
+          "values",
+          "p"
+        ],
+        "properties": {
+          "p": {
+            "type": "number",
+            "format": "double"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        }
+      },
       "PointsRequest": {
         "type": "object",
         "required": [
@@ -2815,6 +3448,30 @@
                   "format": "double"
                 }
               ]
+            }
+          }
+        }
+      },
+      "PowerRequest": {
+        "type": "object",
+        "description": "A vector plus a scalar exponent (for `elementwise_power`).",
+        "required": [
+          "v",
+          "p"
+        ],
+        "properties": {
+          "p": {
+            "type": "number",
+            "format": "double"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          },
+          "v": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
             }
           }
         }
@@ -2909,6 +3566,22 @@
           "ids"
         ]
       },
+      "SampleRequest": {
+        "type": "object",
+        "description": "A sample of values for a descriptive statistic (f64-only — no\n`precision`). Named `values` rather than `v` to read as a sample,\nnot a geometric vector.",
+        "required": [
+          "values"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        }
+      },
       "ScalarResponse_f64": {
         "type": "object",
         "required": [
@@ -2931,6 +3604,30 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ScaleRequest": {
+        "type": "object",
+        "description": "A vector plus a scalar coefficient (for `scale`).",
+        "required": [
+          "v",
+          "c"
+        ],
+        "properties": {
+          "c": {
+            "type": "number",
+            "format": "double"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          },
+          "v": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
           }
         }
       },
@@ -3347,6 +4044,28 @@
             "items": {
               "type": "number",
               "format": "double"
+            }
+          }
+        }
+      },
+      "VectorsRequest": {
+        "type": "object",
+        "description": "A set of equal-length vectors (for `centroid`).",
+        "required": [
+          "vectors"
+        ],
+        "properties": {
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          },
+          "vectors": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
             }
           }
         }

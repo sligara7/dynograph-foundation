@@ -21,6 +21,23 @@
 //! | `POST /v1/util/linear_regression_slope` | `{points: [[x, y], ...]}` (f64 only)   | `{result: f64}`       |
 //! | `POST /v1/util/jaro_winkler`          | `{a: "s1", b: "s2"}`                     | `{result: u32}` (0..=100) |
 //! | `POST /v1/util/token_sort_ratio`      | `{a: "s1", b: "s2"}`                     | `{result: u32}` (0..=100) |
+//! | `POST /v1/util/squared_euclidean_distance` | `{a:[..], b:[..], precision?}`     | `{result: f64}`       |
+//! | `POST /v1/util/manhattan_distance`    | `{a:[..], b:[..], precision?}`           | `{result: f64}`       |
+//! | `POST /v1/util/add`                   | `{a:[..], b:[..], precision?}`           | `{result: [f64]}`     |
+//! | `POST /v1/util/subtract`              | `{a:[..], b:[..], precision?}`           | `{result: [f64]}`     |
+//! | `POST /v1/util/scale`                 | `{v:[..], c, precision?}`                | `{result: [f64]}`     |
+//! | `POST /v1/util/negate`                | `{v:[..], precision?}`                   | `{result: [f64]}`     |
+//! | `POST /v1/util/hadamard_division`     | `{a:[..], b:[..], precision?}`           | `{result: [f64]}` (400 on zero divisor) |
+//! | `POST /v1/util/elementwise_power`     | `{v:[..], p, precision?}`                | `{result: [f64]}`     |
+//! | `POST /v1/util/l2_normalize`          | `{v:[..], precision?}`                   | `{result: [f64]}` (400 on zero magnitude) |
+//! | `POST /v1/util/centroid`              | `{vectors: [[..], ..], precision?}`      | `{result: [f64]}`     |
+//! | `POST /v1/util/mean`                  | `{values:[..]}` (f64 only)               | `{result: f64}`       |
+//! | `POST /v1/util/variance`              | `{values:[..]}` (f64 only, n>=2)         | `{result: f64}`       |
+//! | `POST /v1/util/std_dev`               | `{values:[..]}` (f64 only, n>=2)         | `{result: f64}`       |
+//! | `POST /v1/util/median`                | `{values:[..]}` (f64 only)               | `{result: f64}`       |
+//! | `POST /v1/util/percentile`            | `{values:[..], p}` (f64 only, 0<=p<=100) | `{result: f64}`       |
+//! | `POST /v1/util/softmax`               | `{values:[..]}` (f64 only)               | `{result: [f64]}`     |
+//! | `POST /v1/util/spearman_correlation`  | `{a:[..], b:[..]}` (f64 only, n>=3)      | `{result: f64}`       |
 //!
 //! ## Precision
 //!
@@ -55,9 +72,14 @@ use utoipa::ToSchema;
 
 use dynograph_resolution::{jaro_winkler, token_sort_ratio};
 use dynograph_vector::{
-    cosine_similarity, cosine_similarity_f64, dot_product, dot_product_f64, euclidean_distance,
-    euclidean_distance_f64, hadamard, hadamard_f64, l2_norm, l2_norm_f64, linear_regression_slope,
-    pearson_correlation, validate_similarity_vector,
+    add, add_f64, centroid, centroid_f64, cosine_similarity, cosine_similarity_f64, dot_product,
+    dot_product_f64, elementwise_power, elementwise_power_f64, euclidean_distance,
+    euclidean_distance_f64, hadamard, hadamard_division, hadamard_division_f64, hadamard_f64,
+    l2_norm, l2_norm_f64, l2_normalize, l2_normalize_f64, linear_regression_slope,
+    manhattan_distance, manhattan_distance_f64, mean, median, negate, negate_f64,
+    pearson_correlation, percentile, scale, scale_f64, softmax, spearman_rank_correlation,
+    squared_euclidean_distance, squared_euclidean_distance_f64, std_dev, subtract, subtract_f64,
+    validate_similarity_vector, variance,
 };
 
 use crate::registry::RegistryError;
@@ -225,11 +247,8 @@ pub(crate) fn run_euclidean_distance(
 
 pub(crate) fn run_hadamard(req: BinaryVectorRequest) -> Result<VectorResponse, RegistryError> {
     validate_binary(&req.a, &req.b)?;
-    let result: Vec<f64> = match req.precision {
-        Precision::F32 => hadamard(&cast_f32(&req.a), &cast_f32(&req.b))
-            .into_iter()
-            .map(|x| x as f64)
-            .collect(),
+    let result = match req.precision {
+        Precision::F32 => widen(hadamard(&cast_f32(&req.a), &cast_f32(&req.b))),
         Precision::F64 => hadamard_f64(&req.a, &req.b),
     };
     Ok(VectorResponse { result })
@@ -327,4 +346,288 @@ fn validate_strings(a: &str, b: &str) -> Result<(), RegistryError> {
         )));
     }
     Ok(())
+}
+
+// =========================================================================
+// v0.6.x additions — more distances, element-wise algebra, descriptive
+// stats. Same conventions as above: vector ops honor `precision`
+// (f32 cast then dispatch); stats are f64-only; a `None` from the
+// underlying fn becomes a 400 (loud-fail) rather than a silent default.
+// JSON has no NaN/Infinity literals, so inputs over the wire are always
+// finite — no extra finiteness screen is needed here.
+// =========================================================================
+
+/// A set of equal-length vectors (for `centroid`).
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct VectorsRequest {
+    pub vectors: Vec<Vec<f64>>,
+    #[serde(default)]
+    pub precision: Precision,
+}
+
+/// A vector plus a scalar coefficient (for `scale`).
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct ScaleRequest {
+    pub v: Vec<f64>,
+    pub c: f64,
+    #[serde(default)]
+    pub precision: Precision,
+}
+
+/// A vector plus a scalar exponent (for `elementwise_power`).
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct PowerRequest {
+    pub v: Vec<f64>,
+    pub p: f64,
+    #[serde(default)]
+    pub precision: Precision,
+}
+
+/// A sample of values for a descriptive statistic (f64-only — no
+/// `precision`). Named `values` rather than `v` to read as a sample,
+/// not a geometric vector.
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct SampleRequest {
+    pub values: Vec<f64>,
+}
+
+/// A sample plus the percentile `p` (in `0..=100`).
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct PercentileRequest {
+    pub values: Vec<f64>,
+    pub p: f64,
+}
+
+/// Length validation for descriptive-stat samples (distinct message from
+/// `validate_unary`, which speaks of a geometric vector `v`).
+fn validate_sample(values: &[f64], min_len: usize, ctx: &str) -> Result<(), RegistryError> {
+    if values.len() < min_len {
+        return Err(RegistryError::BadRequest(format!(
+            "{ctx} requires at least {min_len} value(s), got {}",
+            values.len()
+        )));
+    }
+    if values.len() > MAX_VECTOR_LEN {
+        return Err(RegistryError::BadRequest(format!(
+            "values length {} exceeds maximum {MAX_VECTOR_LEN}",
+            values.len()
+        )));
+    }
+    Ok(())
+}
+
+// --- distances (scalar) ---
+
+pub(crate) fn run_squared_euclidean_distance(
+    req: BinaryVectorRequest,
+) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_binary(&req.a, &req.b)?;
+    let result = match req.precision {
+        Precision::F32 => squared_euclidean_distance(&cast_f32(&req.a), &cast_f32(&req.b)) as f64,
+        Precision::F64 => squared_euclidean_distance_f64(&req.a, &req.b),
+    };
+    Ok(ScalarResponse { result })
+}
+
+pub(crate) fn run_manhattan_distance(
+    req: BinaryVectorRequest,
+) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_binary(&req.a, &req.b)?;
+    let result = match req.precision {
+        Precision::F32 => manhattan_distance(&cast_f32(&req.a), &cast_f32(&req.b)) as f64,
+        Precision::F64 => manhattan_distance_f64(&req.a, &req.b),
+    };
+    Ok(ScalarResponse { result })
+}
+
+// --- element-wise algebra (vector) ---
+
+pub(crate) fn run_add(req: BinaryVectorRequest) -> Result<VectorResponse, RegistryError> {
+    validate_binary(&req.a, &req.b)?;
+    let result = match req.precision {
+        Precision::F32 => widen(add(&cast_f32(&req.a), &cast_f32(&req.b))),
+        Precision::F64 => add_f64(&req.a, &req.b),
+    };
+    Ok(VectorResponse { result })
+}
+
+pub(crate) fn run_subtract(req: BinaryVectorRequest) -> Result<VectorResponse, RegistryError> {
+    validate_binary(&req.a, &req.b)?;
+    let result = match req.precision {
+        Precision::F32 => widen(subtract(&cast_f32(&req.a), &cast_f32(&req.b))),
+        Precision::F64 => subtract_f64(&req.a, &req.b),
+    };
+    Ok(VectorResponse { result })
+}
+
+pub(crate) fn run_hadamard_division(
+    req: BinaryVectorRequest,
+) -> Result<VectorResponse, RegistryError> {
+    validate_binary(&req.a, &req.b)?;
+    let result = match req.precision {
+        Precision::F32 => hadamard_division(&cast_f32(&req.a), &cast_f32(&req.b)).map(widen),
+        Precision::F64 => hadamard_division_f64(&req.a, &req.b),
+    };
+    result
+        .map(|result| VectorResponse { result })
+        .ok_or_else(|| {
+            RegistryError::BadRequest(
+                "hadamard_division undefined: b has a zero component".to_string(),
+            )
+        })
+}
+
+pub(crate) fn run_scale(req: ScaleRequest) -> Result<VectorResponse, RegistryError> {
+    validate_unary(&req.v)?;
+    let result = match req.precision {
+        Precision::F32 => widen(scale(&cast_f32(&req.v), req.c as f32)),
+        Precision::F64 => scale_f64(&req.v, req.c),
+    };
+    Ok(VectorResponse { result })
+}
+
+pub(crate) fn run_negate(req: UnaryVectorRequest) -> Result<VectorResponse, RegistryError> {
+    validate_unary(&req.v)?;
+    let result = match req.precision {
+        Precision::F32 => widen(negate(&cast_f32(&req.v))),
+        Precision::F64 => negate_f64(&req.v),
+    };
+    Ok(VectorResponse { result })
+}
+
+pub(crate) fn run_elementwise_power(req: PowerRequest) -> Result<VectorResponse, RegistryError> {
+    validate_unary(&req.v)?;
+    let result = match req.precision {
+        Precision::F32 => widen(elementwise_power(&cast_f32(&req.v), req.p as f32)),
+        Precision::F64 => elementwise_power_f64(&req.v, req.p),
+    };
+    Ok(VectorResponse { result })
+}
+
+// --- transforms ---
+
+pub(crate) fn run_l2_normalize(req: UnaryVectorRequest) -> Result<VectorResponse, RegistryError> {
+    validate_unary(&req.v)?;
+    let result = match req.precision {
+        Precision::F32 => l2_normalize(&cast_f32(&req.v)).map(widen),
+        Precision::F64 => l2_normalize_f64(&req.v),
+    };
+    result
+        .map(|result| VectorResponse { result })
+        .ok_or_else(|| {
+            RegistryError::BadRequest("l2_normalize undefined: zero-magnitude vector".to_string())
+        })
+}
+
+pub(crate) fn run_centroid(req: VectorsRequest) -> Result<VectorResponse, RegistryError> {
+    if req.vectors.is_empty() {
+        return Err(RegistryError::BadRequest(
+            "vectors must be non-empty".to_string(),
+        ));
+    }
+    let dim = req.vectors[0].len();
+    if dim == 0 {
+        return Err(RegistryError::BadRequest(
+            "each vector must be non-empty".to_string(),
+        ));
+    }
+    if dim > MAX_VECTOR_LEN {
+        return Err(RegistryError::BadRequest(format!(
+            "vector length {dim} exceeds maximum {MAX_VECTOR_LEN}"
+        )));
+    }
+    if req.vectors.iter().any(|v| v.len() != dim) {
+        return Err(RegistryError::BadRequest(
+            "all vectors must have the same length".to_string(),
+        ));
+    }
+    let result = match req.precision {
+        Precision::F32 => {
+            let cast: Vec<Vec<f32>> = req.vectors.iter().map(|v| cast_f32(v)).collect();
+            let refs: Vec<&[f32]> = cast.iter().map(|v| v.as_slice()).collect();
+            centroid(&refs).map(widen)
+        }
+        Precision::F64 => {
+            let refs: Vec<&[f64]> = req.vectors.iter().map(|v| v.as_slice()).collect();
+            centroid_f64(&refs)
+        }
+    };
+    // Validated above, so `None` shouldn't occur; surface it loudly anyway.
+    result
+        .map(|result| VectorResponse { result })
+        .ok_or_else(|| RegistryError::BadRequest("centroid undefined".to_string()))
+}
+
+// --- descriptive statistics (f64 only) ---
+
+pub(crate) fn run_mean(req: SampleRequest) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_sample(&req.values, 1, "mean")?;
+    mean(&req.values)
+        .map(|result| ScalarResponse { result })
+        .ok_or_else(|| RegistryError::BadRequest("mean undefined (empty input)".to_string()))
+}
+
+pub(crate) fn run_variance(req: SampleRequest) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_sample(&req.values, 2, "variance")?;
+    variance(&req.values)
+        .map(|result| ScalarResponse { result })
+        .ok_or_else(|| RegistryError::BadRequest("variance requires n >= 2".to_string()))
+}
+
+pub(crate) fn run_std_dev(req: SampleRequest) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_sample(&req.values, 2, "std_dev")?;
+    std_dev(&req.values)
+        .map(|result| ScalarResponse { result })
+        .ok_or_else(|| RegistryError::BadRequest("std_dev requires n >= 2".to_string()))
+}
+
+pub(crate) fn run_median(req: SampleRequest) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_sample(&req.values, 1, "median")?;
+    median(&req.values)
+        .map(|result| ScalarResponse { result })
+        .ok_or_else(|| RegistryError::BadRequest("median undefined (empty input)".to_string()))
+}
+
+pub(crate) fn run_percentile(req: PercentileRequest) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_sample(&req.values, 1, "percentile")?;
+    if !(0.0..=100.0).contains(&req.p) {
+        return Err(RegistryError::BadRequest(format!(
+            "percentile p must be in 0..=100, got {}",
+            req.p
+        )));
+    }
+    percentile(&req.values, req.p)
+        .map(|result| ScalarResponse { result })
+        .ok_or_else(|| RegistryError::BadRequest("percentile undefined".to_string()))
+}
+
+pub(crate) fn run_softmax(req: SampleRequest) -> Result<VectorResponse, RegistryError> {
+    validate_sample(&req.values, 1, "softmax")?;
+    Ok(VectorResponse {
+        result: softmax(&req.values),
+    })
+}
+
+pub(crate) fn run_spearman_correlation(
+    req: TwoVectorF64Request,
+) -> Result<ScalarResponse<f64>, RegistryError> {
+    validate_binary(&req.a, &req.b)?;
+    if req.a.len() < 3 {
+        return Err(RegistryError::BadRequest(format!(
+            "spearman_correlation requires n >= 3, got {}",
+            req.a.len()
+        )));
+    }
+    spearman_rank_correlation(&req.a, &req.b)
+        .map(|result| ScalarResponse { result })
+        .ok_or_else(|| {
+            RegistryError::BadRequest(
+                "spearman_correlation undefined (likely a constant input)".to_string(),
+            )
+        })
+}
+
+/// Widen an f32 result vector to the f64 wire type (JSON numbers are f64).
+fn widen(v: Vec<f32>) -> Vec<f64> {
+    v.into_iter().map(|x| x as f64).collect()
 }

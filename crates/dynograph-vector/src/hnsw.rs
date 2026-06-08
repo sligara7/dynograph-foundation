@@ -449,6 +449,26 @@ impl HnswIndex {
 
     /// Search for the k nearest neighbors to a query vector.
     pub fn search(&self, query: &[f32], k: usize) -> Vec<SearchResult> {
+        self.search_filtered(query, k, |_| true)
+    }
+
+    /// Search for the k nearest neighbors whose id satisfies `keep`.
+    ///
+    /// A post-filter over the same `ef`-width beam [`search`](Self::search)
+    /// uses: candidates are gathered by proximity, then those failing
+    /// `keep` (or tombstoned) are dropped before taking the top k. Useful
+    /// for ACL / type / exclude-self filtering without a separate index.
+    ///
+    /// Best-effort: a highly selective predicate can return fewer than `k`
+    /// hits even when more exist in the index, because the filter is
+    /// applied *after* the fixed-width beam search. Widen `ef_search`
+    /// (via [`HnswConfig`]) to trade CPU for filtered recall.
+    pub fn search_filtered(
+        &self,
+        query: &[f32],
+        k: usize,
+        keep: impl Fn(&str) -> bool,
+    ) -> Vec<SearchResult> {
         if self.is_empty() {
             return Vec::new();
         }
@@ -474,14 +494,14 @@ impl HnswIndex {
         let ef = self.config.ef_search.max(k);
         let candidates = self.search_layer(current, query, ef, 0);
 
-        // Return top-k live results. Tombstoned candidates are filtered
-        // here rather than in search_layer so the beam width (ef) still
-        // considers them as traversal waypoints — their neighbor
-        // connections remain valid paths even when the tombstoned node
-        // itself shouldn't land in the result set.
+        // Return top-k live results that pass `keep`. Tombstoned and
+        // filtered-out candidates are dropped here rather than in
+        // search_layer so the beam width (ef) still considers them as
+        // traversal waypoints — their neighbor connections remain valid
+        // paths even when the node itself shouldn't land in the results.
         let results: Vec<SearchResult> = candidates
             .into_iter()
-            .filter(|(idx, _)| !self.nodes[*idx].tombstoned)
+            .filter(|(idx, _)| !self.nodes[*idx].tombstoned && keep(self.nodes[*idx].id.as_ref()))
             .take(k)
             .map(|(idx, score)| SearchResult {
                 id: Arc::clone(&self.nodes[idx].id),
@@ -712,6 +732,32 @@ mod tests {
         assert_eq!(&*results[0].id, "x_axis");
         // xy_diag should be second
         assert_eq!(&*results[1].id, "xy_diag");
+    }
+
+    #[test]
+    fn search_filtered_excludes_rejected_ids() {
+        let mut index = HnswIndex::new(make_config(3));
+        index.insert("x_axis", &[1.0, 0.0, 0.0]);
+        index.insert("y_axis", &[0.0, 1.0, 0.0]);
+        index.insert("z_axis", &[0.0, 0.0, 1.0]);
+        index.insert("xy_diag", &[0.707, 0.707, 0.0]);
+
+        // Unfiltered, the nearest to ~x_axis is x_axis itself.
+        let all = index.search(&[0.9, 0.1, 0.0], 2);
+        assert_eq!(&*all[0].id, "x_axis");
+
+        // Exclude x_axis via the predicate; it must not appear, and the
+        // next-best (xy_diag) takes the top slot.
+        let filtered = index.search_filtered(&[0.9, 0.1, 0.0], 2, |id| id != "x_axis");
+        assert!(filtered.iter().all(|r| &*r.id != "x_axis"));
+        assert_eq!(&*filtered[0].id, "xy_diag");
+
+        // A reject-everything predicate yields no hits.
+        assert!(
+            index
+                .search_filtered(&[1.0, 0.0, 0.0], 4, |_| false)
+                .is_empty()
+        );
     }
 
     #[test]
