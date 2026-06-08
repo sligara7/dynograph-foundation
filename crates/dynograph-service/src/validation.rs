@@ -26,6 +26,26 @@ pub(crate) fn validate_limit(limit: usize, context: &str) -> Result<(), Registry
     Ok(())
 }
 
+/// Reject a `node_type` filter that can never full-text match — an
+/// unknown type, or a known type that declares no `fulltext` property.
+/// Shared by `search:text` and `search:hybrid`'s keyword leg so the
+/// 400 message stays identical (and a client typo surfaces loudly
+/// instead of as an empty 200). Only the keyword leg uses it, so it's
+/// gated to the `fulltext` build like its callers.
+#[cfg(feature = "fulltext")]
+pub(crate) fn validate_fulltext_searchable(
+    schema: &Schema,
+    node_type: &str,
+) -> Result<(), RegistryError> {
+    if !schema.has_fulltext_properties(node_type) {
+        return Err(RegistryError::BadRequest(format!(
+            "node type '{node_type}' is not full-text searchable \
+             (unknown type, or it declares no fulltext properties)"
+        )));
+    }
+    Ok(())
+}
+
 /// Confirm that `prop` is declared on `node_type` in `schema` AND
 /// flagged `indexed: true`. Used by routes that filter by property
 /// via `scan_nodes_by_property` — un-indexed lookups silently return
