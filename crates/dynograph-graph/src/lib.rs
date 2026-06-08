@@ -15,9 +15,12 @@
 //! - [`Graph`] / [`GraphBuilder`] with self-loop and parallel-edge policies
 //! - Connected / weakly-connected [`components`](connected_components) and
 //!   strongly-connected components ([`strongly_connected_components`])
-//! - Centrality: [`degree_centrality`], [`pagerank`], [`eigenvector_centrality`],
-//!   [`closeness_centrality`], [`betweenness_centrality`]
-//! - Structure: articulation points & bridges ([`cut_structure`])
+//! - Centrality: [`degree_centrality`], [`pagerank`], [`personalized_pagerank`],
+//!   [`eigenvector_centrality`], [`closeness_centrality`], [`betweenness_centrality`]
+//! - Structure: articulation points & bridges ([`cut_structure`]), directed
+//!   cycle detection ([`find_cycle`])
+//! - Paths & prediction: single-pair [`shortest_path`], neighborhood-overlap
+//!   link prediction ([`link_prediction_from`] / [`link_prediction_all`])
 //!
 //! Edge weights carry one of two meanings depending on the algorithm, and the
 //! caller must supply the right kind:
@@ -34,20 +37,26 @@ mod centrality;
 mod closeness;
 mod components;
 mod cuts;
+mod cycles;
 mod eigenvector;
 mod error;
 mod graph;
+mod link_prediction;
 mod pagerank;
 mod paths;
 mod scc;
+mod shortest_path;
 
 pub use betweenness::betweenness_centrality;
 pub use centrality::{DegreeMode, degree_centrality};
 pub use closeness::closeness_centrality;
 pub use components::{Components, connected_components};
 pub use cuts::{Cuts, cut_structure};
+pub use cycles::find_cycle;
 pub use eigenvector::{EigenvectorConfig, eigenvector_centrality};
 pub use error::GraphError;
 pub use graph::{Graph, GraphBuilder, ParallelEdgePolicy, SelfLoopPolicy};
-pub use pagerank::{PageRankConfig, pagerank};
+pub use link_prediction::{LinkPredictionMethod, link_prediction_all, link_prediction_from};
+pub use pagerank::{PageRankConfig, pagerank, personalized_pagerank};
 pub use scc::strongly_connected_components;
+pub use shortest_path::{Path, shortest_path};

@@ -6107,6 +6107,117 @@ async fn algo_scc_directed_tree_is_all_singletons() {
     }
 }
 
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_cycles_reports_acyclic_seeded_graph() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // The seeded directed graph is acyclic.
+    let (status, resp) = post_algo(&app, "cycles", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["acyclic"], true, "body: {resp}");
+    assert!(resp["cycle"].as_array().unwrap().is_empty(), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_personalized_pagerank_requires_seeds() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(&app, "personalized_pagerank", json!({})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("seed"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_personalized_pagerank_seeds_dominate() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(
+        &app,
+        "personalized_pagerank",
+        json!({"direction": "undirected", "seeds": ["char-A1"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    // Seeding story-A's hub should rank it (or its immediate neighborhood) above
+    // a node in the disconnected story-B component, which gets only teleport mass.
+    assert!(
+        score_of(&resp, "char-A1") > score_of(&resp, "char-B2"),
+        "seed cluster should dominate: {resp}"
+    );
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_shortest_path_finds_route_and_unreachable() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // char-A1 -> char-A2 via the MENTIONS edge (directed, one hop).
+    let (status, resp) = post_algo(
+        &app,
+        "shortest_path",
+        json!({"source": "char-A1", "target": "char-A2"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["found"], true, "body: {resp}");
+    assert_eq!(resp["distance"], 1.0, "body: {resp}");
+    let path: Vec<&str> = resp["path"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(path, vec!["char-A1", "char-A2"]);
+
+    // Story-A cannot reach story-B (disconnected) -> not found.
+    let (status, resp) = post_algo(
+        &app,
+        "shortest_path",
+        json!({"source": "char-A1", "target": "char-B1"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["found"], false, "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_shortest_path_missing_source_is_400() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(&app, "shortest_path", json!({"target": "char-A2"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("source"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_link_prediction_from_source() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // Undirected story-A star: char-A2, loc-A1, ev-A1 are mutual non-neighbors
+    // that all share the hub char-A1, so from char-A2 they're predicted links.
+    let (status, resp) = post_algo(
+        &app,
+        "link_prediction",
+        json!({"source": "char-A2", "method": "common_neighbors"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let links = resp["links"].as_array().unwrap();
+    assert!(!links.is_empty(), "expected predicted links: {resp}");
+    // Every predicted link is from the source and scores >= 1 common neighbor.
+    for l in links {
+        assert_eq!(l["a"], "char-A2");
+        assert!(l["score"].as_f64().unwrap() >= 1.0);
+    }
+}
+
 #[cfg(not(feature = "graph"))]
 #[tokio::test]
 async fn algo_endpoints_return_501_without_graph_feature() {
@@ -6122,6 +6233,10 @@ async fn algo_endpoints_return_501_without_graph_feature() {
         "betweenness",
         "cuts",
         "scc",
+        "cycles",
+        "personalized_pagerank",
+        "shortest_path",
+        "link_prediction",
     ] {
         let res = app
             .clone()

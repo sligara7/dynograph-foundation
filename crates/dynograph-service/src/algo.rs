@@ -239,10 +239,118 @@ pub(crate) struct NodeScore {
 
 /// Per-node centrality scores, highest first (ties broken by node id). Shared by
 /// every score-producing algorithm (degree, PageRank, eigenvector, closeness,
-/// betweenness).
+/// betweenness, personalized PageRank).
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ScoresResponse {
     pub scores: Vec<NodeScore>,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/personalized_pagerank` (random walk
+/// with restart). Like PageRank, but teleport mass returns to `seeds`, so scores
+/// measure relevance to that seed set. Edge weights are **strengths**.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct PersonalizedPageRankRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+    /// Seed node ids the walk restarts to. Required (non-empty).
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    /// Damping factor in `[0, 1]`. Defaults to 0.85.
+    #[serde(default)]
+    pub damping: Option<f64>,
+    /// L1 convergence threshold. Defaults to 1e-6.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// Iteration budget before a non-convergence error. Defaults to 100.
+    #[serde(default)]
+    pub max_iterations: Option<usize>,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/shortest_path`. Edge weights are path
+/// **costs** (strictly positive); omit `weight` for hop-count distance.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct ShortestPathRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    /// Start node id (required).
+    #[serde(default)]
+    pub source: Option<String>,
+    /// End node id (required).
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+}
+
+/// A shortest path between two nodes. `found` is false (with an empty `path`)
+/// when the target is unreachable from the source.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct ShortestPathResponse {
+    pub found: bool,
+    /// Node ids in order, source first and target last; empty when not found.
+    pub path: Vec<String>,
+    /// Total path cost (hop count when unweighted); 0 when not found.
+    pub distance: f64,
+}
+
+/// Which neighborhood-overlap score link prediction uses.
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LinkPredictionMethodWire {
+    #[default]
+    CommonNeighbors,
+    Jaccard,
+    AdamicAdar,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/link_prediction`. Treats the subgraph
+/// as undirected. With `source`, predicts links from that node; without it,
+/// across all non-adjacent pairs. Results are ranked by score and capped.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct LinkPredictionRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub method: LinkPredictionMethodWire,
+    /// Predict links from this node only; omit for all non-adjacent pairs.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Max ranked results. Defaults to 100, capped at the standard result limit.
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+/// One predicted (currently-absent) link and its score. `a`/`b` are the endpoint
+/// node ids (for a single-source request, `a` is the source).
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct PredictedLink {
+    pub a: String,
+    pub b: String,
+    pub score: f64,
+}
+
+/// Predicted links, highest score first.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct LinkPredictionResponse {
+    pub links: Vec<PredictedLink>,
+}
+
+/// Response for `POST /v1/graphs/{id}/algo/cycles`. `acyclic` is true for a DAG;
+/// otherwise `cycle` is one witness directed cycle (node ids, closed by the edge
+/// from the last back to the first).
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CyclesResponse {
+    pub acyclic: bool,
+    pub cycle: Vec<String>,
 }
 
 // ---- Algorithm entry points ----
@@ -256,8 +364,9 @@ pub(crate) struct ScoresResponse {
 
 #[cfg(feature = "graph")]
 pub(crate) use imp::{
-    run_betweenness, run_closeness, run_components, run_cuts, run_degree, run_eigenvector,
-    run_pagerank, run_scc,
+    run_betweenness, run_closeness, run_components, run_cuts, run_cycles, run_degree,
+    run_eigenvector, run_link_prediction, run_pagerank, run_personalized_pagerank, run_scc,
+    run_shortest_path,
 };
 
 #[cfg(not(feature = "graph"))]
@@ -299,19 +408,51 @@ not_enabled_stub!(run_betweenness, BetweennessRequest, ScoresResponse);
 not_enabled_stub!(run_cuts, ScopedRequest, CutsResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_scc, ScopedRequest, ComponentsResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_cycles, ScopedRequest, CyclesResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(
+    run_personalized_pagerank,
+    PersonalizedPageRankRequest,
+    ScoresResponse
+);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_shortest_path, ShortestPathRequest, ShortestPathResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(
+    run_link_prediction,
+    LinkPredictionRequest,
+    LinkPredictionResponse
+);
 
 #[cfg(feature = "graph")]
 mod imp {
     use super::*;
 
     use dynograph_graph::{
-        Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError, PageRankConfig,
-        betweenness_centrality, closeness_centrality, connected_components, cut_structure,
-        degree_centrality, eigenvector_centrality, pagerank, strongly_connected_components,
+        Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError,
+        LinkPredictionMethod, PageRankConfig, betweenness_centrality, closeness_centrality,
+        connected_components, cut_structure, degree_centrality, eigenvector_centrality, find_cycle,
+        link_prediction_all, link_prediction_from, pagerank, personalized_pagerank, shortest_path,
+        strongly_connected_components,
     };
     use dynograph_storage::{StorageEngine, StoredEdge};
 
     use crate::registry::RegistryError;
+    use crate::validation::validate_limit;
+
+    /// Default cap on link-prediction results when the request omits `limit`.
+    const DEFAULT_LINK_LIMIT: usize = 100;
+
+    impl From<LinkPredictionMethodWire> for LinkPredictionMethod {
+        fn from(w: LinkPredictionMethodWire) -> Self {
+            match w {
+                LinkPredictionMethodWire::CommonNeighbors => LinkPredictionMethod::CommonNeighbors,
+                LinkPredictionMethodWire::Jaccard => LinkPredictionMethod::Jaccard,
+                LinkPredictionMethodWire::AdamicAdar => LinkPredictionMethod::AdamicAdar,
+            }
+        }
+    }
 
     /// Safety cap on subgraph size. Consumer graphs are small (10^2-10^3 nodes);
     /// a scope that pulls far more is almost certainly a mis-scoped request, so
@@ -380,6 +521,172 @@ mod imp {
                     b: graph.id_of(b).to_string(),
                 })
                 .collect(),
+        })
+    }
+
+    /// `algo/personalized_pagerank` — PageRank with restart to `seeds`.
+    pub(crate) fn run_personalized_pagerank(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: PersonalizedPageRankRequest,
+    ) -> Result<ScoresResponse, RegistryError> {
+        if req.seeds.is_empty() {
+            return Err(RegistryError::BadRequest(
+                "personalized_pagerank requires at least one seed".to_string(),
+            ));
+        }
+        let mut config = PageRankConfig::default();
+        if let Some(d) = req.damping {
+            if !(0.0..=1.0).contains(&d) {
+                return Err(RegistryError::BadRequest(format!(
+                    "damping must be in [0, 1], got {d}"
+                )));
+            }
+            config.damping = d;
+        }
+        if let Some(t) = req.tolerance {
+            config.tolerance = validate_tolerance(t)?;
+        }
+        if let Some(m) = req.max_iterations {
+            config.max_iterations = validate_max_iterations(m)?;
+        }
+        let directed = req.direction == AlgoDirection::Directed;
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let mut seeds = Vec::with_capacity(req.seeds.len());
+        for id in &req.seeds {
+            seeds.push(graph.idx_of(id).ok_or_else(|| {
+                RegistryError::BadRequest(format!("seed node {id:?} is not in the scoped graph"))
+            })?);
+        }
+        let raw = personalized_pagerank(&graph, &seeds, &config).map_err(map_graph_err)?;
+        Ok(ScoresResponse {
+            scores: sorted_scores(&graph, raw),
+        })
+    }
+
+    /// `algo/shortest_path` — one shortest route between two nodes.
+    pub(crate) fn run_shortest_path(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: ShortestPathRequest,
+    ) -> Result<ShortestPathResponse, RegistryError> {
+        let source = required_node(&req.source, "source")?;
+        let target = required_node(&req.target, "target")?;
+        let directed = req.direction == AlgoDirection::Directed;
+        let weighted = req.weight.is_some();
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let s = node_index(&graph, source, "source")?;
+        let t = node_index(&graph, target, "target")?;
+        match shortest_path(&graph, s, t, weighted).map_err(map_graph_err)? {
+            Some(path) => Ok(ShortestPathResponse {
+                found: true,
+                path: path
+                    .nodes
+                    .into_iter()
+                    .map(|idx| graph.id_of(idx).to_string())
+                    .collect(),
+                distance: path.distance,
+            }),
+            None => Ok(ShortestPathResponse {
+                found: false,
+                path: Vec::new(),
+                distance: 0.0,
+            }),
+        }
+    }
+
+    /// `algo/link_prediction` — score candidate (absent) edges by neighborhood
+    /// overlap over the undirected subgraph.
+    pub(crate) fn run_link_prediction(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: LinkPredictionRequest,
+    ) -> Result<LinkPredictionResponse, RegistryError> {
+        let limit = req.limit.unwrap_or(DEFAULT_LINK_LIMIT);
+        validate_limit(limit, "limit")?;
+        let method = req.method.into();
+        // Link prediction is an undirected, structural measure (weights ignored).
+        let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, false)?;
+
+        let mut links: Vec<PredictedLink> = match &req.source {
+            Some(src) => {
+                let s = node_index(&graph, src, "source")?;
+                link_prediction_from(&graph, s, method)
+                    .into_iter()
+                    .map(|(t, score)| PredictedLink {
+                        a: src.clone(),
+                        b: graph.id_of(t).to_string(),
+                        score,
+                    })
+                    .collect()
+            }
+            None => link_prediction_all(&graph, method)
+                .into_iter()
+                .map(|(u, v, score)| PredictedLink {
+                    a: graph.id_of(u).to_string(),
+                    b: graph.id_of(v).to_string(),
+                    score,
+                })
+                .collect(),
+        };
+        // Highest score first; deterministic tie-break by endpoint ids.
+        links.sort_by(|x, y| {
+            y.score
+                .partial_cmp(&x.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| (&x.a, &x.b).cmp(&(&y.a, &y.b)))
+        });
+        links.truncate(limit);
+        Ok(LinkPredictionResponse { links })
+    }
+
+    /// `algo/cycles` — is the directed subgraph acyclic, with a witness cycle.
+    pub(crate) fn run_cycles(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: ScopedRequest,
+    ) -> Result<CyclesResponse, RegistryError> {
+        let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, true)?;
+        match find_cycle(&graph) {
+            Some(cycle) => Ok(CyclesResponse {
+                acyclic: false,
+                cycle: cycle
+                    .into_iter()
+                    .map(|idx| graph.id_of(idx).to_string())
+                    .collect(),
+            }),
+            None => Ok(CyclesResponse {
+                acyclic: true,
+                cycle: Vec::new(),
+            }),
+        }
+    }
+
+    /// Unwrap a required node-id field, failing loud if absent or blank.
+    fn required_node<'a>(field: &'a Option<String>, name: &str) -> Result<&'a str, RegistryError> {
+        match field.as_deref() {
+            Some(id) if !id.is_empty() => Ok(id),
+            _ => Err(RegistryError::BadRequest(format!("{name} is required"))),
+        }
+    }
+
+    /// Resolve a node id to its dense index in the scoped graph, failing loud if
+    /// it isn't present.
+    fn node_index(graph: &Graph, id: &str, name: &str) -> Result<usize, RegistryError> {
+        graph.idx_of(id).ok_or_else(|| {
+            RegistryError::BadRequest(format!("{name} node {id:?} is not in the scoped graph"))
         })
     }
 

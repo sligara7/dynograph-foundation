@@ -438,6 +438,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/cycles": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Directed cycle detection: is the scoped subgraph acyclic, plus one witness\ncycle if not. Read-only; one `with_engine_read` lock. Requires the `graph`\nbuild feature; otherwise 501.",
+        "operationId": "algo_cycles",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "acyclic flag + witness cycle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CyclesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/degree": {
       "post": {
         "tags": [
@@ -546,6 +600,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/link_prediction": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Link prediction over the scoped (undirected) subgraph — ranked candidate\nedges by neighborhood overlap. Read-only; one `with_engine_read` lock.\nRequires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_link_prediction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkPredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ranked predicted links",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkPredictionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/pagerank": {
       "post": {
         "tags": [
@@ -577,6 +685,60 @@
         "responses": {
           "200": {
             "description": "PageRank scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / did not converge"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/personalized_pagerank": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Personalized PageRank (random walk with restart) over the scoped subgraph,\nseeded by node ids. Read-only; one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_personalized_pagerank",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonalizedPageRankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "relevance scores",
             "content": {
               "application/json": {
                 "schema": {
@@ -635,6 +797,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ComponentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/shortest_path": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "One shortest path between two nodes of the scoped subgraph. Read-only; one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_shortest_path",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShortestPathRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "shortest path + distance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortestPathResponse"
                 }
               }
             }
@@ -3615,6 +3831,25 @@
           }
         }
       },
+      "CyclesResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/cycles`. `acyclic` is true for a DAG;\notherwise `cycle` is one witness directed cycle (node ids, closed by the edge\nfrom the last back to the first).",
+        "required": [
+          "acyclic",
+          "cycle"
+        ],
+        "properties": {
+          "acyclic": {
+            "type": "boolean"
+          },
+          "cycle": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "DegreeModeWire": {
         "type": "string",
         "description": "Which incident edges degree centrality counts. For an undirected graph all\nthree read the same symmetric adjacency.",
@@ -3897,6 +4132,64 @@
           },
           "wire_version": {
             "type": "string"
+          }
+        }
+      },
+      "LinkPredictionMethodWire": {
+        "type": "string",
+        "description": "Which neighborhood-overlap score link prediction uses.",
+        "enum": [
+          "common_neighbors",
+          "jaccard",
+          "adamic_adar"
+        ]
+      },
+      "LinkPredictionRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/link_prediction`. Treats the subgraph\nas undirected. With `source`, predicts links from that node; without it,\nacross all non-adjacent pairs. Results are ranked by score and capped.",
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Max ranked results. Defaults to 100, capped at the standard result limit.",
+            "minimum": 0
+          },
+          "method": {
+            "$ref": "#/components/schemas/LinkPredictionMethodWire"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Predict links from this node only; omit for all non-adjacent pairs."
+          }
+        }
+      },
+      "LinkPredictionResponse": {
+        "type": "object",
+        "description": "Predicted links, highest score first.",
+        "required": [
+          "links"
+        ],
+        "properties": {
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PredictedLink"
+            }
           }
         }
       },
@@ -4188,6 +4481,66 @@
           }
         }
       },
+      "PersonalizedPageRankRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/personalized_pagerank` (random walk\nwith restart). Like PageRank, but teleport mass returns to `seeds`, so scores\nmeasure relevance to that seed set. Edge weights are **strengths**.",
+        "properties": {
+          "damping": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Damping factor in `[0, 1]`. Defaults to 0.85."
+          },
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "max_iterations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Iteration budget before a non-convergence error. Defaults to 100.",
+            "minimum": 0
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "seeds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Seed node ids the walk restarts to. Required (non-empty)."
+          },
+          "tolerance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "L1 convergence threshold. Defaults to 1e-6."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
       "PointsRequest": {
         "type": "object",
         "required": [
@@ -4244,6 +4597,27 @@
           "f32",
           "f64"
         ]
+      },
+      "PredictedLink": {
+        "type": "object",
+        "description": "One predicted (currently-absent) link and its score. `a`/`b` are the endpoint\nnode ids (for a single-source request, `a` is the source).",
+        "required": [
+          "a",
+          "b",
+          "score"
+        ],
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          }
+        }
       },
       "ReplaceNodeBody": {
         "type": "object",
@@ -4448,7 +4822,7 @@
       },
       "ScoresResponse": {
         "type": "object",
-        "description": "Per-node centrality scores, highest first (ties broken by node id). Shared by\nevery score-producing algorithm (degree, PageRank, eigenvector, closeness,\nbetweenness).",
+        "description": "Per-node centrality scores, highest first (ties broken by node id). Shared by\nevery score-producing algorithm (degree, PageRank, eigenvector, closeness,\nbetweenness, personalized PageRank).",
         "required": [
           "scores"
         ],
@@ -4544,6 +4918,75 @@
               "type": "number",
               "format": "float"
             }
+          }
+        }
+      },
+      "ShortestPathRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/shortest_path`. Edge weights are path\n**costs** (strictly positive); omit `weight` for hop-count distance.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Start node id (required)."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "End node id (required)."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
+      "ShortestPathResponse": {
+        "type": "object",
+        "description": "A shortest path between two nodes. `found` is false (with an empty `path`)\nwhen the target is unreachable from the source.",
+        "required": [
+          "found",
+          "path",
+          "distance"
+        ],
+        "properties": {
+          "distance": {
+            "type": "number",
+            "format": "double",
+            "description": "Total path cost (hop count when unweighted); 0 when not found."
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids in order, source first and target last; empty when not found."
           }
         }
       },

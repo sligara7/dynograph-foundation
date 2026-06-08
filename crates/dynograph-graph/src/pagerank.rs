@@ -42,7 +42,50 @@ pub fn pagerank(graph: &Graph, config: &PageRankConfig) -> Result<Vec<f64>, Grap
     if n == 0 {
         return Ok(Vec::new());
     }
-    let nf = n as f64;
+    // Uniform teleport => standard PageRank.
+    let teleport = vec![1.0 / n as f64; n];
+    power_iteration(graph, &teleport, config)
+}
+
+/// Personalized PageRank (a.k.a. random walk with restart): like [`pagerank`],
+/// but the `(1 - damping)` teleport mass returns to the `seeds` instead of
+/// spreading uniformly, so scores measure relevance *to the seed set*. Seeds are
+/// node indices; a repeated seed weights that node more heavily.
+///
+/// Errors: [`GraphError::InvalidParameter`] if `seeds` is empty, plus the same
+/// weight / convergence errors as [`pagerank`]. An empty graph returns empty.
+pub fn personalized_pagerank(
+    graph: &Graph,
+    seeds: &[usize],
+    config: &PageRankConfig,
+) -> Result<Vec<f64>, GraphError> {
+    let n = graph.node_count();
+    if n == 0 {
+        return Ok(Vec::new());
+    }
+    if seeds.is_empty() {
+        return Err(GraphError::InvalidParameter(
+            "personalized PageRank requires at least one seed node".to_string(),
+        ));
+    }
+    let mut teleport = vec![0.0; n];
+    let share = 1.0 / seeds.len() as f64;
+    for &s in seeds {
+        teleport[s] += share;
+    }
+    power_iteration(graph, &teleport, config)
+}
+
+/// Shared power-iteration core. `teleport` is the restart distribution (must sum
+/// to 1): uniform for plain PageRank, seed-concentrated for personalized. Both
+/// the teleport term and the dangling-mass redistribution follow it, so the rank
+/// vector stays a distribution summing to ~1.
+fn power_iteration(
+    graph: &Graph,
+    teleport: &[f64],
+    config: &PageRankConfig,
+) -> Result<Vec<f64>, GraphError> {
+    let n = graph.node_count();
     let d = config.damping;
 
     // Weighted out-degree (strength) per node; reject negative weights.
@@ -60,29 +103,30 @@ pub fn pagerank(graph: &Graph, config: &PageRankConfig) -> Result<Vec<f64>, Grap
         *slot = sum;
     }
 
-    let mut rank = vec![1.0 / nf; n];
+    let mut rank = teleport.to_vec();
     for _ in 0..config.max_iterations {
-        let mut next = vec![(1.0 - d) / nf; n];
+        // Teleport term: (1-d) of the mass restarts per the teleport vector.
+        let mut next: Vec<f64> = teleport.iter().map(|&t| (1.0 - d) * t).collect();
         let mut dangling = 0.0;
-        for u in 0..n {
-            if out_strength[u] == 0.0 {
-                // No out-edges: hold the mass to redistribute uniformly.
-                dangling += rank[u];
+        for (u, (&rank_u, &strength_u)) in rank.iter().zip(out_strength.iter()).enumerate() {
+            if strength_u == 0.0 {
+                // No out-strength: hold the mass to redistribute via teleport.
+                dangling += rank_u;
                 continue;
             }
-            let share = d * rank[u] / out_strength[u];
+            let share = d * rank_u / strength_u;
             for &(v, w) in graph.out_neighbors(u) {
                 next[v] += share * w;
             }
         }
-        let spread = d * dangling / nf;
-        if spread != 0.0 {
-            for slot in next.iter_mut() {
-                *slot += spread;
+        if dangling != 0.0 {
+            let mass = d * dangling;
+            for (slot, &t) in next.iter_mut().zip(teleport.iter()) {
+                *slot += mass * t;
             }
         }
 
-        let delta: f64 = (0..n).map(|i| (next[i] - rank[i]).abs()).sum();
+        let delta: f64 = next.iter().zip(&rank).map(|(a, b)| (a - b).abs()).sum();
         rank = next;
         if delta < config.tolerance {
             return Ok(rank);
@@ -168,6 +212,42 @@ mod tests {
             pagerank(&g, &PageRankConfig::default()),
             Err(GraphError::InvalidWeight(_))
         ));
+    }
+
+    #[test]
+    fn personalized_pagerank_requires_seeds() {
+        let mut b = GraphBuilder::new();
+        b.add_edge("a", "b", 1.0).unwrap();
+        let g = b.build(true);
+        assert!(matches!(
+            personalized_pagerank(&g, &[], &PageRankConfig::default()),
+            Err(GraphError::InvalidParameter(_))
+        ));
+    }
+
+    #[test]
+    fn personalized_pagerank_decays_with_distance_from_seed() {
+        // Undirected chain a-b-c-d. Seeding {a}, relevance should decay with
+        // distance: closer nodes score higher than farther ones.
+        let mut bld = GraphBuilder::new();
+        bld.add_edge("a", "b", 1.0).unwrap();
+        bld.add_edge("b", "c", 1.0).unwrap();
+        bld.add_edge("c", "d", 1.0).unwrap();
+        let g = bld.build(false);
+        let a = g.idx_of("a").unwrap();
+        let ppr = personalized_pagerank(&g, &[a], &PageRankConfig::default()).unwrap();
+        let sum: f64 = ppr.iter().sum();
+        assert!((sum - 1.0).abs() < 1e-6, "ppr should sum to 1: {sum}");
+        let (pa, pb, pc, pd) = (
+            ppr[a],
+            ppr[g.idx_of("b").unwrap()],
+            ppr[g.idx_of("c").unwrap()],
+            ppr[g.idx_of("d").unwrap()],
+        );
+        // The seed region (a and its neighbor b) dominates the far region, and
+        // relevance decays with distance from there (b > c > d). (a itself is not
+        // the strict max — its degree-2 neighbor b accrues more flow.)
+        assert!(pa > pc && pb > pc && pc > pd, "expected decay: {ppr:?}");
     }
 
     #[test]

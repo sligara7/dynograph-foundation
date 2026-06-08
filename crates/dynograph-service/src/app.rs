@@ -23,8 +23,10 @@ use dynograph_vector::HnswIndex;
 use crate::{
     algo::{
         AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ComponentsResponse,
-        CutEdge, CutsResponse, DegreeModeWire, DegreeRequest, EigenvectorRequest, NodeScore,
-        PageRankRequest, ScopedRequest, ScoresResponse, WeightSpec,
+        CutEdge, CutsResponse, CyclesResponse, DegreeModeWire, DegreeRequest, EigenvectorRequest,
+        LinkPredictionMethodWire, LinkPredictionRequest, LinkPredictionResponse, NodeScore,
+        PageRankRequest, PersonalizedPageRankRequest, PredictedLink, ScopedRequest, ScoresResponse,
+        ShortestPathRequest, ShortestPathResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
@@ -124,6 +126,10 @@ use crate::{
         algo_betweenness,
         algo_cuts,
         algo_scc,
+        algo_cycles,
+        algo_personalized_pagerank,
+        algo_shortest_path,
+        algo_link_prediction,
         // embeddings + search
         set_embedding,
         get_embedding,
@@ -243,11 +249,19 @@ use crate::{
         EigenvectorRequest,
         ClosenessRequest,
         BetweennessRequest,
+        PersonalizedPageRankRequest,
+        ShortestPathRequest,
+        LinkPredictionRequest,
+        LinkPredictionMethodWire,
         ComponentsResponse,
         ScoresResponse,
         NodeScore,
         CutsResponse,
         CutEdge,
+        CyclesResponse,
+        ShortestPathResponse,
+        PredictedLink,
+        LinkPredictionResponse,
         // welford
         WelfordUpdateRequest,
         WelfordUpdateResponse,
@@ -423,6 +437,19 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/algo/betweenness", post(algo_betweenness))
         .route("/v1/graphs/{id}/algo/cuts", post(algo_cuts))
         .route("/v1/graphs/{id}/algo/scc", post(algo_scc))
+        .route("/v1/graphs/{id}/algo/cycles", post(algo_cycles))
+        .route(
+            "/v1/graphs/{id}/algo/personalized_pagerank",
+            post(algo_personalized_pagerank),
+        )
+        .route(
+            "/v1/graphs/{id}/algo/shortest_path",
+            post(algo_shortest_path),
+        )
+        .route(
+            "/v1/graphs/{id}/algo/link_prediction",
+            post(algo_link_prediction),
+        )
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -1878,6 +1905,117 @@ async fn algo_scc(
     let entry = graph_entry(&state, &id)?;
     let response = entry
         .with_engine_read(move |engine| crate::algo::run_scc(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Directed cycle detection: is the scoped subgraph acyclic, plus one witness
+/// cycle if not. Read-only; one `with_engine_read` lock. Requires the `graph`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/cycles",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "acyclic flag + witness cycle", body = CyclesResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_cycles(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_cycles(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Personalized PageRank (random walk with restart) over the scoped subgraph,
+/// seeded by node ids. Read-only; one `with_engine_read` lock. Requires the
+/// `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/personalized_pagerank",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = PersonalizedPageRankRequest,
+    responses(
+        (status = 200, description = "relevance scores", body = ScoresResponse),
+        (status = 400, description = "validation error / did not converge"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_personalized_pagerank(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<PersonalizedPageRankRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_personalized_pagerank(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// One shortest path between two nodes of the scoped subgraph. Read-only; one
+/// `with_engine_read` lock. Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/shortest_path",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ShortestPathRequest,
+    responses(
+        (status = 200, description = "shortest path + distance", body = ShortestPathResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_shortest_path(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ShortestPathRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_shortest_path(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Link prediction over the scoped (undirected) subgraph — ranked candidate
+/// edges by neighborhood overlap. Read-only; one `with_engine_read` lock.
+/// Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/link_prediction",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = LinkPredictionRequest,
+    responses(
+        (status = 200, description = "ranked predicted links", body = LinkPredictionResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_link_prediction(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<LinkPredictionRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_link_prediction(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
 }

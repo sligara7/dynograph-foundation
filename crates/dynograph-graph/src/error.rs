@@ -23,6 +23,9 @@ pub enum GraphError {
     /// weight for shortest-path-based closeness/betweenness (Dijkstra needs
     /// strictly positive edge costs). The string explains the specific rule.
     InvalidWeight(String),
+    /// A non-weight algorithm parameter was invalid — e.g. personalized PageRank
+    /// called with no seed nodes. The string explains the specific rule.
+    InvalidParameter(String),
     /// A power-iteration algorithm (PageRank, eigenvector centrality) failed to
     /// converge within the configured iteration budget, or the measure is
     /// undefined for the input (e.g. eigenvector centrality on an edgeless
@@ -45,6 +48,7 @@ impl fmt::Display for GraphError {
                 )
             }
             GraphError::InvalidWeight(detail) => write!(f, "invalid edge weight: {detail}"),
+            GraphError::InvalidParameter(detail) => write!(f, "invalid parameter: {detail}"),
             GraphError::NotConverged { iterations } => {
                 write!(
                     f,
