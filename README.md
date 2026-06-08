@@ -36,7 +36,7 @@ run it:
 # pull published image
 docker run --rm -p 8080:8080 -v dynograph-data:/data \
     -e DYNOGRAPH_STORAGE_ROOT=/data \
-    ghcr.io/sligara7/dynograph-foundation:0.6.1
+    ghcr.io/sligara7/dynograph-foundation:0.6.2
 
 # native
 cargo run --release --bin dynograph -- --config dynograph.example.toml
@@ -63,7 +63,7 @@ the contract without the committed spec being regenerated
 spec's `info.version` tracks the crate version, so regenerate it as part
 of a release bump.
 
-Published images are tagged per release (`:0.6.1`) plus `:latest`.
+Published images are tagged per release (`:0.6.2`) plus `:latest`.
 The publish workflow (`.github/workflows/release.yml`) runs on every
 `v*` git tag push.
 
@@ -74,12 +74,12 @@ in-memory storage, `127.0.0.1:8080`, `noauth`. See
 
 ## Use as a library
 
-Git dependency on the latest tag (`v0.6.1`):
+Git dependency on the latest tag (`v0.6.2`):
 
 ```toml
 [dependencies]
-dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.6.1" }
-dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.6.1" }
+dynograph-core    = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.6.2" }
+dynograph-storage = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.6.2" }
 ```
 
 ```rust
@@ -95,7 +95,7 @@ engine.create_node("graph1", "Person", "alice", properties)?;
 
 ```toml
 [dependencies]
-dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.6.1" }
+dynograph-client = { git = "https://github.com/sligara7/dynograph-foundation.git", tag = "v0.6.2" }
 ```
 
 ```rust

@@ -4,7 +4,7 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## Unreleased
+## v0.6.2 — 2026-06-07
 
 Turn on full-text/BM25 search in the shipped artifact and cover it in CI. The
 full-text primitive itself — the `dynograph-text` embedded-Tantivy index, the
