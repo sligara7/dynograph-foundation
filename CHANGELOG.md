@@ -4,6 +4,43 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.7.0 — 2026-06-08
+
+The domain-neutral graph-theory algorithm suite plus batch vector math, so
+consumers get **all** their graph / vector / stats math from the foundation
+behind one stable wire contract instead of reimplementing it (numpy adjacency
+SVD, hand-rolled cosine loops, etc.). All additive — no breaking changes.
+
+### Added (`dynograph-graph` — new crate)
+
+- A pure, dependency-free graph-theory crate (the topology sibling of
+  `dynograph-vector`): exact algorithms over a densely-indexed in-memory `Graph`.
+  Components (weak + strongly-connected/Tarjan); centrality (degree, PageRank,
+  personalized PageRank / random-walk-with-restart, eigenvector, closeness,
+  betweenness); structure (articulation points & bridges, directed cycle
+  detection, topological sort, clustering coefficient / transitivity); paths &
+  flow (single-pair shortest path, max-flow / min-cut); and link prediction
+  (common-neighbors / Jaccard / Adamic-Adar). Deep traversals are iterative so
+  they can't overflow the stack at the node cap.
+
+### Added (`dynograph-service`)
+
+- **`POST /v1/graphs/{id}/algo/*`** — 17 graph-algorithm endpoints over the
+  generic node/edge graph. Each request supplies the domain-specific parts (a
+  subgraph `scope`, an edge-weight projection, a direction) and gets back a
+  generic result (scores, partitions, paths, cuts). Behind the optional `graph`
+  build feature (mirroring `fulltext`): the routes and OpenAPI contract always
+  exist; without the feature they return `501`. The published image enables it.
+- **`POST /v1/util/pairwise_cosine`** and **`POST /v1/util/pairwise_distance`** —
+  batch N×N matrix forms so a consumer ranking N entities does one call instead
+  of N² per-pair round-trips. Offloaded to the blocking pool.
+
+### Changed (packaging)
+
+- Bump workspace version 0.6.3 → 0.7.0; promote docs/version strings and the
+  generated `docs/openapi.json` (`info.version`) to match. Release image and the
+  smoke test build with `--features graph,dynograph-service/fulltext`.
+
 ## v0.6.3 — 2026-06-08
 
 A domain-neutral hybrid-search primitive that fuses the retrieval legs the
