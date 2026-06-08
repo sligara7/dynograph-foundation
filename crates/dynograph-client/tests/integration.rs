@@ -959,3 +959,160 @@ async fn util_new_endpoints_f32_precision() {
         .unwrap();
     assert!((r.result - 7.0).abs() < 1e-5);
 }
+
+// ---------------------------------------------------------------------------
+// search + pairwise (v0.7.0 surface). The in-process service is compiled
+// without the `fulltext` feature here, so keyword paths return 501 — asserted
+// directly as the typed passthrough. Vector-only hybrid and the util pairwise
+// matrices need no feature and round-trip for real.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn util_pairwise_cosine_round_trip() {
+    let (client, _server) = spawn_service().await;
+    // Three vectors: v0 ∥ v1 (cosine 1), v0 ⟂ v2 (cosine 0).
+    let vectors = vec![vec![1.0, 0.0], vec![2.0, 0.0], vec![0.0, 1.0]];
+    let m = client
+        .util_pairwise_cosine(&vectors, None)
+        .await
+        .unwrap()
+        .matrix;
+    assert_eq!(m.len(), 3);
+    assert_eq!(m[0].len(), 3);
+    assert!((m[0][0] - 1.0).abs() < 1e-9, "self-similarity is 1");
+    assert!((m[0][1] - 1.0).abs() < 1e-9, "parallel vectors: cosine 1");
+    assert!(m[0][2].abs() < 1e-9, "orthogonal vectors: cosine 0");
+    // Symmetric.
+    assert!((m[0][1] - m[1][0]).abs() < 1e-9);
+}
+
+#[tokio::test]
+async fn util_pairwise_distance_round_trip() {
+    let (client, _server) = spawn_service().await;
+    let vectors = vec![vec![0.0, 0.0], vec![3.0, 4.0]];
+    let m = client
+        .util_pairwise_distance(&vectors, dynograph_client::DistanceMetric::Euclidean, None)
+        .await
+        .unwrap()
+        .matrix;
+    assert_eq!(m.len(), 2);
+    assert!(m[0][0].abs() < 1e-9, "distance to self is 0");
+    assert!((m[0][1] - 5.0).abs() < 1e-9, "3-4-5 triangle");
+    assert!((m[1][0] - 5.0).abs() < 1e-9, "symmetric");
+}
+
+#[tokio::test]
+async fn util_pairwise_distance_metric_is_honored() {
+    let (client, _server) = spawn_service().await;
+    let vectors = vec![vec![0.0, 0.0], vec![3.0, 4.0]];
+    // Manhattan distance of (3,4) from origin is 7, not the Euclidean 5.
+    let m = client
+        .util_pairwise_distance(&vectors, dynograph_client::DistanceMetric::Manhattan, None)
+        .await
+        .unwrap()
+        .matrix;
+    assert!((m[0][1] - 7.0).abs() < 1e-9, "metric selects manhattan");
+}
+
+#[tokio::test]
+async fn search_hybrid_vector_only_round_trip() {
+    // Vector-only hybrid needs no `fulltext` feature: a `query_vector` +
+    // `node_type` request fuses just the vector leg.
+    let (client, _server) = spawn_service().await;
+    client.create_graph("g1", &tiny_schema()).await.unwrap();
+    for id in ["a", "b", "c"] {
+        client
+            .create_node("g1", "Item", id, &props(&[("name", json!(id))]))
+            .await
+            .unwrap();
+    }
+    client
+        .set_embedding("g1", "Item", "a", &[1.0, 0.0, 0.0])
+        .await
+        .unwrap();
+    client
+        .set_embedding("g1", "Item", "b", &[0.95, 0.1, 0.0])
+        .await
+        .unwrap();
+    client
+        .set_embedding("g1", "Item", "c", &[0.0, 0.0, 1.0])
+        .await
+        .unwrap();
+
+    let body = json!({
+        "query_vector": [1.0, 0.0, 0.0],
+        "node_type": "Item",
+        "limit": 3,
+    });
+    let resp = client.search_hybrid("g1", &body).await.unwrap();
+    let ids: Vec<&str> = resp.hits.iter().map(|h| h.node_id.as_str()).collect();
+    assert_eq!(ids, vec!["a", "b", "c"], "ranked by vector similarity");
+    // Single-leg fusion: every hit has a vector leg, no keyword leg.
+    assert!(resp.hits[0].legs.vector.is_some());
+    assert!(resp.hits[0].legs.keyword.is_none());
+    assert_eq!(resp.hits[0].legs.vector.unwrap().rank, 1);
+    assert_eq!(resp.hits[0].node_type, "Item");
+}
+
+// The in-process service is compiled WITHOUT `fulltext` in the default CI job
+// and WITH it in the `--features dynograph-service/fulltext` job. The client
+// crate has no compile-time signal for which, so these tests pin the wrapper
+// contract — the server's status surfaces as a typed `ClientError::Http` — in a
+// way that holds under both: 501 when the feature is off, and the feature-on
+// outcome (a 400 from `tiny_schema`'s `Item` having no fulltext-searchable
+// property, or a 200 for the bodyless reindex) otherwise.
+
+#[tokio::test]
+async fn search_text_surfaces_server_status() {
+    let (client, _server) = spawn_service().await;
+    client.create_graph("g1", &tiny_schema()).await.unwrap();
+    let status = client
+        .search_text("g1", "anything", Some("Item"), 10)
+        .await
+        .unwrap_err()
+        .status();
+    assert!(
+        matches!(
+            status,
+            Some(reqwest::StatusCode::NOT_IMPLEMENTED | reqwest::StatusCode::BAD_REQUEST)
+        ),
+        "expected 501 (no fulltext) or 400 (fulltext, non-searchable schema), got {status:?}"
+    );
+}
+
+#[tokio::test]
+async fn search_reindex_surfaces_server_status() {
+    let (client, _server) = spawn_service().await;
+    client.create_graph("g1", &tiny_schema()).await.unwrap();
+    // Feature off => 501 passthrough; feature on => reindex runs (Item has no
+    // searchable property, so nothing is indexed) and returns Ok. Both are
+    // valid wrapper outcomes; what must never happen is a transport/decode error.
+    match client.search_reindex("g1").await {
+        Ok(resp) => {
+            let _ = resp.indexed;
+        }
+        Err(e) => assert_eq!(e.status(), Some(reqwest::StatusCode::NOT_IMPLEMENTED)),
+    }
+}
+
+#[tokio::test]
+async fn search_hybrid_keyword_leg_surfaces_server_status() {
+    let (client, _server) = spawn_service().await;
+    client.create_graph("g1", &tiny_schema()).await.unwrap();
+    // A `query` leg engages the keyword path: 501 without fulltext, or 400 with
+    // it (Item has no fulltext-searchable property). Either way the client
+    // surfaces the server's status as a typed error.
+    let body = json!({ "query": "anything", "node_type": "Item", "limit": 5 });
+    let status = client
+        .search_hybrid("g1", &body)
+        .await
+        .unwrap_err()
+        .status();
+    assert!(
+        matches!(
+            status,
+            Some(reqwest::StatusCode::NOT_IMPLEMENTED | reqwest::StatusCode::BAD_REQUEST)
+        ),
+        "expected 501 (no fulltext) or 400 (fulltext, non-searchable schema), got {status:?}"
+    );
+}
