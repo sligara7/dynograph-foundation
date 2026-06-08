@@ -1395,6 +1395,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/search:hybrid": {
+      "post": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Hybrid search: Reciprocal-Rank-Fusion over the vector (HNSW) and\nkeyword (BM25) legs, with an optional structured `where` prefilter. See\n`crate::search_hybrid` for the wire shape, fusion math, and per-leg\ndesign decisions. Read-only — one `with_state_read` lock exposes both\nthe engine and the per-type HNSW indexes the two legs need. At least one\nranked leg is required (`query` and/or `query_vector`) — a pure `where`\nfilter with no ranked leg is a 400 (that's what `nodes:scan` is for). The\nkeyword leg requires the `fulltext` build feature (otherwise 501); a\nvector leg (optionally with a `where` prefilter) succeeds in any build.",
+        "operationId": "search_hybrid",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchHybridBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "fused, ranked hits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchHybridResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid request"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "keyword leg requested but full-text feature not enabled"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/search:reindex": {
       "post": {
         "tags": [
@@ -3209,6 +3263,106 @@
           }
         }
       },
+      "HybridHit": {
+        "type": "object",
+        "description": "One fused result, ordered by RRF `score` (highest first).",
+        "required": [
+          "node_id",
+          "node_type",
+          "score",
+          "legs"
+        ],
+        "properties": {
+          "legs": {
+            "$ref": "#/components/schemas/HybridLegBreakdown"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "Fused Reciprocal-Rank-Fusion score."
+          }
+        }
+      },
+      "HybridLegBreakdown": {
+        "type": "object",
+        "description": "Per-leg breakdown attached to each hit. Only legs that ranked the node\nare present.",
+        "properties": {
+          "keyword": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HybridLegInfo"
+              }
+            ]
+          },
+          "vector": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HybridLegInfo"
+              }
+            ]
+          }
+        }
+      },
+      "HybridLegInfo": {
+        "type": "object",
+        "description": "One leg's contribution to a fused hit.",
+        "required": [
+          "rank",
+          "score"
+        ],
+        "properties": {
+          "rank": {
+            "type": "integer",
+            "description": "1-based rank within that leg's ranked output.",
+            "minimum": 1
+          },
+          "score": {
+            "type": "number",
+            "format": "float",
+            "description": "That leg's native score (BM25 for keyword, similarity for vector) —\nechoed for transparency; the fused `score` is what orders hits."
+          }
+        }
+      },
+      "LegName": {
+        "type": "string",
+        "description": "Which retrieval legs a request targets. Used both for the optional\nexplicit `legs` selector and to key the per-leg breakdown in a hit.",
+        "enum": [
+          "vector",
+          "keyword"
+        ]
+      },
+      "LegWeights": {
+        "type": "object",
+        "description": "Optional per-leg RRF weights. Omitted legs default to `1.0`.",
+        "properties": {
+          "keyword": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "vector": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          }
+        }
+      },
       "MatchKind": {
         "type": "string",
         "enum": [
@@ -3666,6 +3820,83 @@
           },
           "value": {
             "type": "object"
+          }
+        }
+      },
+      "SearchHybridBody": {
+        "type": "object",
+        "properties": {
+          "k_per_leg": {
+            "type": "integer",
+            "description": "Candidates each leg contributes pre-fusion (1..=MAX_LIMIT).",
+            "maximum": 10000,
+            "minimum": 1
+          },
+          "legs": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/LegName"
+            },
+            "description": "Restrict to a subset of legs. Default = whichever inputs are\npresent. Naming a leg whose input is absent is a 400."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Final result cap after fusion (1..=MAX_LIMIT).",
+            "maximum": 10000,
+            "minimum": 1
+          },
+          "node_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Type filter applied to every active leg. Required when the vector\nleg or a structured `where` prefilter is active (both are\nper-type); optional for keyword-only."
+          },
+          "query": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Keyword/BM25 leg input. Tokenized like `search:text` (AND\nsemantics, no query grammar). Omit for vector-only search."
+          },
+          "query_vector": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Vector leg input. Foundation does **not** embed — the caller\nsupplies the query vector (sidecar's job). Omit for keyword-only."
+          },
+          "weights": {
+            "$ref": "#/components/schemas/LegWeights",
+            "description": "Optional per-leg RRF weights (each leg defaults to 1.0)."
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WhereClause"
+            },
+            "description": "Optional structured prefilter (intersect): only nodes matching all\nclauses survive in every leg. Same clause grammar as `nodes:scan`."
+          }
+        }
+      },
+      "SearchHybridResponse": {
+        "type": "object",
+        "required": [
+          "hits"
+        ],
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HybridHit"
+            }
           }
         }
       },

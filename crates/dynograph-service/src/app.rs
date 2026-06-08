@@ -53,6 +53,10 @@ use crate::{
         run as run_resolve_or_create,
     },
     schema_response::{SchemaResponse, WIRE_VERSION},
+    search_hybrid::{
+        HybridHit, HybridLegBreakdown, HybridLegInfo, LegName, LegWeights, SearchHybridBody,
+        SearchHybridResponse, run as run_search_hybrid,
+    },
     similar_response::{SimilarHit, SimilarResponse},
     traverse::{
         Direction as TraverseDirection, PropertyFilter as TraversePropertyFilter, ReturnFormat,
@@ -116,6 +120,7 @@ use crate::{
         delete_embedding,
         similar,
         search_text,
+        search_hybrid,
         search_reindex,
         // util
         util_cosine_similarity,
@@ -173,6 +178,13 @@ use crate::{
         SearchTextHit,
         SearchTextResponse,
         SearchReindexResponse,
+        SearchHybridBody,
+        LegName,
+        LegWeights,
+        SearchHybridResponse,
+        HybridHit,
+        HybridLegBreakdown,
+        HybridLegInfo,
         // batch
         BatchRequest,
         BatchOp,
@@ -392,6 +404,7 @@ pub fn app(state: AppState) -> Router {
         )
         .route("/v1/graphs/{id}/similar", post(similar))
         .route("/v1/graphs/{id}/search:text", post(search_text))
+        .route("/v1/graphs/{id}/search:hybrid", post(search_hybrid))
         .route("/v1/graphs/{id}/search:reindex", post(search_reindex))
         .route("/v1/util/cosine_similarity", post(util_cosine_similarity))
         .route("/v1/util/dot_product", post(util_dot_product))
@@ -1959,13 +1972,8 @@ async fn search_text_impl(
             // type, or a known type with no `fulltext` property. Mirrors
             // `similar` / `nodes_scan` rather than masking a client typo as an
             // empty result.
-            if let Some(nt) = &node_type
-                && !engine.schema().has_fulltext_properties(nt)
-            {
-                return Err(RegistryError::BadRequest(format!(
-                    "node type '{nt}' is not full-text searchable \
-                     (unknown type, or it declares no fulltext properties)"
-                )));
+            if let Some(nt) = &node_type {
+                crate::validation::validate_fulltext_searchable(engine.schema(), nt)?;
             }
             let hits = engine.search_fulltext(&id, &query, node_type.as_deref(), limit)?;
             Ok(SearchTextResponse {
@@ -1993,6 +2001,40 @@ async fn search_text_impl(
         "full-text search is not enabled in this build (compile with --features fulltext)"
             .to_string(),
     ))
+}
+
+/// Hybrid search: Reciprocal-Rank-Fusion over the vector (HNSW) and
+/// keyword (BM25) legs, with an optional structured `where` prefilter. See
+/// `crate::search_hybrid` for the wire shape, fusion math, and per-leg
+/// design decisions. Read-only — one `with_state_read` lock exposes both
+/// the engine and the per-type HNSW indexes the two legs need. At least one
+/// ranked leg is required (`query` and/or `query_vector`) — a pure `where`
+/// filter with no ranked leg is a 400 (that's what `nodes:scan` is for). The
+/// keyword leg requires the `fulltext` build feature (otherwise 501); a
+/// vector leg (optionally with a `where` prefilter) succeeds in any build.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/search:hybrid",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = SearchHybridBody,
+    responses(
+        (status = 200, description = "fused, ranked hits", body = SearchHybridResponse),
+        (status = 400, description = "invalid request"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "keyword leg requested but full-text feature not enabled"),
+    ),
+    tag = "search",
+)]
+async fn search_hybrid(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<SearchHybridBody>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_state_read(move |engine, indexes| run_search_hybrid(engine, indexes, &id, body))
+        .await?;
+    Ok(Json(response).into_response())
 }
 
 /// Rebuild the graph's full-text index from the authoritative node store. Admin
