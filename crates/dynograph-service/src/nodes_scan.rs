@@ -1,8 +1,8 @@
 //! POST /v1/graphs/{id}/nodes:scan — predicate-filtered scan over a
 //! single node type.
 //!
-//! Surfaced by market_graph's query service: "find all Persons with
-//! `influence_level = market_moving`" and similar property-filtered
+//! Surfaced by a query service: "find all Persons with
+//! `influence_level = high`" and similar property-filtered
 //! scans. Today's `list_nodes` query string takes one `(prop, value)`
 //! pair only and is `eq`-only; this primitive generalizes to a list
 //! of AND-combined predicates over the seven standard ops.
@@ -75,7 +75,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use dynograph_core::Value;
+use dynograph_core::{Schema, Value};
 use dynograph_storage::{StorageEngine, StoredNode};
 
 use crate::node_response::NodeResponse;
@@ -159,27 +159,9 @@ pub(crate) fn run(
         ));
     }
 
-    let schema = engine.schema();
-    for clause in &req.clauses {
-        // validate_indexed_property catches unknown node type AND
-        // unknown property AND un-indexed property in one pass; no
-        // need for a separate type-existence check upstream.
-        validate_indexed_property(schema, &req.node_type, &clause.property, "where")?;
-        validate_clause_value_shape(clause)?;
-    }
+    validate_clauses(engine.schema(), &req.node_type, &req.clauses)?;
 
-    // First `eq` clause drives an index-backed scan_nodes_by_property
-    // (one CF prefix scan). Without an eq clause, fall back to a
-    // full per-type scan. Either way, every clause (including the
-    // seed) is re-evaluated in memory so the AND semantics stay
-    // uniform.
-    let seed_eq = req.clauses.iter().find(|c| c.op == Op::Eq);
-    let candidates: Vec<StoredNode> = match seed_eq {
-        Some(c) => {
-            engine.scan_nodes_by_property(graph_id, &req.node_type, &c.property, &c.value)?
-        }
-        None => engine.scan_nodes(graph_id, &req.node_type)?,
-    };
+    let candidates = candidate_nodes(engine, graph_id, &req.node_type, &req.clauses)?;
 
     let mut matched: Vec<StoredNode> = Vec::new();
     let mut truncated = false;
@@ -204,6 +186,65 @@ pub(crate) fn run(
             truncated,
         },
     })
+}
+
+/// Validate every clause: indexed-property (which catches unknown node
+/// type AND unknown property AND un-indexed property in one pass) + the
+/// op's value shape. All 400, pre-flight, before any scan starts. Shared
+/// by [`run`] and [`matching_node_ids`] so the two scan entry points can't
+/// drift apart on what counts as a valid clause.
+fn validate_clauses(
+    schema: &Schema,
+    node_type: &str,
+    clauses: &[WhereClause],
+) -> Result<(), RegistryError> {
+    for clause in clauses {
+        validate_indexed_property(schema, node_type, &clause.property, "where")?;
+        validate_clause_value_shape(clause)?;
+    }
+    Ok(())
+}
+
+/// Gather the candidate rows a clause set scans over. The first `eq`
+/// clause drives an index-backed `scan_nodes_by_property` (one CF
+/// prefix scan); without an `eq` clause we fall back to a full
+/// per-type scan. The remaining clauses (including the seed) are
+/// re-evaluated in memory by the caller so the AND semantics stay
+/// uniform regardless of which path produced the candidates.
+fn candidate_nodes(
+    engine: &StorageEngine,
+    graph_id: &str,
+    node_type: &str,
+    clauses: &[WhereClause],
+) -> Result<Vec<StoredNode>, RegistryError> {
+    let seed_eq = clauses.iter().find(|c| c.op == Op::Eq);
+    let candidates = match seed_eq {
+        Some(c) => engine.scan_nodes_by_property(graph_id, node_type, &c.property, &c.value)?,
+        None => engine.scan_nodes(graph_id, node_type)?,
+    };
+    Ok(candidates)
+}
+
+/// Resolve a clause set to the *full* set of matching `node_id`s for
+/// `node_type` — the structured-prefilter primitive `search:hybrid`
+/// intersects each retrieval leg against. Validates every clause the
+/// same way [`run`] does (indexed-property + value-shape, all 400
+/// pre-flight), then AND-evaluates them in memory. Unbounded on
+/// purpose: a prefilter must include *every* match or it would silently
+/// drop valid leg hits (consumer graphs are small — see the scale note
+/// in ISSUES #21).
+pub(crate) fn matching_node_ids(
+    engine: &StorageEngine,
+    graph_id: &str,
+    node_type: &str,
+    clauses: &[WhereClause],
+) -> Result<std::collections::HashSet<String>, RegistryError> {
+    validate_clauses(engine.schema(), node_type, clauses)?;
+    Ok(candidate_nodes(engine, graph_id, node_type, clauses)?
+        .into_iter()
+        .filter(|node| clauses_match(clauses, node))
+        .map(|node| node.node_id)
+        .collect())
 }
 
 /// Confirm the `value` shape is sensible for the op. Cheap O(1) check

@@ -32,6 +32,26 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  fulltext:
+    # The full-text/BM25 path (the `dynograph-text` crate plus the
+    # `fulltext`-gated wiring in dynograph-storage and dynograph-service) sits
+    # behind an opt-in cargo feature that is OFF by default — so build-test and
+    # test-release never compile or exercise it, leaving every
+    # `#[cfg(feature = "fulltext")]` engine/service integration test unrun. The
+    # shipped Docker image builds WITH the feature, so this leg builds, tests,
+    # and lints the same configuration to keep it green. Enabling the service
+    # feature transitively enables dynograph-storage/fulltext.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - run: cargo build --workspace --all-targets --features dynograph-service/fulltext
+      - run: cargo test --workspace --features dynograph-service/fulltext
+      - run: cargo clippy --workspace --all-targets --features dynograph-service/fulltext -- -D warnings
+
   test-release:
     # Tests under the release profile. Catches the class that only
     # manifests with optimizations on and debug assertions off:
@@ -52,15 +72,18 @@ jobs:
     # Build the binary, boot it (in-memory, no-auth defaults), and probe
     # the operational endpoints so a binary that fails to start — or a
     # route that 500s on a fresh process — fails CI instead of shipping.
+    # Build with the same `fulltext` feature the Dockerfile enables so this
+    # boots the exact binary configuration the published image ships.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      # Build with the same features as the published image (Dockerfile uses
-      # `--features graph`) so the binary we smoke-test matches what ships.
-      - run: cargo build --release --bin dynograph --features graph
+      # Build with the same features as the published image (the Dockerfile uses
+      # `--features graph,dynograph-service/fulltext`) so the binary we
+      # smoke-test matches what ships.
+      - run: cargo build --release --bin dynograph --features graph,dynograph-service/fulltext
       - run: ./scripts/smoke-test.sh
 
   storage-rocksdb:

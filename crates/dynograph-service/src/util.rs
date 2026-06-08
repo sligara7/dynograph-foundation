@@ -2,8 +2,8 @@
 //!
 //! Exposes the load-bearing Tier-3 functions from `dynograph-vector`
 //! and `dynograph-resolution` over HTTP so consumers that can't embed
-//! foundation as Rust crates (Python services like market_graph,
-//! arbitrary HTTP callers) get the same canonical math implementations
+//! foundation as Rust crates (Python services, arbitrary HTTP
+//! callers) get the same canonical math implementations
 //! as the in-process consumers. Avoids the alternative — every
 //! consumer re-implementing cosine / Pearson / fuzzy strings in their
 //! own language with subtle numerical drift.

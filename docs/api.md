@@ -72,7 +72,7 @@ Create a graph.
 Returns `201 Created` + `SchemaResponse`:
 
 ```json
-{ "id": "my_graph", "wire_version": "0.6.1", "content_hash": "<sha256-hex>", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.6.3", "content_hash": "<sha256-hex>", "schema": {...} }
 ```
 
 Errors: `400` invalid id; `409` duplicate.
@@ -109,7 +109,7 @@ Full schema body — same shape codegen / drift-detection consumers
 read.
 
 ```json
-{ "id": "my_graph", "wire_version": "0.6.1", "content_hash": "...", "schema": {...} }
+{ "id": "my_graph", "wire_version": "0.6.3", "content_hash": "...", "schema": {...} }
 ```
 
 ### `PUT /v1/graphs/{id}/schema`
@@ -252,7 +252,7 @@ Returns `204` / `404`.
 Run a list of node/edge mutations as one atomic transaction —
 all-or-nothing. Mirrors the in-process write-lock atomicity that
 single handlers can't compose across HTTP. Closes the dominant
-gap from the storyflow audit (2026-05-04).
+gap from the 2026-05-04 audit.
 
 ```json
 {
@@ -327,7 +327,7 @@ cleans up).
 Fuzzy/vector entity resolution with create-on-miss. Composes the
 `dynograph-resolution` crate (token_sort_ratio + jaro_winkler with
 cosine-similarity tiebreaker) over candidates fetched from storage.
-Storyflow's LLM extraction funnels every Character through this
+A consumer's LLM extraction funnels every entity through this
 gate; the route exists to make the same path available without
 embedding the foundation crates in-process.
 
@@ -357,7 +357,7 @@ one place.
 
 `match_kind` distinguishes auto-merge (fuzzy ≥ auto_merge_threshold)
 from vector-merge (fuzzy in [fuzzy_threshold, auto_merge_threshold)
-+ embedding cosine ≥ vector_threshold) — useful for storyflow-side
++ embedding cosine ≥ vector_threshold) — useful for consumer-side
 threshold tuning. `id` is the existing node's id on either merge,
 or a fresh UUIDv4 on create.
 
@@ -397,8 +397,8 @@ workload needs them.
 
 Walk a typed source set + collect their outgoing edges of selected
 types in one call. Replaces the per-node `outgoing_edges`
-round-trip pattern that consumers (e.g. storyflow's
-`collect_story_edges`) use to project a graph slice for relationship
+round-trip pattern that consumers use (e.g. a
+`collect_*_edges` master pattern) to project a graph slice for relationship
 listings, hierarchy queries, and algorithm input. Read-only — single
 `with_engine_read` lock for the whole scan.
 
@@ -679,7 +679,7 @@ honest, just no data to search. Schema-unknown type is `400`.
 
 The `wire_version` field on `SchemaResponse` and
 `GraphMetadataResponse` is the foundation crate's `Cargo.toml`
-version (e.g. `"0.6.1"`). Consumers compare it against a
+version (e.g. `"0.6.3"`). Consumers compare it against a
 compiled-in constant; mismatch should fail-fast (the consumer was
 built against a different foundation version).
 
@@ -689,5 +689,5 @@ hash). Consumers cache codegen output keyed by this hash;
 mismatch means the schema has changed and code regen is needed.
 
 Both fields are load-bearing — the drift-detection contract is
-the same one storyflow's C-partial substrate uses. Don't strip
+the same one a C-partial substrate uses. Don't strip
 them on the consumer side.

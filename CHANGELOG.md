@@ -4,6 +4,63 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.6.3 — 2026-06-08
+
+A domain-neutral hybrid-search primitive that fuses the retrieval legs the
+foundation already has, so consumers' NL→graph / GraphRAG layers stop
+reimplementing rank fusion.
+
+### Added (dynograph-service)
+
+- **`POST /v1/graphs/{id}/search:hybrid`** — fans out to the vector (HNSW) and
+  keyword (BM25) legs and **Reciprocal-Rank-Fuses** their ranked outputs into a
+  single ranked node list (`score = Σ_leg weight_leg / (k_rrf + rank_leg)`,
+  `k_rrf = 60`). Rank-based on purpose, so it's immune to un-normalized
+  embedding magnitudes — no score normalization needed. Each hit carries a
+  per-leg `{rank, score}` breakdown.
+  - An optional structured `where` clause acts as an **intersect prefilter**
+    (same grammar as `nodes:scan`), constraining every ranked leg; it is not a
+    fusion leg of its own. At least one ranked leg (`query` and/or
+    `query_vector`) is required — a pure `where` filter is what `nodes:scan` is
+    for.
+  - The vector leg requires `node_type` (HNSW indexes are per-type; a cross-type
+    fan-out would silently skip mismatched-dim indexes, so it fails loud).
+  - The keyword leg is behind the opt-in `fulltext` cargo feature; requesting it
+    in a build without the feature returns `501`, exactly like `search:text`.
+    Vector-only requests succeed in any build.
+  - Optional per-leg `weights`, `k_per_leg` (candidates per leg pre-fusion), and
+    `limit` (final cap). Foundation never embeds — the caller supplies
+    `query_vector`.
+
+### Changed (packaging)
+
+- Bump workspace version 0.6.2 → 0.6.3; promote docs/version strings and the
+  generated `docs/openapi.json` (`info.version`) to match.
+
+## v0.6.2 — 2026-06-07
+
+Turn on full-text/BM25 search in the shipped artifact and cover it in CI. The
+full-text primitive itself — the `dynograph-text` embedded-Tantivy index, the
+`fulltext: true` property flag, and the `POST /v1/graphs/{id}/search:text` /
+`search:reindex` endpoints — shipped in v0.5.9 behind an opt-in `fulltext` cargo
+feature (off by default), but the published image was built without it, so those
+endpoints returned `501 Not Implemented` in the container.
+
+### Changed (packaging)
+
+- The release Docker image now builds with `--features
+  dynograph-service/fulltext`, so full-text search is live in the shipped
+  container instead of returning 501. The feature remains opt-in for source
+  builds; only the published artifact changes.
+
+### CI
+
+- New `fulltext` job builds, tests, and clippy-lints the workspace with the
+  `fulltext` feature on, exercising the `#[cfg(feature = "fulltext")]`
+  storage/service wiring that the default-feature legs skip. The `smoke-test`
+  job now builds the binary with the same feature, so it boots the exact
+  configuration the published image ships.
+
 ## v0.6.1 — 2026-06-07
 
 Domain-neutral vector/stats math: more distances, element-wise algebra,
@@ -83,15 +140,15 @@ becomes `#[non_exhaustive]` (the one source-compatibility note).
 
 Tier-3 primitives exposed over HTTP; Tier-2 primitives wrapped in
 `dynograph-client`. Closes the "everything in foundation must be
-reachable from market_graph (Python) and a future Rust extraction
-crate" gap surfaced by the market_graph capabilities inventory.
+reachable from a Python consumer and a future Rust extraction
+crate" gap surfaced by a consumer capabilities inventory.
 
 ### Added (service)
 
 - **`POST /v1/graphs/{id}/nodes:exists`** — batch `(type, name)`
   existence check. Returns per-query `{exists, id}` in request order
   so the caller can zip queries with results. Replaces N round-trips
-  via `list_nodes` (market_graph's two-pass extraction relevance gate)
+  via `list_nodes` (a two-pass extraction relevance gate)
   with a single HTTP call. Pre-flight rejects requests where `name`
   isn't `indexed: true` — the un-indexed-rejection policy
   `/resolve-or-create` and `/edges:collect` already use.
@@ -178,8 +235,8 @@ Contract change: read-your-own-writes within a batch.
   earlier ops in the same batch had buffered. That contract was
   documented and tested but proved a footgun for downstream consumers
   that naturally expected transactional read-your-own-writes
-  semantics — surfaced concretely by storyflow's `integrate_fragment`
-  handler, where a Character created early in the batch was
+  semantics — surfaced concretely by a consumer's fragment-integration
+  handler, where an entity created early in the batch was
   invisible to subsequent `resolve_entity` (= `scan_nodes`) calls
   for the rest of the batch, silently dropping cross-entity edges.
 
@@ -214,8 +271,8 @@ Contract change: read-your-own-writes within a batch.
   `batch_delete_node_cascades_in_batch_edges`. Both anticipated this
   flip in their pre-v0.5.5 doc comments.
 
-  Performance: the buffer is bounded (storyflow's heaviest case caps
-  at ~67 ops; `MAX_BATCH_OPS` is 1000). The reverse-walk in `get` is
+  Performance: the buffer is bounded (the heaviest known consumer case
+  caps at ~67 ops; `MAX_BATCH_OPS` is 1000). The reverse-walk in `get` is
   O(buffer) per call; the overlay in `prefix_scan` is O(scan + buffer)
   with logarithmic upsert/remove via BTreeMap. Microseconds in
   practice.
@@ -228,12 +285,12 @@ contract — e.g., as a way to build a delta against the snapshot at
 pre-batch state explicitly before `begin_batch()` if you still need
 it. We don't expect any out-of-tree consumers to have done this; the
 contract was always fragile (a single in-batch write would break the
-delta), and storyflow's only consumer of foundation has been
+delta), and the only known consumer of foundation has been
 audited.
 
 ## v0.5.4 — 2026-05-06
 
-Fourth and final primitive identified by the storyflow→foundation
+Fourth and final primitive identified by the foundation
 audit (2026-05-04). With this release all four enumerated
 primitives (`/batch`, `/resolve-or-create`, `/edges:collect`,
 `/traverse`) are in main.
@@ -241,7 +298,7 @@ primitives (`/batch`, `/resolve-or-create`, `/edges:collect`,
 ### Added
 
 - **`POST /v1/graphs/{id}/traverse`** — typed BFS over one or more
-  edge-type steps from a single start node. Backs storyflow's
+  edge-type steps from a single start node. Backs a consumer's
   `compute_predecessors` shape: transitive walk along a single
   edge type from a start node, scoped by a node property. Used
   today by `state_at_epoch`, `events_between_epochs`, and the
@@ -309,14 +366,14 @@ transitively) AND `(peer, step_idx+1)` (advance), so a chain like
 
 ## v0.5.3 — 2026-05-05
 
-Third of four primitives identified by the storyflow→foundation
+Third of four primitives identified by the foundation
 audit (2026-05-04). Closes the read-side fan-out gap.
 
 ### Added
 
 - **`POST /v1/graphs/{id}/edges:collect`** — fan-out edge
-  collection across a typed source set. Replaces storyflow's
-  `collect_story_edges` master pattern (today walks N entity
+  collection across a typed source set. Replaces a
+  `collect_*_edges` master pattern (today walks N entity
   types × M nodes × K edge types via per-node `outgoing_edges` —
   hundreds of round-trips per call); one HTTP call after
   migration. Used by 13+ knowledge-graph routes plus the
@@ -376,7 +433,7 @@ audit (2026-05-04). Closes the read-side fan-out gap.
 
 ## v0.5.2 — 2026-05-05
 
-Second of four primitives identified by the storyflow→foundation
+Second of four primitives identified by the foundation
 audit (2026-05-04). Closes the LLM-extraction migration gate.
 
 ### Added
@@ -384,10 +441,10 @@ audit (2026-05-04). Closes the LLM-extraction migration gate.
 - **`POST /v1/graphs/{id}/resolve-or-create`** — fuzzy/vector entity
   resolution with create-on-miss semantics. Exposes the existing
   `dynograph-resolution` crate (token_sort_ratio + jaro_winkler with
-  cosine-similarity tiebreaker) over HTTP. Storyflow's LLM
-  extraction funnels every Character through the embedded
-  `graph.create_or_resolve_node_scoped` today; after migration each
-  Character is one HTTP call to this route.
+  cosine-similarity tiebreaker) over HTTP. A consumer's LLM
+  extraction funnels every entity through an embedded
+  resolve-or-create call today; after migration each
+  entity is one HTTP call to this route.
 
   Body carries `node_type` + `properties` (including the query name
   at `properties.name`) + optional `embedding` for vector tiebreaking
@@ -396,7 +453,7 @@ audit (2026-05-04). Closes the LLM-extraction migration gate.
   `{id, was_created, match_kind}` where `match_kind` is one of
   `auto_merge` / `vector_merge` / `created_new` — extension over the
   audit's `{id, was_created}` sketch, distinguishes auto-merge from
-  vector-merge for storyflow-side observability and threshold tuning.
+  vector-merge for consumer-side observability and threshold tuning.
 
   Pre-flight validation pushes every checkable failure ahead of any
   writes (all 400, no state changes): unknown node_type; type with
@@ -424,9 +481,9 @@ audit (2026-05-04). Closes the LLM-extraction migration gate.
 
 ## v0.5.1 — 2026-05-05
 
-First of four primitives identified by the storyflow→foundation
+First of four primitives identified by the foundation
 audit (2026-05-04). Closes the dominant atomicity gap: every
-multi-write storyflow handler today depends on the in-process
+multi-write handler today depends on the in-process
 write lock making the sequence atomic, which doesn't survive the
 move to HTTP.
 
@@ -467,9 +524,9 @@ move to HTTP.
   out of scope for this release.
 
   PR: [#3](https://github.com/sligara7/dynograph-foundation/pull/3).
-  Storyflow side-B acceptance gate: `mutation.integrate_fragment_atomic`
-  (storyflow commit `37b34717`) — must stay green when storyflow
-  rewrites `integrate_fragment` to call `/batch`.
+  Consumer side-B acceptance gate: a `mutation.integrate_fragment_atomic`
+  test — must stay green when a consumer rewrites its
+  fragment-integration handler to call `/batch`.
 
 ## v0.5.0 — 2026-05-04
 
@@ -571,7 +628,7 @@ change shipped under v0.3.2's patch tag.
   edge type's declared properties. Until v0.3.2, edge endpoint validation
   ran but property validation was skipped — required properties could be
   missing, enum values could fall outside the declared set, and the
-  handler still returned `200`. Surfaced by storyflow's `SUBTEXT_OF`
+  handler still returned `200`. Surfaced by a consumer's `SUBTEXT_OF`
   lifecycle probe returning HTTP 200 on `relationship_type="totally_made_up"`.
 - New `DynoError::EdgeValidation { edge_type, property, message }`
   variant so edge-property failures name the offending edge instead of

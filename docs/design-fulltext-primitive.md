@@ -3,7 +3,6 @@
 > Status: in progress.
 > Scope decision (locked): **new `dynograph-text` crate**, backed by **Tantivy**,
 > **lexical search only** in the first cut (no built-in vector fusion).
-> Background and rationale: see `document-queryability-discussion.md`.
 >
 > Progress:
 > - [x] Step 1 — `dynograph-core` `fulltext` flag + helpers + validation.

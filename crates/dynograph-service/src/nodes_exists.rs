@@ -1,9 +1,9 @@
 //! POST /v1/graphs/{id}/nodes:exists — batch (type, name) existence check.
 //!
-//! Surfaced by market_graph's two-pass extraction pipeline (Pass 1b
-//! relevance gate): after Pass 1 extracts N entities from a fragment,
-//! the gate asks "do any of these already exist?" — if yes, run Pass
-//! 1b with graph context; if no, skip the second LLM call. Today that
+//! Surfaced by a two-pass extraction pipeline (a relevance gate):
+//! after the first pass extracts N entities from a fragment, the gate
+//! asks "do any of these already exist?" — if yes, run the second pass
+//! with graph context; if no, skip the second LLM call. Today that
 //! decision needs N round-trips via `list_nodes` (or N `get_node`s
 //! when the natural-key id is known); after migration it is one HTTP
 //! call.
@@ -63,7 +63,7 @@ use crate::validation::validate_indexed_property;
 
 /// Hard upper bound on a single batch. Above this, callers should
 /// shard. Picked at ~1000 to comfortably cover a single LLM-extracted
-/// fragment's entity-set (market_graph's two-pass gate is tens of
+/// fragment's entity-set (a two-pass gate is typically tens of
 /// entities per call) without leaving room for accidental
 /// graph-wide scans.
 pub(crate) const MAX_QUERIES: usize = 1000;
