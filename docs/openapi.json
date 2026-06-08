@@ -1400,7 +1400,7 @@
         "tags": [
           "search"
         ],
-        "summary": "Hybrid search: Reciprocal-Rank-Fusion over the vector (HNSW) and\nkeyword (BM25) legs, with an optional structured `where` prefilter. See\n`crate::search_hybrid` for the wire shape, fusion math, and per-leg\ndesign decisions. Read-only — one `with_state_read` lock exposes both\nthe engine and the per-type HNSW indexes the two legs need. The keyword\nleg requires the `fulltext` build feature (otherwise 501); vector-only /\nstructured-only requests succeed in any build.",
+        "summary": "Hybrid search: Reciprocal-Rank-Fusion over the vector (HNSW) and\nkeyword (BM25) legs, with an optional structured `where` prefilter. See\n`crate::search_hybrid` for the wire shape, fusion math, and per-leg\ndesign decisions. Read-only — one `with_state_read` lock exposes both\nthe engine and the per-type HNSW indexes the two legs need. At least one\nranked leg is required (`query` and/or `query_vector`) — a pure `where`\nfilter with no ranked leg is a 400 (that's what `nodes:scan` is for). The\nkeyword leg requires the `fulltext` build feature (otherwise 501); a\nvector leg (optionally with a `where` prefilter) succeeds in any build.",
         "operationId": "search_hybrid",
         "parameters": [
           {
@@ -3326,7 +3326,7 @@
           "rank": {
             "type": "integer",
             "description": "1-based rank within that leg's ranked output.",
-            "minimum": 0
+            "minimum": 1
           },
           "score": {
             "type": "number",

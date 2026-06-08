@@ -46,7 +46,11 @@
 //!   (a no-silent-fallbacks violation), so it fails loud instead.
 //! - The keyword leg is behind the `fulltext` build feature; a request
 //!   that asks for it in a build without the feature returns 501, exactly
-//!   like `search:text`. Vector-only / structured-only still succeed.
+//!   like `search:text`. A vector leg (optionally with a `where` prefilter)
+//!   needs no feature and succeeds in any build.
+//! - At least one *ranked* leg is required (`query` and/or `query_vector`).
+//!   A pure `where` filter with no ranked leg is a 400 — that is what
+//!   `nodes:scan` is for; the prefilter only constrains the ranked legs.
 
 use std::collections::{HashMap, HashSet};
 
@@ -144,6 +148,9 @@ pub(crate) struct SearchHybridBody {
 #[derive(Debug, Serialize, Clone, Copy, ToSchema)]
 pub(crate) struct HybridLegInfo {
     /// 1-based rank within that leg's ranked output.
+    // `usize` would advertise `minimum: 0` in the generated spec; the rank
+    // is 1-based, so pin it lest clients infer 0-based ranks.
+    #[schema(minimum = 1)]
     pub rank: usize,
     /// That leg's native score (BM25 for keyword, similarity for vector) —
     /// echoed for transparency; the fused `score` is what orders hits.
@@ -190,11 +197,12 @@ pub(crate) struct LegHit {
     pub score: f32,
 }
 
-/// Per-node fusion accumulator. `Default` gives the zero state for every
-/// field except `best_rank`, which the insert overrides with `usize::MAX`.
+/// Per-node fusion accumulator. Keyed externally by `(node_type, node_id)`,
+/// so the type lives in the map key, not here. `Default` gives the zero
+/// state for every field except `best_rank`, which the insert overrides
+/// with `usize::MAX`.
 #[derive(Default)]
 struct Fused {
-    node_type: String,
     score: f32,
     /// Best (lowest) rank this node achieved in any leg — the first
     /// tie-break key.
@@ -207,24 +215,30 @@ struct Fused {
 /// fully determined by its inputs.
 ///
 /// `score = Σ_leg weight_leg / (k_rrf + rank_leg(node))`. Hits are ordered
-/// by fused score (desc), then best single-leg rank (asc), then `node_id`
-/// (asc) so the result is fully deterministic. Truncated to `limit`.
+/// by fused score (desc), then best single-leg rank (asc), then
+/// `(node_type, node_id)` (asc) so the result is fully deterministic.
+/// Truncated to `limit`.
+///
+/// A node's identity is `(node_type, node_id)`, not `node_id` alone — the
+/// keyword leg with no `node_type` filter can return hits from several
+/// types, and two types may legitimately share a `node_id`. Keying by the
+/// pair keeps those distinct while still merging the *same* node seen by
+/// both legs (a vector hit and a keyword hit agree on the type, since the
+/// vector leg is always type-scoped).
 pub(crate) fn rrf_fuse(legs: &[RankedLeg], k_rrf: f32, limit: usize) -> Vec<HybridHit> {
-    let mut fused: HashMap<String, Fused> = HashMap::new();
+    let mut fused: HashMap<(String, String), Fused> = HashMap::new();
     for leg in legs {
         for (i, hit) in leg.hits.iter().enumerate() {
             let rank = i + 1;
             let contribution = leg.weight / (k_rrf + rank as f32);
-            let entry = fused.entry(hit.node_id.clone()).or_insert_with(|| Fused {
-                best_rank: usize::MAX,
-                ..Default::default()
-            });
+            let entry = fused
+                .entry((hit.node_type.clone(), hit.node_id.clone()))
+                .or_insert_with(|| Fused {
+                    best_rank: usize::MAX,
+                    ..Default::default()
+                });
             entry.score += contribution;
             entry.best_rank = entry.best_rank.min(rank);
-            // Legs agree on a node's type; take the first non-empty.
-            if entry.node_type.is_empty() && !hit.node_type.is_empty() {
-                entry.node_type = hit.node_type.clone();
-            }
             let info = HybridLegInfo {
                 rank,
                 score: hit.score,
@@ -236,22 +250,22 @@ pub(crate) fn rrf_fuse(legs: &[RankedLeg], k_rrf: f32, limit: usize) -> Vec<Hybr
         }
     }
 
-    let mut entries: Vec<(String, Fused)> = fused.into_iter().collect();
-    entries.sort_by(|(a_id, a), (b_id, b)| {
+    let mut entries: Vec<((String, String), Fused)> = fused.into_iter().collect();
+    entries.sort_by(|(a_key, a), (b_key, b)| {
         // Scores are finite (positive weight / positive denom), so the
         // partial_cmp never returns None; the fallback keeps it total.
         b.score
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.best_rank.cmp(&b.best_rank))
-            .then(a_id.cmp(b_id))
+            .then(a_key.cmp(b_key))
     });
     entries.truncate(limit);
     entries
         .into_iter()
-        .map(|(node_id, f)| HybridHit {
+        .map(|((node_type, node_id), f)| HybridHit {
             node_id,
-            node_type: f.node_type,
+            node_type,
             score: f.score,
             legs: HybridLegBreakdown {
                 vector: f.vector,
@@ -521,6 +535,41 @@ mod tests {
         assert_eq!(b_legs.keyword.unwrap().score, 7.0);
         assert_eq!(hits[1].node_id, "a");
         assert!(hits[1].legs.keyword.is_none());
+    }
+
+    #[test]
+    fn distinct_node_types_sharing_a_node_id_are_not_merged() {
+        // The keyword leg with no node_type filter can return two different
+        // types that happen to share a node_id. They are distinct nodes
+        // (identity is (node_type, node_id)) and must NOT collapse into one
+        // fused entry — doing so would corrupt scores and drop a real hit.
+        let legs = vec![RankedLeg {
+            name: LegName::Keyword,
+            weight: 1.0,
+            hits: vec![
+                LegHit {
+                    node_id: "x".into(),
+                    node_type: "A".into(),
+                    score: 5.0,
+                },
+                LegHit {
+                    node_id: "x".into(),
+                    node_type: "B".into(),
+                    score: 3.0,
+                },
+            ],
+        }];
+        let hits = rrf_fuse(&legs, K_RRF, 10);
+        assert_eq!(hits.len(), 2, "must not merge same id / different type");
+        // Rank-1 (type A) outscores rank-2 (type B); both retain their type.
+        assert_eq!(
+            (hits[0].node_type.as_str(), hits[0].node_id.as_str()),
+            ("A", "x")
+        );
+        assert_eq!(
+            (hits[1].node_type.as_str(), hits[1].node_id.as_str()),
+            ("B", "x")
+        );
     }
 
     #[test]

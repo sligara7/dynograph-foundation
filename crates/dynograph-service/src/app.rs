@@ -2007,9 +2007,11 @@ async fn search_text_impl(
 /// keyword (BM25) legs, with an optional structured `where` prefilter. See
 /// `crate::search_hybrid` for the wire shape, fusion math, and per-leg
 /// design decisions. Read-only — one `with_state_read` lock exposes both
-/// the engine and the per-type HNSW indexes the two legs need. The keyword
-/// leg requires the `fulltext` build feature (otherwise 501); vector-only /
-/// structured-only requests succeed in any build.
+/// the engine and the per-type HNSW indexes the two legs need. At least one
+/// ranked leg is required (`query` and/or `query_vector`) — a pure `where`
+/// filter with no ranked leg is a 400 (that's what `nodes:scan` is for). The
+/// keyword leg requires the `fulltext` build feature (otherwise 501); a
+/// vector leg (optionally with a `where` prefilter) succeeds in any build.
 #[utoipa::path(
     post,
     path = "/v1/graphs/{id}/search:hybrid",
