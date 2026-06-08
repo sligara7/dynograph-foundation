@@ -31,10 +31,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub use error::ClientError;
 pub use wire::{
-    EdgeResponse, EmbeddingResponse, GraphMetadataResponse, NodeExistence, NodeListResponse,
+    DistanceMetric, EdgeResponse, EmbeddingResponse, GraphMetadataResponse, HybridHit,
+    HybridLegBreakdown, HybridLegInfo, MatrixResponse, NodeExistence, NodeListResponse,
     NodeResponse, NodesExistsResponse, Precision, ResolveOrCreateResponse, SchemaResponse,
-    SimilarHit, SimilarResponse, UtilRatioResponse, UtilResult, UtilScalarResponse,
-    UtilVectorResponse, WelfordUpdateResponse,
+    SearchHybridResponse, SearchReindexResponse, SearchTextHit, SearchTextResponse, SimilarHit,
+    SimilarResponse, UtilRatioResponse, UtilResult, UtilScalarResponse, UtilVectorResponse,
+    WelfordUpdateResponse,
 };
 
 /// The service's JSON error envelope, `{ "error": "<message>" }`,
@@ -582,6 +584,69 @@ impl DynographClient {
     }
 
     // =========================================================================
+    // Search (v0.7.0 service surface). The keyword path of each is behind the
+    // server's `fulltext` build feature; against a service compiled without it
+    // `search_text`/`search_reindex` and any hybrid request carrying a `query`
+    // leg return 501 (surfaced as `ClientError::Http { status: 501, .. }`).
+    // Vector-only hybrid (`query_vector` + `node_type`, no `query`) needs no
+    // feature.
+    // =========================================================================
+
+    /// `POST /v1/graphs/{id}/search:hybrid` — fuse a vector leg and/or a
+    /// keyword leg via Reciprocal-Rank Fusion. The request body is passed
+    /// through untyped (like [`batch`](Self::batch) / [`traverse`](Self::traverse))
+    /// so the full clause grammar isn't duplicated here; see service-side
+    /// `crate::search_hybrid` for the shape:
+    /// `{query?, query_vector?, node_type?, where?, legs?, k_per_leg?, limit?,
+    /// weights?}`. `node_type` is required whenever the vector leg or a
+    /// `where` prefilter is active. The response is typed.
+    pub async fn search_hybrid(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<SearchHybridResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/search:hybrid"), body)
+            .await
+    }
+
+    /// `POST /v1/graphs/{id}/search:text` — BM25 keyword search over the
+    /// graph's full-text index, optionally scoped to one `node_type`. Hits
+    /// come back highest-score-first. Requires the server's `fulltext`
+    /// feature; otherwise 501.
+    pub async fn search_text(
+        &self,
+        id: &str,
+        query: &str,
+        node_type: Option<&str>,
+        limit: usize,
+    ) -> Result<SearchTextResponse, ClientError> {
+        #[derive(Serialize)]
+        struct Body<'a> {
+            query: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            node_type: Option<&'a str>,
+            limit: usize,
+        }
+        self.post_json(
+            &format!("/v1/graphs/{id}/search:text"),
+            &Body {
+                query,
+                node_type,
+                limit,
+            },
+        )
+        .await
+    }
+
+    /// `POST /v1/graphs/{id}/search:reindex` — rebuild the graph's
+    /// full-text index from current node state; returns the count
+    /// indexed. Requires the server's `fulltext` feature; otherwise 501.
+    pub async fn search_reindex(&self, id: &str) -> Result<SearchReindexResponse, ClientError> {
+        self.send_json(self.request(Method::POST, &format!("/v1/graphs/{id}/search:reindex")))
+            .await
+    }
+
+    // =========================================================================
     // Audit-promoted primitives (v0.5.1 → v0.5.4) and v0.5.6 additions.
     //
     // The complex-body endpoints take `&serde_json::Value` for the
@@ -957,6 +1022,37 @@ impl DynographClient {
             None => json!({ "vectors": vectors }),
         };
         self.post_json("/v1/util/centroid", &body).await
+    }
+
+    /// `POST /v1/util/pairwise_cosine` — full N×N cosine-similarity
+    /// matrix (row-major) over equal-length `vectors`. 400 if empty,
+    /// ragged, or over the pairwise cap.
+    pub async fn util_pairwise_cosine(
+        &self,
+        vectors: &[Vec<f64>],
+        precision: Option<Precision>,
+    ) -> Result<MatrixResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "vectors": vectors, "precision": p }),
+            None => json!({ "vectors": vectors }),
+        };
+        self.post_json("/v1/util/pairwise_cosine", &body).await
+    }
+
+    /// `POST /v1/util/pairwise_distance` — full N×N distance matrix
+    /// (row-major) under `metric` over equal-length `vectors`. 400 if
+    /// empty, ragged, or over the pairwise cap.
+    pub async fn util_pairwise_distance(
+        &self,
+        vectors: &[Vec<f64>],
+        metric: DistanceMetric,
+        precision: Option<Precision>,
+    ) -> Result<MatrixResponse, ClientError> {
+        let body = match precision {
+            Some(p) => json!({ "vectors": vectors, "metric": metric, "precision": p }),
+            None => json!({ "vectors": vectors, "metric": metric }),
+        };
+        self.post_json("/v1/util/pairwise_distance", &body).await
     }
 
     /// `POST /v1/util/mean` — arithmetic mean (f64-only). 400 on empty.
