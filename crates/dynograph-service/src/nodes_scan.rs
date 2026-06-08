@@ -191,9 +191,10 @@ pub(crate) fn run(
 /// Validate every clause: indexed-property (which catches unknown node
 /// type AND unknown property AND un-indexed property in one pass) + the
 /// op's value shape. All 400, pre-flight, before any scan starts. Shared
-/// by [`run`] and [`matching_node_ids`] so the two scan entry points can't
-/// drift apart on what counts as a valid clause.
-fn validate_clauses(
+/// by [`run`], [`matching_node_ids`], and `algo`'s subgraph projection
+/// (`AlgoScope.where`) so every clause consumer agrees on what counts as a
+/// valid clause.
+pub(crate) fn validate_clauses(
     schema: &Schema,
     node_type: &str,
     clauses: &[WhereClause],
@@ -282,7 +283,7 @@ fn validate_clause_value_shape(clause: &WhereClause) -> Result<(), RegistryError
     }
 }
 
-fn clauses_match(clauses: &[WhereClause], node: &StoredNode) -> bool {
+pub(crate) fn clauses_match(clauses: &[WhereClause], node: &StoredNode) -> bool {
     clauses.iter().all(|c| clause_matches(c, node))
 }
 

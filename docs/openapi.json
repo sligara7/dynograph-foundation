@@ -3538,7 +3538,7 @@
       },
       "AlgoScope": {
         "type": "object",
-        "description": "Subgraph selection shared by every algorithm. Omitted fields mean \"all\":\nno `node_types` => every node type in the schema; no `edge_types` => every\nedge type.",
+        "description": "Subgraph selection shared by every algorithm. Omitted fields mean \"all\":\nno `node_types` => every node type in the schema; no `edge_types` => every\nedge type; an empty `where` => no property filter.",
         "properties": {
           "edge_types": {
             "type": [
@@ -3558,7 +3558,14 @@
             "items": {
               "type": "string"
             },
-            "description": "Node types to include. Omit for all types."
+            "description": "Node types to include. Omit for all types; an explicit empty list is a\n400. Note this interacts with `where`: omitting it means a `where`\nclause's property must be indexed on *every* node type in the schema, so\nto predicate on a property only some types carry, name those types here."
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WhereClause"
+            },
+            "description": "Optional property predicate (same clause grammar as `nodes:scan` /\n`search:hybrid`): only nodes matching **all** clauses enter the\nprojected subgraph, and only edges between two surviving nodes are\nkept. Lets one logical subgraph partitioned by a node property (not a\ntype) be analyzed in isolation. Each clause's property must be declared\nand `indexed` on **every** in-scope node type, else 400 — narrow\n`node_types` to disambiguate."
           }
         }
       },

@@ -42,20 +42,34 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::nodes_scan::WhereClause;
+
 // ---- Wire types (always compiled — they ARE the OpenAPI contract) ----
 
 /// Subgraph selection shared by every algorithm. Omitted fields mean "all":
 /// no `node_types` => every node type in the schema; no `edge_types` => every
-/// edge type.
+/// edge type; an empty `where` => no property filter.
 #[derive(Debug, Deserialize, ToSchema)]
 #[cfg_attr(not(feature = "graph"), allow(dead_code))]
 pub(crate) struct AlgoScope {
-    /// Node types to include. Omit for all types.
+    /// Node types to include. Omit for all types; an explicit empty list is a
+    /// 400. Note this interacts with `where`: omitting it means a `where`
+    /// clause's property must be indexed on *every* node type in the schema, so
+    /// to predicate on a property only some types carry, name those types here.
     #[serde(default)]
     pub node_types: Option<Vec<String>>,
     /// Edge types to include. Omit for all types.
     #[serde(default)]
     pub edge_types: Option<Vec<String>>,
+    /// Optional property predicate (same clause grammar as `nodes:scan` /
+    /// `search:hybrid`): only nodes matching **all** clauses enter the
+    /// projected subgraph, and only edges between two surviving nodes are
+    /// kept. Lets one logical subgraph partitioned by a node property (not a
+    /// type) be analyzed in isolation. Each clause's property must be declared
+    /// and `indexed` on **every** in-scope node type, else 400 — narrow
+    /// `node_types` to disambiguate.
+    #[serde(default, rename = "where")]
+    pub where_clauses: Vec<WhereClause>,
 }
 
 /// Edge-weight projection. With neither field set, edges are unweighted (every
@@ -1043,9 +1057,20 @@ mod imp {
 
         let schema = engine.schema();
 
-        // Resolve in-scope node types (validate any explicitly requested).
+        // Resolve in-scope node types (validate any explicitly requested). An
+        // explicitly empty list is rejected rather than silently treated as the
+        // empty graph: it would scope every algorithm to zero nodes (an empty
+        // result that reads like a real answer) and would also skip the `where`
+        // validation below, which runs per in-scope type. Omit the field for
+        // "all types".
         let node_types: Vec<String> = match scope.and_then(|s| s.node_types.as_ref()) {
             Some(types) => {
+                if types.is_empty() {
+                    return Err(RegistryError::BadRequest(
+                        "scope.node_types must be non-empty (omit it to scope to all node types)"
+                            .to_string(),
+                    ));
+                }
                 for t in types {
                     if !schema.node_types.contains_key(t) {
                         return Err(RegistryError::BadRequest(format!(
@@ -1074,10 +1099,29 @@ mod imp {
                 None => schema.edge_types.keys().cloned().collect(),
             };
 
+        // Optional property predicate (`scope.where`): only nodes matching all
+        // clauses enter the projected subgraph. Validate every clause against
+        // every in-scope node type up front (indexed-property + value-shape,
+        // all 400) — a clause whose property isn't indexed on some in-scope
+        // type fails loud, pushing the caller to narrow scope.node_types,
+        // matching the id-conflation guard's posture. An empty predicate is a
+        // no-op in both helpers (`validate_clauses` iterates zero clauses;
+        // `clauses_match` is a vacuous `all` => true), so it isn't special-cased.
+        let where_clauses: &[WhereClause] =
+            scope.map(|s| s.where_clauses.as_slice()).unwrap_or(&[]);
+        for nt in &node_types {
+            crate::nodes_scan::validate_clauses(schema, nt, where_clauses)?;
+        }
+
         // Collect in-scope nodes; detect id conflation across types (fail loud).
         let mut id_type: HashMap<String, String> = HashMap::new();
         for nt in &node_types {
             for node in engine.scan_nodes(graph_id, nt)? {
+                // Drop nodes failing the property predicate before they (or any
+                // edge touching them) enter the graph.
+                if !crate::nodes_scan::clauses_match(where_clauses, &node) {
+                    continue;
+                }
                 if let Some(prev) = id_type.insert(node.node_id.clone(), nt.clone())
                     && &prev != nt
                 {
