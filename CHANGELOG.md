@@ -4,7 +4,13 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## Unreleased
+## v0.6.0 — 2026-06-07
+
+Optional Unix-domain-socket transport, served alongside TCP, with
+matching client support. A faster same-host path for co-located
+consumers; TCP-only remains the default, so the release is
+backward-compatible at the transport level. The client's `ClientError`
+becomes `#[non_exhaustive]` (the one source-compatibility note).
 
 ### Added (service)
 
