@@ -1,0 +1,13 @@
+[package]
+name = "dynograph-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Pure, dependency-free graph-theory algorithms over a generic in-memory
+# graph. Mirrors `dynograph-vector`: domain-neutral math with no storage,
+# service, or core dependency. Callers (the service layer) build a `Graph`
+# from whatever source they like and hand it in. Graphs are small
+# (10^2-10^3 nodes per consumer graph) so every algorithm here is exact.
+[dependencies]
