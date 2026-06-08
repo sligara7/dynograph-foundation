@@ -173,6 +173,13 @@ pub struct ServerConfig {
     /// `Config`'s `#[serde(default)]` on the `server` field).
     #[serde(default = "default_bind")]
     pub bind: String,
+    /// Optional Unix-domain-socket path. When set, the service binds a
+    /// `UnixListener` here *in addition to* the TCP `bind` address and
+    /// serves the same router on both — a faster same-host transport for
+    /// co-located consumers with no TCP/IP stack overhead. `None` (the
+    /// default) means TCP only.
+    #[serde(default)]
+    pub uds_path: Option<PathBuf>,
     /// Max request body size in bytes (413 above it).
     #[serde(default = "default_max_body_bytes")]
     pub max_body_bytes: usize,
@@ -224,6 +231,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             bind: default_bind(),
+            uds_path: None,
             max_body_bytes: default_max_body_bytes(),
             request_timeout_secs: default_request_timeout_secs(),
             max_concurrent_requests: default_max_concurrent_requests(),
@@ -260,6 +268,9 @@ impl Config {
         if let Ok(bind) = std::env::var("DYNOGRAPH_BIND") {
             self.server.bind = bind;
         }
+        if let Ok(uds) = std::env::var("DYNOGRAPH_UDS_PATH") {
+            self.server.uds_path = Some(PathBuf::from(uds));
+        }
         if let Ok(root) = std::env::var("DYNOGRAPH_STORAGE_ROOT") {
             self.storage.root = Some(PathBuf::from(root));
         }
@@ -291,6 +302,24 @@ root = "/var/lib/dynograph"
         .unwrap();
         assert_eq!(cfg.server.bind, "0.0.0.0:9090");
         assert_eq!(cfg.storage.root, Some(PathBuf::from("/var/lib/dynograph")));
+    }
+
+    #[test]
+    fn uds_path_round_trips_and_defaults_to_none() {
+        let cfg: Config = toml::from_str("").unwrap();
+        assert!(cfg.server.uds_path.is_none());
+
+        let cfg: Config = toml::from_str(
+            r#"
+[server]
+uds_path = "/run/dynograph.sock"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.server.uds_path,
+            Some(PathBuf::from("/run/dynograph.sock"))
+        );
     }
 
     #[test]

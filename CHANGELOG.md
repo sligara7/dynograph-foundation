@@ -4,6 +4,35 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## Unreleased
+
+### Added (service)
+
+- **Unix-domain-socket transport** — set `[server].uds_path` (or
+  `DYNOGRAPH_UDS_PATH`) to serve the full `/v1` API on a Unix socket
+  *in addition to* the TCP `bind` address. Same router, auth, limits,
+  and OpenAPI on both transports; a faster path for co-located
+  consumers with no TCP/IP stack overhead. TCP-only
+  remains the default. A stale socket left by a crashed prior run is
+  reclaimed on start; an existing non-socket file at the path is a
+  hard startup error rather than something silently overwritten.
+
+### Added (client)
+
+- **`DynographClient::connect_unix(path)`** — reach the service over its
+  Unix-socket transport. Connections are pooled/kept-alive (where the
+  UDS win over TCP is largest, per the `transport_bench` example).
+  Identical method surface to the TCP client (`new`) — every call
+  behaves the same; only the constructor differs. `base_url()` returns
+  the socket path for UDS clients.
+
+### Changed (client)
+
+- `ClientError` is now `#[non_exhaustive]` and gains a `Unix(String)`
+  variant for Unix-transport failures (connect / timeout / malformed
+  request), kept separate from the reqwest-backed `Network`. Downstream
+  `match`es need a wildcard arm.
+
 ## v0.5.6 — 2026-05-10
 
 Tier-3 primitives exposed over HTTP; Tier-2 primitives wrapped in

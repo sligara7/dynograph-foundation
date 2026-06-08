@@ -13,13 +13,27 @@ description = "Async HTTP client for the dynograph-service /v1/ API."
 dynograph-core = { path = "../dynograph-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_urlencoded = "0.7"
 thiserror = { workspace = true }
+# TCP transport (default). Unchanged behavior — base-URL clients keep
+# using reqwest end to end.
 reqwest = { workspace = true }
+# Unix-domain-socket transport (`connect_unix`). hyper-util's pooled
+# Client over hyperlocal's UnixConnector — pooled keep-alive is where the
+# UDS win over TCP is largest. tokio is needed for the per-request
+# timeout wrapper (and is already in the tree via reqwest).
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "http1", "tokio"] }
+http-body-util = { workspace = true }
+hyperlocal = { version = "0.9.1", default-features = false, features = ["client"] }
+tokio = { workspace = true }
 
 [dev-dependencies]
-# Integration tests bind a real TCP listener on 127.0.0.1:0 and run
-# `dynograph-service` in-process to exercise the client end-to-end.
+# Integration tests run `dynograph-service` in-process — over a real TCP
+# listener (integration.rs) and over a Unix socket (uds.rs) — to exercise
+# the client end-to-end on both transports.
 dynograph-service = { path = "../dynograph-service" }
 tokio = { workspace = true }
 axum = { workspace = true }
 jsonwebtoken = { workspace = true }
+tempfile = "3"

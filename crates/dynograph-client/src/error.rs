@@ -1,7 +1,11 @@
 //! Client-side errors.
 //!
-//! The HTTP layer returns one of three classes:
-//! - `Network`: no response (connection refused, DNS, timeout).
+//! The HTTP layer returns one of these classes:
+//! - `Network`: no response over the TCP transport (connection
+//!   refused, DNS, timeout).
+//! - `Unix`: no response over the Unix-socket transport (connect
+//!   failed, request timed out, malformed request). Separate from
+//!   `Network` because the UDS path doesn't go through reqwest.
 //! - `Http { status, body }`: server replied with a non-2xx; the
 //!   plain-text body is preserved so callers can match on the
 //!   honest reason ("missing Authorization", "schema evolution
@@ -13,10 +17,17 @@
 
 use thiserror::Error;
 
+/// Marked `#[non_exhaustive]` so future transports/error classes can be
+/// added without breaking downstream `match`es — callers must include a
+/// wildcard arm.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ClientError {
     #[error("network error: {0}")]
     Network(#[from] reqwest::Error),
+
+    #[error("unix transport error: {0}")]
+    Unix(String),
 
     #[error("http {status}: {body}")]
     Http {

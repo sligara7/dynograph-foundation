@@ -23,6 +23,7 @@ mod resolve_or_create;
 mod schema_evolution;
 mod schema_response;
 mod similar_response;
+mod transport;
 mod traverse;
 mod util;
 mod validation;
@@ -41,4 +42,5 @@ pub use registry::{GraphEntry, GraphRegistry, RegistryError, StorageBackend, val
 pub use schema_evolution::{EvolutionError, validate_compatible};
 pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
 pub use similar_response::{SimilarHit, SimilarResponse};
+pub use transport::{UdsBindError, bind_uds};
 pub use util::Precision;
