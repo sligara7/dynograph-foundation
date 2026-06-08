@@ -1054,31 +1054,65 @@ async fn search_hybrid_vector_only_round_trip() {
     assert_eq!(resp.hits[0].node_type, "Item");
 }
 
+// The in-process service is compiled WITHOUT `fulltext` in the default CI job
+// and WITH it in the `--features dynograph-service/fulltext` job. The client
+// crate has no compile-time signal for which, so these tests pin the wrapper
+// contract — the server's status surfaces as a typed `ClientError::Http` — in a
+// way that holds under both: 501 when the feature is off, and the feature-on
+// outcome (a 400 from `tiny_schema`'s `Item` having no fulltext-searchable
+// property, or a 200 for the bodyless reindex) otherwise.
+
 #[tokio::test]
-async fn search_text_passes_through_501_without_fulltext() {
+async fn search_text_surfaces_server_status() {
     let (client, _server) = spawn_service().await;
     client.create_graph("g1", &tiny_schema()).await.unwrap();
-    let err = client
+    let status = client
         .search_text("g1", "anything", Some("Item"), 10)
         .await
-        .unwrap_err();
-    assert_eq!(err.status(), Some(reqwest::StatusCode::NOT_IMPLEMENTED));
+        .unwrap_err()
+        .status();
+    assert!(
+        matches!(
+            status,
+            Some(reqwest::StatusCode::NOT_IMPLEMENTED | reqwest::StatusCode::BAD_REQUEST)
+        ),
+        "expected 501 (no fulltext) or 400 (fulltext, non-searchable schema), got {status:?}"
+    );
 }
 
 #[tokio::test]
-async fn search_reindex_passes_through_501_without_fulltext() {
+async fn search_reindex_surfaces_server_status() {
     let (client, _server) = spawn_service().await;
     client.create_graph("g1", &tiny_schema()).await.unwrap();
-    let err = client.search_reindex("g1").await.unwrap_err();
-    assert_eq!(err.status(), Some(reqwest::StatusCode::NOT_IMPLEMENTED));
+    // Feature off => 501 passthrough; feature on => reindex runs (Item has no
+    // searchable property, so nothing is indexed) and returns Ok. Both are
+    // valid wrapper outcomes; what must never happen is a transport/decode error.
+    match client.search_reindex("g1").await {
+        Ok(resp) => {
+            let _ = resp.indexed;
+        }
+        Err(e) => assert_eq!(e.status(), Some(reqwest::StatusCode::NOT_IMPLEMENTED)),
+    }
 }
 
 #[tokio::test]
-async fn search_hybrid_keyword_leg_passes_through_501_without_fulltext() {
+async fn search_hybrid_keyword_leg_surfaces_server_status() {
     let (client, _server) = spawn_service().await;
     client.create_graph("g1", &tiny_schema()).await.unwrap();
-    // A `query` leg requires the fulltext feature; the server 501s before fusion.
+    // A `query` leg engages the keyword path: 501 without fulltext, or 400 with
+    // it (Item has no fulltext-searchable property). Either way the client
+    // surfaces the server's status as a typed error.
     let body = json!({ "query": "anything", "node_type": "Item", "limit": 5 });
-    let err = client.search_hybrid("g1", &body).await.unwrap_err();
-    assert_eq!(err.status(), Some(reqwest::StatusCode::NOT_IMPLEMENTED));
+    let status = client
+        .search_hybrid("g1", &body)
+        .await
+        .unwrap_err()
+        .status();
+    assert!(
+        matches!(
+            status,
+            Some(reqwest::StatusCode::NOT_IMPLEMENTED | reqwest::StatusCode::BAD_REQUEST)
+        ),
+        "expected 501 (no fulltext) or 400 (fulltext, non-searchable schema), got {status:?}"
+    );
 }
