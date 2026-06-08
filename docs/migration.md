@@ -2,9 +2,9 @@
 
 This is the playbook for moving an existing consumer that depends
 on `dynograph-storage` (or its higher-level wrappers) directly off
-the embedded path and onto the new HTTP service. The canonical
-migration target is storyflow's `services/dynograph/crates/dynograph-server`,
-but the pattern generalizes.
+the embedded path and onto the new HTTP service. It's written for a
+consumer that wraps the embedded engine in its own server crate, but
+the pattern generalizes.
 
 ## What changes
 
@@ -27,9 +27,9 @@ but the pattern generalizes.
 - The `Schema` / `Value` / `DynoError` types from `dynograph-core`
   are reused on both sides of the migration.
 - `wire_version` + `content_hash` drift detection contract is
-  identical to the C-partial substrate storyflow already uses.
+  identical to the C-partial substrate consumers already use.
 
-## Step-by-step (storyflow-flavored)
+## Step-by-step
 
 The order minimizes downtime and avoids dual-write windows.
 
@@ -65,7 +65,7 @@ distinct `id`:
 ```bash
 curl -X POST http://dynograph:8080/v1/graphs \
     -H 'content-type: application/json' \
-    -d "$(jq -n --arg id 'storyflow' --slurpfile schema schema.json '{id: $id, schema: $schema[0]}')"
+    -d "$(jq -n --arg id 'mygraph' --slurpfile schema schema.json '{id: $id, schema: $schema[0]}')"
 ```
 
 Capture the `content_hash` from the response — that's the
@@ -83,7 +83,7 @@ candidate). Replace the embedded call with an HTTP call via
 let schema = engine.schema().clone();
 
 // After:
-let resp = dynograph_client.get_schema("storyflow").await?;
+let resp = dynograph_client.get_schema("mygraph").await?;
 let schema = resp.schema;
 ```
 
@@ -98,8 +98,8 @@ path passes a parity-check window, drop the embedded writes.
 
 ```rust
 // Strangler-fig:
-engine.create_node("storyflow", "Item", &id, props.clone())?;
-client.create_node("storyflow", "Item", &id, &props_json).await?;
+engine.create_node("mygraph", "Item", &id, props.clone())?;
+client.create_node("mygraph", "Item", &id, &props_json).await?;
 // Compare or assert equivalence; then remove the engine call once stable.
 ```
 
@@ -144,7 +144,7 @@ never authorization. A typical consumer layout:
 ## Drift detection
 
 `wire_version` and `content_hash` on every schema-bearing response
-implement the same drift contract storyflow's C-partial substrate
+implement the same drift contract a C-partial substrate
 uses:
 
 - `wire_version` mismatch → consumer was built against a

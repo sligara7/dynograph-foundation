@@ -1,8 +1,8 @@
 //! POST /v1/graphs/{id}/edges:collect — fan-out edge collection
 //! across a typed source set.
 //!
-//! Closes audit primitive #3 (storyflow audit 2026-05-04). Replaces
-//! the storyflow `collect_story_edges` master pattern that walks
+//! Closes audit primitive #3 (2026-05-04 audit). Replaces a
+//! `collect_*_edges` master pattern that walks
 //! N entity types × M nodes × K edge types via per-node
 //! `outgoing_edges` — hundreds of round-trips per call today; one
 //! HTTP call after migration. Used by 13+ knowledge-graph routes

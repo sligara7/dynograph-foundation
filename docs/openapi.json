@@ -1313,7 +1313,7 @@
         "tags": [
           "graphs"
         ],
-        "summary": "Full schema view: same shape consumed by generation_plus codegen\n(matches storyflow's C-partial `build_schema_contract` output).",
+        "summary": "Full schema view: same shape consumed by generation_plus codegen\n(matches the C-partial `build_schema_contract` output).",
         "operationId": "get_schema",
         "parameters": [
           {
