@@ -51,12 +51,28 @@ pub(crate) struct Sssp {
 }
 
 /// Compute single-source shortest paths from `s`, following outgoing edges
-/// (which for an undirected graph means all incident edges).
+/// (which for an undirected graph means all incident edges). Includes the path
+/// counts (`sigma`), predecessor lists, and finalization order betweenness needs.
 pub(crate) fn shortest_paths(g: &Graph, s: usize, weighted: bool) -> Sssp {
-    if weighted { dijkstra(g, s) } else { bfs(g, s) }
+    if weighted {
+        dijkstra(g, s, true)
+    } else {
+        bfs(g, s, true)
+    }
 }
 
-fn bfs(g: &Graph, s: usize) -> Sssp {
+/// Compute only the distance vector from `s` — for callers (closeness) that
+/// don't need path counts/predecessors, skipping their per-source allocation
+/// (notably the `Vec<Vec<usize>>` predecessor lists, one per source).
+pub(crate) fn distances(g: &Graph, s: usize, weighted: bool) -> Vec<f64> {
+    if weighted {
+        dijkstra(g, s, false).dist
+    } else {
+        bfs(g, s, false).dist
+    }
+}
+
+fn bfs(g: &Graph, s: usize, track_paths: bool) -> Sssp {
     let n = g.node_count();
     let mut dist = vec![f64::INFINITY; n];
     let mut sigma = vec![0.0; n];
@@ -69,7 +85,9 @@ fn bfs(g: &Graph, s: usize) -> Sssp {
     queue.push_back(s);
 
     while let Some(v) = queue.pop_front() {
-        order.push(v);
+        if track_paths {
+            order.push(v);
+        }
         for &(w, _cost) in g.out_neighbors(v) {
             // First discovery of w: set its distance and enqueue.
             if dist[w].is_infinite() {
@@ -77,7 +95,7 @@ fn bfs(g: &Graph, s: usize) -> Sssp {
                 queue.push_back(w);
             }
             // w found on (another) shortest path through v.
-            if (dist[w] - (dist[v] + 1.0)).abs() < EPS {
+            if track_paths && (dist[w] - (dist[v] + 1.0)).abs() < EPS {
                 sigma[w] += sigma[v];
                 preds[w].push(v);
             }
@@ -92,7 +110,7 @@ fn bfs(g: &Graph, s: usize) -> Sssp {
     }
 }
 
-fn dijkstra(g: &Graph, s: usize) -> Sssp {
+fn dijkstra(g: &Graph, s: usize, track_paths: bool) -> Sssp {
     let n = g.node_count();
     let mut dist = vec![f64::INFINITY; n];
     let mut sigma = vec![0.0; n];
@@ -112,18 +130,22 @@ fn dijkstra(g: &Graph, s: usize) -> Sssp {
             continue;
         }
         done[v] = true;
-        order.push(v);
+        if track_paths {
+            order.push(v);
+        }
 
         for &(w, cost) in g.out_neighbors(v) {
             let nd = d + cost;
             if nd < dist[w] - EPS {
                 // Strictly shorter path found: reset counts/preds.
                 dist[w] = nd;
-                sigma[w] = sigma[v];
-                preds[w].clear();
-                preds[w].push(v);
+                if track_paths {
+                    sigma[w] = sigma[v];
+                    preds[w].clear();
+                    preds[w].push(v);
+                }
                 heap.push(State { dist: nd, node: w });
-            } else if (nd - dist[w]).abs() < EPS {
+            } else if track_paths && (nd - dist[w]).abs() < EPS {
                 // Tie: another shortest path to w through v. Because costs are
                 // strictly positive, dist[v] < dist[w], so v is already
                 // finalized — all of w's sigma is accumulated before it settles.

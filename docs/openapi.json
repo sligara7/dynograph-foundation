@@ -3299,7 +3299,7 @@
       },
       "ClosenessRequest": {
         "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path\n**costs** (higher = farther) and must be strictly positive; omit `weight`\nfor unit-cost (hop-count) distances.",
+        "description": "Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path\n**costs** (higher = farther) and must be strictly positive; omit `weight`\nfor unit-cost (hop-count) distances. On a `directed` graph this is *outward*\ncloseness (distances from each node to the rest, following edge direction).",
         "properties": {
           "direction": {
             "$ref": "#/components/schemas/AlgoDirection"
@@ -3661,10 +3661,18 @@
       },
       "EigenvectorRequest": {
         "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/eigenvector`. Edge weights are\n**strengths**; omit `weight` for an unweighted run.",
+        "description": "Request for `POST /v1/graphs/{id}/algo/eigenvector`. Edge weights are\n**strengths**; omit `weight` for an unweighted run.\n\nEigenvector centrality is computed on the **undirected** graph (it is only\nwell-defined there). `direction` therefore accepts only `undirected` (the\ndefault); `directed` is rejected with a 400 pointing to `/algo/pagerank`,\nwhich is the directed importance measure.",
         "properties": {
           "direction": {
-            "$ref": "#/components/schemas/AlgoDirection"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoDirection",
+                "description": "Only `undirected` is accepted (the default). `directed` => 400."
+              }
+            ]
           },
           "max_iterations": {
             "type": [

@@ -145,6 +145,11 @@ pub(crate) struct PageRankRequest {
 
 /// Request for `POST /v1/graphs/{id}/algo/eigenvector`. Edge weights are
 /// **strengths**; omit `weight` for an unweighted run.
+///
+/// Eigenvector centrality is computed on the **undirected** graph (it is only
+/// well-defined there). `direction` therefore accepts only `undirected` (the
+/// default); `directed` is rejected with a 400 pointing to `/algo/pagerank`,
+/// which is the directed importance measure.
 #[derive(Debug, Deserialize, ToSchema)]
 #[cfg_attr(not(feature = "graph"), allow(dead_code))]
 pub(crate) struct EigenvectorRequest {
@@ -152,8 +157,9 @@ pub(crate) struct EigenvectorRequest {
     pub scope: Option<AlgoScope>,
     #[serde(default)]
     pub weight: Option<WeightSpec>,
+    /// Only `undirected` is accepted (the default). `directed` => 400.
     #[serde(default)]
-    pub direction: AlgoDirection,
+    pub direction: Option<AlgoDirection>,
     /// L1 convergence threshold. Defaults to 1e-6.
     #[serde(default)]
     pub tolerance: Option<f64>,
@@ -164,7 +170,8 @@ pub(crate) struct EigenvectorRequest {
 
 /// Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path
 /// **costs** (higher = farther) and must be strictly positive; omit `weight`
-/// for unit-cost (hop-count) distances.
+/// for unit-cost (hop-count) distances. On a `directed` graph this is *outward*
+/// closeness (distances from each node to the rest, following edge direction).
 #[derive(Debug, Deserialize, ToSchema)]
 #[cfg_attr(not(feature = "graph"), allow(dead_code))]
 pub(crate) struct ClosenessRequest {
@@ -395,13 +402,22 @@ mod imp {
         if let Some(m) = req.max_iterations {
             config.max_iterations = validate_max_iterations(m)?;
         }
-        let directed = req.direction == AlgoDirection::Directed;
+        // Eigenvector centrality is only sound on an undirected (symmetric)
+        // graph; a directed graph can yield a power-iteration artifact. Reject
+        // an explicit `directed` and always build undirected.
+        if req.direction == Some(AlgoDirection::Directed) {
+            return Err(RegistryError::BadRequest(
+                "eigenvector centrality is only defined for undirected graphs; pass \
+                 direction=undirected, or use /algo/pagerank for directed importance"
+                    .to_string(),
+            ));
+        }
         let graph = build_graph(
             engine,
             graph_id,
             req.scope.as_ref(),
             req.weight.as_ref(),
-            directed,
+            false,
         )?;
         let raw = eigenvector_centrality(&graph, &config).map_err(map_graph_err)?;
         Ok(ScoresResponse {
@@ -488,11 +504,18 @@ mod imp {
         Ok(t)
     }
 
+    /// Upper bound on `max_iterations`. The power-iteration loops are CPU-bound
+    /// and run under the per-graph read lock on the blocking pool, where the
+    /// HTTP timeout layer can't interrupt them — an unbounded budget lets one
+    /// request pin a worker and starve writers. Cap it (same fail-loud posture
+    /// as MAX_ALGO_NODES/EDGES); 10k iterations is far past any real convergence.
+    const MAX_ITERATIONS: usize = 10_000;
+
     fn validate_max_iterations(m: usize) -> Result<usize, RegistryError> {
-        if m == 0 {
-            return Err(RegistryError::BadRequest(
-                "max_iterations must be at least 1".to_string(),
-            ));
+        if m == 0 || m > MAX_ITERATIONS {
+            return Err(RegistryError::BadRequest(format!(
+                "max_iterations must be in 1..={MAX_ITERATIONS}, got {m}"
+            )));
         }
         Ok(m)
     }

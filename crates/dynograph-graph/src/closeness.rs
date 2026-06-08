@@ -7,10 +7,14 @@
 //! variant, which behaves sensibly on disconnected graphs by scaling down nodes
 //! that can only reach part of the graph. Weighted runs treat edge weight as a
 //! **cost** and require strictly positive weights.
+//!
+//! Because paths follow outgoing edges, on a **directed** graph this is *outward*
+//! closeness (how short `s`'s paths to others are), not the reverse "how short
+//! others' paths to `s` are". On an undirected graph the distinction vanishes.
 
 use crate::error::GraphError;
 use crate::graph::Graph;
-use crate::paths::{require_positive_costs, shortest_paths};
+use crate::paths::{distances, require_positive_costs};
 
 /// Compute closeness centrality for every node. An unreachable or isolated node
 /// scores 0. An empty graph (and the trivial one-node graph) returns all zeros.
@@ -28,10 +32,10 @@ pub fn closeness_centrality(graph: &Graph, weighted: bool) -> Result<Vec<f64>, G
     }
 
     for (s, slot) in scores.iter_mut().enumerate() {
-        let sssp = shortest_paths(graph, s, weighted);
+        let dist = distances(graph, s, weighted);
         let mut sum = 0.0;
         let mut reachable = 0usize;
-        for (v, &d) in sssp.dist.iter().enumerate() {
+        for (v, &d) in dist.iter().enumerate() {
             if v != s && d.is_finite() {
                 sum += d;
                 reachable += 1;

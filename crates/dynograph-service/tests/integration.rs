@@ -5994,6 +5994,28 @@ async fn algo_eigenvector_center_dominates_on_undirected_chain() {
 
 #[cfg(feature = "graph")]
 #[tokio::test]
+async fn algo_eigenvector_rejects_directed() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(&app, "eigenvector", json!({"direction": "directed"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("undirected"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_pagerank_rejects_excessive_max_iterations() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // An unbounded iteration budget is a DoS vector under the read lock; the cap
+    // rejects it loudly.
+    let (status, resp) = post_algo(&app, "pagerank", json!({"max_iterations": 100000000})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("max_iterations"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
 async fn algo_closeness_hub_beats_leaf() {
     let app = build_app_with_knowledge_graph().await;
     seed_two_story_graph(&app).await;

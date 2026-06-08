@@ -11,9 +11,19 @@
 //! giving standard symmetric-adjacency eigenvector centrality. Edge weights are
 //! **strengths** and must be non-negative (Perron-Frobenius).
 //!
-//! Scores are normalized to unit L2 norm. The measure is undefined on an
-//! edgeless graph (no adjacency structure to rank), which surfaces as
-//! [`GraphError::NotConverged`] rather than a fake uniform answer.
+//! Scores are normalized to unit L2 norm. The measure is undefined on a graph
+//! with no positive-weight edges (no adjacency structure to rank), which
+//! surfaces as [`GraphError::NotConverged`] rather than a fake uniform answer.
+//!
+//! **Intended for undirected (symmetric) graphs.** The `(I + A)` convergence
+//! guarantee and the "doesn't change the eigenvector" property rely on `A` being
+//! symmetric; on a directed graph the dominant-magnitude eigenvalue of `(I + A)`
+//! need not be the Perron eigenvalue, so power iteration can converge to an
+//! artifact (e.g. a DAG, whose true eigenvector centrality is degenerate). The
+//! service layer only computes this on the undirected graph for that reason.
+//! Even undirected, a graph with a degenerate dominant eigenspace (e.g. two
+//! isomorphic disconnected components) has a non-unique eigenvector; the result
+//! is then seed-dependent — a standard limitation of the measure.
 
 use crate::error::GraphError;
 use crate::graph::Graph;
@@ -52,9 +62,11 @@ pub fn eigenvector_centrality(
     }
 
     // Reject negative weights (Perron-Frobenius assumes a non-negative matrix),
-    // and require at least one edge — the measure is undefined on an edgeless
-    // graph (the `+ I` shift would otherwise return a meaningless uniform vector).
-    let mut any_edge = false;
+    // and require at least one POSITIVE-weight edge. An edgeless graph — or one
+    // whose every edge weight is 0 (structurally edgeless for ranking) — has no
+    // adjacency to propagate importance; the `+ I` shift would otherwise return
+    // a meaningless uniform vector, so fail loud instead.
+    let mut any_positive = false;
     for v in 0..n {
         for &(_, w) in graph.in_neighbors(v) {
             if w < 0.0 {
@@ -62,10 +74,12 @@ pub fn eigenvector_centrality(
                     "eigenvector-centrality weights are strengths and must be non-negative, got {w}"
                 )));
             }
-            any_edge = true;
+            if w > 0.0 {
+                any_positive = true;
+            }
         }
     }
-    if !any_edge {
+    if !any_positive {
         return Err(GraphError::NotConverged {
             iterations: config.max_iterations,
         });
@@ -124,6 +138,20 @@ mod tests {
         let mut b = GraphBuilder::new();
         b.add_node("a");
         b.add_node("b");
+        let g = b.build(false);
+        assert!(matches!(
+            eigenvector_centrality(&g, &EigenvectorConfig::default()),
+            Err(GraphError::NotConverged { .. })
+        ));
+    }
+
+    #[test]
+    fn all_zero_weight_graph_is_undefined() {
+        // Edges exist but every weight is 0 => structurally edgeless for ranking.
+        // Must fail loud, not return a fake uniform vector.
+        let mut b = GraphBuilder::new();
+        b.add_edge("a", "b", 0.0).unwrap();
+        b.add_edge("b", "c", 0.0).unwrap();
         let g = b.build(false);
         assert!(matches!(
             eigenvector_centrality(&g, &EigenvectorConfig::default()),
