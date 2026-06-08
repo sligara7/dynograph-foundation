@@ -18,9 +18,16 @@ pub enum GraphError {
     },
     /// An algorithm that requires at least one node was run on an empty graph.
     EmptyGraph,
+    /// A weight violated an algorithm's domain constraint — e.g. a negative
+    /// "strength" weight for PageRank/eigenvector, or a non-positive "cost"
+    /// weight for shortest-path-based closeness/betweenness (Dijkstra needs
+    /// strictly positive edge costs). The string explains the specific rule.
+    InvalidWeight(String),
     /// A power-iteration algorithm (PageRank, eigenvector centrality) failed to
-    /// converge within the configured iteration budget. Surfaced rather than
-    /// returning a half-converged vector that reads like a real answer.
+    /// converge within the configured iteration budget, or the measure is
+    /// undefined for the input (e.g. eigenvector centrality on an edgeless
+    /// graph). Surfaced rather than returning a vector that reads like a real
+    /// answer.
     NotConverged { iterations: usize },
 }
 
@@ -37,6 +44,7 @@ impl fmt::Display for GraphError {
                     "algorithm requires at least one node but the graph is empty"
                 )
             }
+            GraphError::InvalidWeight(detail) => write!(f, "invalid edge weight: {detail}"),
             GraphError::NotConverged { iterations } => {
                 write!(
                     f,

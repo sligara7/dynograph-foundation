@@ -120,6 +120,79 @@ pub(crate) struct DegreeRequest {
     pub mode: DegreeModeWire,
 }
 
+/// Request for `POST /v1/graphs/{id}/algo/pagerank`. Edge weights are
+/// **strengths** (a node splits its rank among out-edges in proportion to
+/// weight); omit `weight` for an unweighted (equal-split) run.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct PageRankRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+    /// Damping factor in `[0, 1]`. Defaults to 0.85.
+    #[serde(default)]
+    pub damping: Option<f64>,
+    /// L1 convergence threshold. Defaults to 1e-6.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// Iteration budget before a non-convergence error. Defaults to 100.
+    #[serde(default)]
+    pub max_iterations: Option<usize>,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/eigenvector`. Edge weights are
+/// **strengths**; omit `weight` for an unweighted run.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct EigenvectorRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+    /// L1 convergence threshold. Defaults to 1e-6.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// Iteration budget before a non-convergence error. Defaults to 100.
+    #[serde(default)]
+    pub max_iterations: Option<usize>,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path
+/// **costs** (higher = farther) and must be strictly positive; omit `weight`
+/// for unit-cost (hop-count) distances.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct ClosenessRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+}
+
+/// Request for `POST /v1/graphs/{id}/algo/betweenness`. Edge weights are path
+/// **costs** and must be strictly positive; omit `weight` for unit-cost
+/// distances.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct BetweennessRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    #[serde(default)]
+    pub direction: AlgoDirection,
+    /// Normalize scores by the number of node pairs. Defaults to true.
+    #[serde(default)]
+    pub normalized: Option<bool>,
+}
+
 /// One (weakly-)connected component: the node ids it contains.
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct ComponentsResponse {
@@ -137,22 +210,27 @@ pub(crate) struct NodeScore {
     pub score: f64,
 }
 
-/// Degree-centrality scores, highest first (ties broken by node id).
+/// Per-node centrality scores, highest first (ties broken by node id). Shared by
+/// every score-producing algorithm (degree, PageRank, eigenvector, closeness,
+/// betweenness).
 #[derive(Debug, Serialize, ToSchema)]
-pub(crate) struct DegreeResponse {
+pub(crate) struct ScoresResponse {
     pub scores: Vec<NodeScore>,
 }
 
 // ---- Algorithm entry points ----
 //
-// Both `run_*` functions share one signature `(&StorageEngine, &str, Req) ->
+// Every `run_*` shares one signature `(&StorageEngine, &str, Req) ->
 // Result<Resp, RegistryError>` regardless of the feature, so the app-layer
 // handlers are uniform (no `cfg` in app.rs). With the `graph` feature they run
-// the algorithm; without it they return 501. New algo endpoints (PRs B-D) add a
-// `run_*` here and a thin handler — no per-endpoint feature plumbing.
+// the algorithm; without it they return 501. A new algo endpoint adds a `run_*`
+// in `imp`, a no-feature stub line below, and a thin handler — no per-endpoint
+// feature plumbing.
 
 #[cfg(feature = "graph")]
-pub(crate) use imp::{run_components, run_degree};
+pub(crate) use imp::{
+    run_betweenness, run_closeness, run_components, run_degree, run_eigenvector, run_pagerank,
+};
 
 #[cfg(not(feature = "graph"))]
 fn not_enabled() -> crate::registry::RegistryError {
@@ -162,30 +240,42 @@ fn not_enabled() -> crate::registry::RegistryError {
     )
 }
 
+/// Declares a no-feature `run_*` stub returning 501, matching the real
+/// signature so the handlers stay feature-agnostic.
 #[cfg(not(feature = "graph"))]
-pub(crate) fn run_components(
-    _engine: &dynograph_storage::StorageEngine,
-    _graph_id: &str,
-    _req: ComponentsRequest,
-) -> Result<ComponentsResponse, crate::registry::RegistryError> {
-    Err(not_enabled())
+macro_rules! not_enabled_stub {
+    ($name:ident, $req:ty, $resp:ty) => {
+        pub(crate) fn $name(
+            _engine: &dynograph_storage::StorageEngine,
+            _graph_id: &str,
+            _req: $req,
+        ) -> Result<$resp, crate::registry::RegistryError> {
+            Err(not_enabled())
+        }
+    };
 }
 
 #[cfg(not(feature = "graph"))]
-pub(crate) fn run_degree(
-    _engine: &dynograph_storage::StorageEngine,
-    _graph_id: &str,
-    _req: DegreeRequest,
-) -> Result<DegreeResponse, crate::registry::RegistryError> {
-    Err(not_enabled())
-}
+not_enabled_stub!(run_components, ComponentsRequest, ComponentsResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_degree, DegreeRequest, ScoresResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_pagerank, PageRankRequest, ScoresResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_eigenvector, EigenvectorRequest, ScoresResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_closeness, ClosenessRequest, ScoresResponse);
+#[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_betweenness, BetweennessRequest, ScoresResponse);
 
 #[cfg(feature = "graph")]
 mod imp {
     use super::*;
 
     use dynograph_graph::{
-        DegreeMode, Graph, GraphBuilder, connected_components, degree_centrality,
+        DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError, PageRankConfig,
+        betweenness_centrality, closeness_centrality, connected_components, degree_centrality,
+        eigenvector_centrality, pagerank,
     };
     use dynograph_storage::{StorageEngine, StoredEdge};
 
@@ -241,7 +331,7 @@ mod imp {
         engine: &StorageEngine,
         graph_id: &str,
         req: DegreeRequest,
-    ) -> Result<DegreeResponse, RegistryError> {
+    ) -> Result<ScoresResponse, RegistryError> {
         let directed = req.direction == AlgoDirection::Directed;
         let weighted = req.weight.is_some();
         let graph = build_graph(
@@ -252,6 +342,119 @@ mod imp {
             directed,
         )?;
         let raw = degree_centrality(&graph, req.mode.into(), weighted);
+        Ok(ScoresResponse {
+            scores: sorted_scores(&graph, raw),
+        })
+    }
+
+    /// `algo/pagerank` — PageRank over the scoped graph (weights = strength).
+    pub(crate) fn run_pagerank(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: PageRankRequest,
+    ) -> Result<ScoresResponse, RegistryError> {
+        let mut config = PageRankConfig::default();
+        if let Some(d) = req.damping {
+            if !(0.0..=1.0).contains(&d) {
+                return Err(RegistryError::BadRequest(format!(
+                    "damping must be in [0, 1], got {d}"
+                )));
+            }
+            config.damping = d;
+        }
+        if let Some(t) = req.tolerance {
+            config.tolerance = validate_tolerance(t)?;
+        }
+        if let Some(m) = req.max_iterations {
+            config.max_iterations = validate_max_iterations(m)?;
+        }
+        let directed = req.direction == AlgoDirection::Directed;
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let raw = pagerank(&graph, &config).map_err(map_graph_err)?;
+        Ok(ScoresResponse {
+            scores: sorted_scores(&graph, raw),
+        })
+    }
+
+    /// `algo/eigenvector` — eigenvector centrality (weights = strength).
+    pub(crate) fn run_eigenvector(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: EigenvectorRequest,
+    ) -> Result<ScoresResponse, RegistryError> {
+        let mut config = EigenvectorConfig::default();
+        if let Some(t) = req.tolerance {
+            config.tolerance = validate_tolerance(t)?;
+        }
+        if let Some(m) = req.max_iterations {
+            config.max_iterations = validate_max_iterations(m)?;
+        }
+        let directed = req.direction == AlgoDirection::Directed;
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let raw = eigenvector_centrality(&graph, &config).map_err(map_graph_err)?;
+        Ok(ScoresResponse {
+            scores: sorted_scores(&graph, raw),
+        })
+    }
+
+    /// `algo/closeness` — closeness centrality (weights = path cost).
+    pub(crate) fn run_closeness(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: ClosenessRequest,
+    ) -> Result<ScoresResponse, RegistryError> {
+        let directed = req.direction == AlgoDirection::Directed;
+        let weighted = req.weight.is_some();
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let raw = closeness_centrality(&graph, weighted).map_err(map_graph_err)?;
+        Ok(ScoresResponse {
+            scores: sorted_scores(&graph, raw),
+        })
+    }
+
+    /// `algo/betweenness` — betweenness centrality (weights = path cost).
+    pub(crate) fn run_betweenness(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: BetweennessRequest,
+    ) -> Result<ScoresResponse, RegistryError> {
+        let directed = req.direction == AlgoDirection::Directed;
+        let weighted = req.weight.is_some();
+        let normalized = req.normalized.unwrap_or(true);
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            directed,
+        )?;
+        let raw = betweenness_centrality(&graph, weighted, normalized).map_err(map_graph_err)?;
+        Ok(ScoresResponse {
+            scores: sorted_scores(&graph, raw),
+        })
+    }
+
+    /// Map dense per-index scores to `NodeScore`s, highest score first with a
+    /// deterministic tie-break by node id.
+    fn sorted_scores(graph: &Graph, raw: Vec<f64>) -> Vec<NodeScore> {
         let mut scores: Vec<NodeScore> = raw
             .into_iter()
             .enumerate()
@@ -260,14 +463,38 @@ mod imp {
                 score,
             })
             .collect();
-        // Highest score first; deterministic tie-break by node id.
         scores.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then_with(|| a.node.cmp(&b.node))
         });
-        Ok(DegreeResponse { scores })
+        scores
+    }
+
+    /// Algorithm-domain errors (bad weights, non-convergence) all stem from the
+    /// caller's scope/weights/config, so surface them as 400s with the crate's
+    /// explanatory message.
+    fn map_graph_err(e: GraphError) -> RegistryError {
+        RegistryError::BadRequest(e.to_string())
+    }
+
+    fn validate_tolerance(t: f64) -> Result<f64, RegistryError> {
+        if !t.is_finite() || t <= 0.0 {
+            return Err(RegistryError::BadRequest(format!(
+                "tolerance must be a positive number, got {t}"
+            )));
+        }
+        Ok(t)
+    }
+
+    fn validate_max_iterations(m: usize) -> Result<usize, RegistryError> {
+        if m == 0 {
+            return Err(RegistryError::BadRequest(
+                "max_iterations must be at least 1".to_string(),
+            ));
+        }
+        Ok(m)
     }
 
     /// Build the in-memory graph from storage under the caller's read lock.

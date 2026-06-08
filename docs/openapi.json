@@ -222,6 +222,114 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/betweenness": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Betweenness centrality over the scoped subgraph (edge weights = positive path\ncost). Read-only; runs under one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_betweenness",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetweennessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "betweenness centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/closeness": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Closeness centrality over the scoped subgraph (edge weights = positive path\ncost). Read-only; runs under one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_closeness",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClosenessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "closeness centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/components": {
       "post": {
         "tags": [
@@ -310,13 +418,121 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DegreeResponse"
+                  "$ref": "#/components/schemas/ScoresResponse"
                 }
               }
             }
           },
           "400": {
             "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/eigenvector": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Eigenvector centrality over the scoped subgraph (edge weights = strength).\nRead-only; runs under one `with_engine_read` lock. Requires the `graph` build\nfeature; otherwise 501.",
+        "operationId": "algo_eigenvector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EigenvectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "eigenvector centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / undefined or did not converge"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/pagerank": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "PageRank over the scoped subgraph (edge weights = strength). Read-only; runs\nunder one `with_engine_read` lock. Requires the `graph` build feature;\notherwise 501.",
+        "operationId": "algo_pagerank",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageRankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "PageRank scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / did not converge"
           },
           "401": {
             "description": "missing or invalid credentials (when bearer auth is enabled)"
@@ -2980,6 +3196,42 @@
           }
         }
       },
+      "BetweennessRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/betweenness`. Edge weights are path\n**costs** and must be strictly positive; omit `weight` for unit-cost\ndistances.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "normalized": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Normalize scores by the number of node pairs. Defaults to true."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
       "BinaryStringRequest": {
         "type": "object",
         "required": [
@@ -3042,6 +3294,35 @@
           },
           "version": {
             "type": "string"
+          }
+        }
+      },
+      "ClosenessRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path\n**costs** (higher = farther) and must be strictly positive; omit `weight`\nfor unit-cost (hop-count) distances.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
           }
         }
       },
@@ -3244,21 +3525,6 @@
           }
         }
       },
-      "DegreeResponse": {
-        "type": "object",
-        "description": "Degree-centrality scores, highest first (ties broken by node id).",
-        "required": [
-          "scores"
-        ],
-        "properties": {
-          "scores": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NodeScore"
-            }
-          }
-        }
-      },
       "EdgeResponse": {
         "type": "object",
         "required": [
@@ -3392,6 +3658,51 @@
           }
         ],
         "description": "Untagged so the JSON has the shape the caller asked for: an\n`{\"edges\": [...], \"truncated\": ...}` object for `format = \"edges\"`,\nan `{\"adjacency\": {...}, \"truncated\": ...}` object for\n`format = \"adjacency\"`. Caller distinguishes by which field is\npresent (always exactly one)."
+      },
+      "EigenvectorRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/eigenvector`. Edge weights are\n**strengths**; omit `weight` for an unweighted run.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "max_iterations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Iteration budget before a non-convergence error. Defaults to 100.",
+            "minimum": 0
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "tolerance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "L1 convergence threshold. Defaults to 1e-6."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
       },
       "EmbeddingResponse": {
         "type": "object",
@@ -3663,6 +3974,59 @@
           "lte"
         ]
       },
+      "PageRankRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/pagerank`. Edge weights are\n**strengths** (a node splits its rank among out-edges in proportion to\nweight); omit `weight` for an unweighted (equal-split) run.",
+        "properties": {
+          "damping": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Damping factor in `[0, 1]`. Defaults to 0.85."
+          },
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "max_iterations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Iteration budget before a non-convergence error. Defaults to 100.",
+            "minimum": 0
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "tolerance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "L1 convergence threshold. Defaults to 1e-6."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
       "PercentileRequest": {
         "type": "object",
         "description": "A sample plus the percentile `p` (in `0..=100`).",
@@ -3923,6 +4287,21 @@
           },
           "value": {
             "type": "object"
+          }
+        }
+      },
+      "ScoresResponse": {
+        "type": "object",
+        "description": "Per-node centrality scores, highest first (ties broken by node id). Shared by\nevery score-producing algorithm (degree, PageRank, eigenvector, closeness,\nbetweenness).",
+        "required": [
+          "scores"
+        ],
+        "properties": {
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeScore"
+            }
           }
         }
       },

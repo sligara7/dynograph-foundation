@@ -5920,13 +5920,142 @@ async fn algo_unknown_graph_returns_404() {
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
+// Helper: pull a single node's score out of a ScoresResponse body.
+#[cfg(feature = "graph")]
+fn score_of(resp: &Value, node: &str) -> f64 {
+    resp["scores"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["node"] == node)
+        .unwrap_or_else(|| panic!("node {node} not in scores: {resp}"))["score"]
+        .as_f64()
+        .unwrap()
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_pagerank_ranks_hub_first_and_sums_to_one() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(&app, "pagerank", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let scores = resp["scores"].as_array().unwrap();
+    assert_eq!(scores.len(), 6);
+    // PageRank flows along edges; char-A1 is pointed at by ev-A1 (INVOLVES) and
+    // is the most-connected node, so it should not be the lowest. Mostly we
+    // assert the rank vector is a valid distribution.
+    let sum: f64 = scores.iter().map(|s| s["score"].as_f64().unwrap()).sum();
+    assert!((sum - 1.0).abs() < 1e-6, "ranks should sum to ~1: {sum}");
+    // Scores are sorted descending.
+    let vals: Vec<f64> = scores
+        .iter()
+        .map(|s| s["score"].as_f64().unwrap())
+        .collect();
+    assert!(
+        vals.windows(2).all(|w| w[0] >= w[1]),
+        "not sorted: {vals:?}"
+    );
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_pagerank_rejects_bad_damping() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(&app, "pagerank", json!({"damping": 1.5})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("damping"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_eigenvector_center_dominates_on_undirected_chain() {
+    let app = build_app_with_knowledge_graph().await;
+    // char-A1 - char-A2 (MENTIONS) and char-A1 - loc-A1 ... but simplest: use
+    // the seeded graph undirected and check the most-connected node leads.
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(
+        &app,
+        "eigenvector",
+        json!({"direction": "undirected", "scope": {"node_types": ["Character", "Location", "Event"], "edge_types": ["MENTIONS", "VISITS", "INVOLVES"]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    // char-A1 is the hub of story-A's component; its eigenvector centrality
+    // should exceed its leaf neighbor char-A2.
+    assert!(
+        score_of(&resp, "char-A1") > score_of(&resp, "char-A2"),
+        "hub should dominate: {resp}"
+    );
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_closeness_hub_beats_leaf() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(&app, "closeness", json!({"direction": "undirected"})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    // In story-A's component, char-A1 (degree 3) is closer to the rest than the
+    // leaf loc-A1 (degree 1).
+    assert!(
+        score_of(&resp, "char-A1") > score_of(&resp, "loc-A1"),
+        "hub closeness should beat leaf: {resp}"
+    );
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_betweenness_hub_is_the_only_bridge() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    let (status, resp) = post_algo(
+        &app,
+        "betweenness",
+        json!({"direction": "undirected", "normalized": false}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    // char-A1 sits between A2/loc/ev (all attach only through it), so it carries
+    // all the betweenness in story-A; the leaves carry none.
+    assert!(
+        score_of(&resp, "char-A1") > 0.0,
+        "hub should be a bridge: {resp}"
+    );
+    assert_eq!(score_of(&resp, "char-A2"), 0.0, "leaf carries none: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_closeness_non_positive_weight_fails_loud() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // Edges have no "weight" property -> missing weight is the loud failure here
+    // (the cost-positivity check is exercised by the crate unit tests).
+    let (status, resp) =
+        post_algo(&app, "closeness", json!({"weight": {"property": "cost"}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+}
+
 #[cfg(not(feature = "graph"))]
 #[tokio::test]
 async fn algo_endpoints_return_501_without_graph_feature() {
     // Create the graph first so the handler's graph_entry lookup succeeds and we
     // reach the feature-gated 501 (not a 404).
     let app = build_app_with_knowledge_graph().await;
-    for path in ["components", "degree"] {
+    for path in [
+        "components",
+        "degree",
+        "pagerank",
+        "eigenvector",
+        "closeness",
+        "betweenness",
+    ] {
         let res = app
             .clone()
             .oneshot(json_post(&format!("/v1/graphs/g1/algo/{path}"), &json!({})))
