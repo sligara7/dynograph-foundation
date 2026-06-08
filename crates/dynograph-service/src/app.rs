@@ -30,7 +30,10 @@ use crate::{
         ShortestPathResponse, SourceTargetRequest, ToposortResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
-    batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
+    batch::{
+        BatchOp, BatchOpError, BatchOpResult, BatchRequest, BatchResponse, BatchValidation,
+        MAX_BATCH_OPS, dry_run_ops, run_ops,
+    },
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     config::ServerLimits,
     edge_response::EdgeResponse,
@@ -217,6 +220,8 @@ use crate::{
         BatchOp,
         BatchResponse,
         BatchOpError,
+        BatchOpResult,
+        BatchValidation,
         // resolve-or-create
         ResolveOrCreateRequest,
         ScopeFilter,
@@ -1444,13 +1449,17 @@ async fn delete_edge(
 /// lock so (a) ops and HNSW maintenance for any `delete_node` happen
 /// in lockstep, and (b) concurrent readers either see pre-batch or
 /// post-batch state, never a torn intermediate.
+///
+/// With `dry_run: true` the ops run against the batch buffer for a per-op
+/// validation report and are then discarded — the graph is never mutated and
+/// the response is a `BatchValidation` (HTTP 200 regardless of `valid`).
 #[utoipa::path(
     post,
     path = "/v1/graphs/{id}/batch",
     params(("id" = String, Path, description = "graph id")),
     request_body = BatchRequest,
     responses(
-        (status = 200, description = "all ops applied", body = BatchResponse),
+        (status = 200, description = "all ops applied (commit) or per-op report (dry_run)", body = BatchResponse),
         (status = 400, description = "validation error or per-op failure", body = BatchOpError),
         (status = 404, description = "graph not found"),
     ),
@@ -1473,6 +1482,20 @@ async fn batch(
             "ops length {} exceeds maximum {MAX_BATCH_OPS}",
             req.ops.len()
         )));
+    }
+
+    // Validate-only: run every op against the buffer, then discard. Always 200
+    // — the dry run itself succeeded; `valid` reports whether the ops would.
+    if req.dry_run {
+        let validation = entry
+            .with_state_write(move |engine, _indexes| {
+                engine.begin_batch();
+                let validation = dry_run_ops(engine, &id, req.ops);
+                engine.discard_batch();
+                validation
+            })
+            .await;
+        return Ok(Json(validation).into_response());
     }
 
     enum Outcome {

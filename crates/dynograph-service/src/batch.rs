@@ -45,6 +45,12 @@ pub(crate) const MAX_BATCH_OPS: usize = 1000;
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct BatchRequest {
     pub ops: Vec<BatchOp>,
+    /// Validate-only: run every op against the batch buffer (read-your-own-
+    /// writes intact) to compute a per-op pass/fail report, then discard
+    /// without committing. The graph is never mutated. Defaults to false
+    /// (commit). See [`BatchValidation`].
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 /// One mutation. Field names match the existing single-handler bodies
@@ -140,6 +146,29 @@ pub(crate) struct BatchOpError {
     pub error: String,
     pub op_index: usize,
     pub op_type: &'static str,
+}
+
+/// One op's outcome in a `dry_run` validation report.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BatchOpResult {
+    pub index: usize,
+    pub op: &'static str,
+    pub ok: bool,
+    /// The would-be failure message; absent when `ok`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Response for a `dry_run` batch: a per-op pass/fail report plus an overall
+/// flag. Unlike the commit path (which stops at the first failure for
+/// atomicity), the dry run evaluates **every** op against the buffer — a failed
+/// op simply has no effect on it — so one round-trip surfaces all problems.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BatchValidation {
+    /// True iff every op would apply; when false, `results` pinpoints which
+    /// op(s) failed and why.
+    pub valid: bool,
+    pub results: Vec<BatchOpResult>,
 }
 
 /// Apply one op against `engine` with batching active. The "missing
@@ -245,4 +274,36 @@ pub(crate) fn run_ops(
     }
 
     Ok((response, deleted_nodes))
+}
+
+/// Run every op against `engine` (which must already have `begin_batch()`
+/// active) for a `dry_run`, recording each op's pass/fail. Unlike [`run_ops`]
+/// this does **not** stop at the first failure: a failed `apply_op` leaves the
+/// buffer untouched (the engine validates before writing), so evaluation
+/// continues and the report covers all ops. The caller must `discard_batch()`
+/// afterwards — a dry run never commits.
+pub(crate) fn dry_run_ops(
+    engine: &mut StorageEngine,
+    graph_id: &str,
+    ops: Vec<BatchOp>,
+) -> BatchValidation {
+    let mut results = Vec::with_capacity(ops.len());
+    let mut valid = true;
+    for (index, op) in ops.into_iter().enumerate() {
+        let op_type = op.kind();
+        let (ok, error) = match apply_op(engine, graph_id, op) {
+            Ok(_) => (true, None),
+            Err(e) => {
+                valid = false;
+                (false, Some(e))
+            }
+        };
+        results.push(BatchOpResult {
+            index,
+            op: op_type,
+            ok,
+            error,
+        });
+    }
+    BatchValidation { valid, results }
 }

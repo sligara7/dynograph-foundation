@@ -1038,6 +1038,7 @@
           "primitives"
         ],
         "summary": "Atomic multi-op transaction. See `crate::batch` for the wire shape\nand design rationale. Whole batch runs under one `with_state_write`\nlock so (a) ops and HNSW maintenance for any `delete_node` happen\nin lockstep, and (b) concurrent readers either see pre-batch or\npost-batch state, never a torn intermediate.",
+        "description": "With `dry_run: true` the ops run against the batch buffer for a per-op\nvalidation report and are then discarded — the graph is never mutated and\nthe response is a `BatchValidation` (HTTP 200 regardless of `valid`).",
         "operationId": "batch",
         "parameters": [
           {
@@ -1062,7 +1063,7 @@
         },
         "responses": {
           "200": {
-            "description": "all ops applied",
+            "description": "all ops applied (commit) or per-op report (dry_run)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3759,12 +3760,44 @@
           }
         }
       },
+      "BatchOpResult": {
+        "type": "object",
+        "description": "One op's outcome in a `dry_run` validation report.",
+        "required": [
+          "index",
+          "op",
+          "ok"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The would-be failure message; absent when `ok`."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "op": {
+            "type": "string"
+          }
+        }
+      },
       "BatchRequest": {
         "type": "object",
         "required": [
           "ops"
         ],
         "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "Validate-only: run every op against the batch buffer (read-your-own-\nwrites intact) to compute a per-op pass/fail report, then discard\nwithout committing. The graph is never mutated. Defaults to false\n(commit). See [`BatchValidation`]."
+          },
           "ops": {
             "type": "array",
             "items": {
@@ -3812,6 +3845,26 @@
           "ops_applied": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "BatchValidation": {
+        "type": "object",
+        "description": "Response for a `dry_run` batch: a per-op pass/fail report plus an overall\nflag. Unlike the commit path (which stops at the first failure for\natomicity), the dry run evaluates **every** op against the buffer — a failed\nop simply has no effect on it — so one round-trip surfaces all problems.",
+        "required": [
+          "valid",
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchOpResult"
+            }
+          },
+          "valid": {
+            "type": "boolean",
+            "description": "True iff every op would apply; when false, `results` pinpoints which\nop(s) failed and why."
           }
         }
       },
