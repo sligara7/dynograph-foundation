@@ -82,6 +82,20 @@ if ! curl -fsS "${BASE}/openapi.json" | grep -q '"openapi"'; then
   fail=1
 fi
 
+# Confirm the stateless math surface (/v1/util/*) is actually exposed on the
+# booted binary — consumers depend on DF for vector/stats math instead of
+# reimplementing it, so a build that dropped these routes must fail here.
+util_code=$(curl -s -o /dev/null -w '%{http_code}' \
+  -H 'content-type: application/json' \
+  -d '{"vectors":[[1,0],[0,1]]}' \
+  "${BASE}/v1/util/pairwise_cosine" || echo "000")
+if [[ "$util_code" == "200" ]]; then
+  echo "smoke-test: POST /v1/util/pairwise_cosine -> ${util_code}"
+else
+  echo "smoke-test: POST /v1/util/pairwise_cosine -> ${util_code} (expected 200; /v1/util/* not exposed?)" >&2
+  fail=1
+fi
+
 if [[ "$fail" -eq 0 ]]; then
   echo "smoke-test: all probes passed"
 fi

@@ -2979,6 +2979,78 @@
         }
       }
     },
+    "/v1/util/pairwise_cosine": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_pairwise_cosine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VectorsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "N×N cosine-similarity matrix",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatrixResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/pairwise_distance": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_pairwise_distance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairwiseDistanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "N×N distance matrix under the chosen metric",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatrixResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/pearson_correlation": {
       "post": {
         "tags": [
@@ -4082,6 +4154,16 @@
           }
         }
       },
+      "DistanceMetric": {
+        "type": "string",
+        "description": "Distance metric for `pairwise_distance`.",
+        "enum": [
+          "euclidean",
+          "squared_euclidean",
+          "manhattan",
+          "cosine"
+        ]
+      },
       "EdgeResponse": {
         "type": "object",
         "required": [
@@ -4407,6 +4489,25 @@
           "created_new"
         ]
       },
+      "MatrixResponse": {
+        "type": "object",
+        "description": "An N×N result matrix (row-major), e.g. a pairwise similarity/distance matrix.",
+        "required": [
+          "matrix"
+        ],
+        "properties": {
+          "matrix": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          }
+        }
+      },
       "MaxFlowResponse": {
         "type": "object",
         "description": "Response for `POST /v1/graphs/{id}/algo/max_flow`. The max flow value equals\nthe min-cut capacity; `source_side` is the node partition on the source side\nof that cut, and `cut_edges` the crossing edges.",
@@ -4690,6 +4791,31 @@
                 "$ref": "#/components/schemas/WeightSpec"
               }
             ]
+          }
+        }
+      },
+      "PairwiseDistanceRequest": {
+        "type": "object",
+        "description": "A set of equal-length vectors plus a metric (for `pairwise_distance`).",
+        "required": [
+          "vectors"
+        ],
+        "properties": {
+          "metric": {
+            "$ref": "#/components/schemas/DistanceMetric"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          },
+          "vectors": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            }
           }
         }
       },
@@ -5537,7 +5663,7 @@
       },
       "VectorsRequest": {
         "type": "object",
-        "description": "A set of equal-length vectors (for `centroid`).",
+        "description": "A set of equal-length vectors (for `centroid` and `pairwise_cosine`).",
         "required": [
           "vectors"
         ],

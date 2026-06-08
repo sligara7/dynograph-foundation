@@ -68,15 +68,16 @@ use crate::{
         run as run_traverse,
     },
     util::{
-        BinaryStringRequest, BinaryVectorRequest, PercentileRequest, PointsRequest, PowerRequest,
-        Precision, SampleRequest, ScalarResponse, ScaleRequest, TwoVectorF64Request,
-        UnaryVectorRequest, VectorResponse, VectorsRequest, run_add, run_centroid,
-        run_cosine_similarity, run_dot_product, run_elementwise_power, run_euclidean_distance,
-        run_hadamard, run_hadamard_division, run_jaro_winkler, run_l2_norm, run_l2_normalize,
+        BinaryStringRequest, BinaryVectorRequest, DistanceMetric, MatrixResponse,
+        PairwiseDistanceRequest, PercentileRequest, PointsRequest, PowerRequest, Precision,
+        SampleRequest, ScalarResponse, ScaleRequest, TwoVectorF64Request, UnaryVectorRequest,
+        VectorResponse, VectorsRequest, run_add, run_centroid, run_cosine_similarity,
+        run_dot_product, run_elementwise_power, run_euclidean_distance, run_hadamard,
+        run_hadamard_division, run_jaro_winkler, run_l2_norm, run_l2_normalize,
         run_linear_regression_slope, run_manhattan_distance, run_mean, run_median, run_negate,
-        run_pearson_correlation, run_percentile, run_scale, run_softmax, run_spearman_correlation,
-        run_squared_euclidean_distance, run_std_dev, run_subtract, run_token_sort_ratio,
-        run_variance, validate_embedding_values,
+        run_pairwise_cosine, run_pairwise_distance, run_pearson_correlation, run_percentile,
+        run_scale, run_softmax, run_spearman_correlation, run_squared_euclidean_distance,
+        run_std_dev, run_subtract, run_token_sort_ratio, run_variance, validate_embedding_values,
     },
     validation::validate_limit,
     welford_update::{WelfordUpdateRequest, WelfordUpdateResponse, run as run_welford_update},
@@ -161,6 +162,8 @@ use crate::{
         util_elementwise_power,
         util_l2_normalize,
         util_centroid,
+        util_pairwise_cosine,
+        util_pairwise_distance,
         util_mean,
         util_variance,
         util_std_dev,
@@ -288,6 +291,9 @@ use crate::{
         ScalarResponse<f64>,
         ScalarResponse<u32>,
         VectorResponse,
+        DistanceMetric,
+        PairwiseDistanceRequest,
+        MatrixResponse,
         // ops
         BuildInfoResponse,
     )),
@@ -498,6 +504,8 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/util/elementwise_power", post(util_elementwise_power))
         .route("/v1/util/l2_normalize", post(util_l2_normalize))
         .route("/v1/util/centroid", post(util_centroid))
+        .route("/v1/util/pairwise_cosine", post(util_pairwise_cosine))
+        .route("/v1/util/pairwise_distance", post(util_pairwise_distance))
         .route("/v1/util/mean", post(util_mean))
         .route("/v1/util/variance", post(util_variance))
         .route("/v1/util/std_dev", post(util_std_dev))
@@ -2831,6 +2839,36 @@ async fn util_l2_normalize(Json(req): Json<UnaryVectorRequest>) -> Result<Respon
 )]
 async fn util_centroid(Json(req): Json<VectorsRequest>) -> Result<Response, RegistryError> {
     Ok(Json(run_centroid(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/pairwise_cosine",
+    request_body = VectorsRequest,
+    responses(
+        (status = 200, description = "N×N cosine-similarity matrix", body = MatrixResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_pairwise_cosine(Json(req): Json<VectorsRequest>) -> Result<Response, RegistryError> {
+    Ok(Json(run_pairwise_cosine(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/pairwise_distance",
+    request_body = PairwiseDistanceRequest,
+    responses(
+        (status = 200, description = "N×N distance matrix under the chosen metric", body = MatrixResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_pairwise_distance(
+    Json(req): Json<PairwiseDistanceRequest>,
+) -> Result<Response, RegistryError> {
+    Ok(Json(run_pairwise_distance(req)?).into_response())
 }
 
 #[utoipa::path(

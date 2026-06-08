@@ -90,6 +90,13 @@ use crate::registry::RegistryError;
 /// pathological client would send to wedge a worker.
 pub(crate) const MAX_VECTOR_LEN: usize = 100_000;
 
+/// Hard cap on the number of vectors in a pairwise (matrix-producing) request.
+/// The output is an N×N matrix, so this bounds both the O(N²·dim) compute and
+/// the response size; the body-size limit already bounds N·dim on input. 1000
+/// vectors (a 10^6-entry matrix) is the point of these endpoints — one call
+/// instead of a million per-pair round-trips — without an unbounded response.
+pub(crate) const MAX_PAIRWISE_VECTORS: usize = 1000;
+
 /// Hard cap on string length for fuzzy-match endpoints. `jaro_winkler`
 /// and `token_sort_ratio` are O(|a|·|b|); without this, an attacker
 /// sending two ~1MB strings (axum's default JSON body limit is ~2MB)
@@ -357,12 +364,40 @@ fn validate_strings(a: &str, b: &str) -> Result<(), RegistryError> {
 // finite — no extra finiteness screen is needed here.
 // =========================================================================
 
-/// A set of equal-length vectors (for `centroid`).
+/// A set of equal-length vectors (for `centroid` and `pairwise_cosine`).
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct VectorsRequest {
     pub vectors: Vec<Vec<f64>>,
     #[serde(default)]
     pub precision: Precision,
+}
+
+/// Distance metric for `pairwise_distance`.
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DistanceMetric {
+    #[default]
+    Euclidean,
+    SquaredEuclidean,
+    Manhattan,
+    /// Cosine distance, `1 - cosine_similarity`.
+    Cosine,
+}
+
+/// A set of equal-length vectors plus a metric (for `pairwise_distance`).
+#[derive(Debug, Deserialize, ToSchema)]
+pub(crate) struct PairwiseDistanceRequest {
+    pub vectors: Vec<Vec<f64>>,
+    #[serde(default)]
+    pub metric: DistanceMetric,
+    #[serde(default)]
+    pub precision: Precision,
+}
+
+/// An N×N result matrix (row-major), e.g. a pairwise similarity/distance matrix.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct MatrixResponse {
+    pub matrix: Vec<Vec<f64>>,
 }
 
 /// A vector plus a scalar coefficient (for `scale`).
@@ -556,6 +591,103 @@ pub(crate) fn run_centroid(req: VectorsRequest) -> Result<VectorResponse, Regist
     result
         .map(|result| VectorResponse { result })
         .ok_or_else(|| RegistryError::BadRequest("centroid undefined".to_string()))
+}
+
+/// Validate a matrix of vectors for a pairwise op: non-empty, count within the
+/// pairwise cap, equal non-empty lengths within `MAX_VECTOR_LEN`. Returns `dim`.
+fn validate_matrix(vectors: &[Vec<f64>]) -> Result<usize, RegistryError> {
+    if vectors.is_empty() {
+        return Err(RegistryError::BadRequest(
+            "vectors must be non-empty".to_string(),
+        ));
+    }
+    if vectors.len() > MAX_PAIRWISE_VECTORS {
+        return Err(RegistryError::BadRequest(format!(
+            "vector count {} exceeds maximum {MAX_PAIRWISE_VECTORS}",
+            vectors.len()
+        )));
+    }
+    let dim = vectors[0].len();
+    if dim == 0 {
+        return Err(RegistryError::BadRequest(
+            "each vector must be non-empty".to_string(),
+        ));
+    }
+    if dim > MAX_VECTOR_LEN {
+        return Err(RegistryError::BadRequest(format!(
+            "vector length {dim} exceeds maximum {MAX_VECTOR_LEN}"
+        )));
+    }
+    if vectors.iter().any(|v| v.len() != dim) {
+        return Err(RegistryError::BadRequest(
+            "all vectors must have the same length".to_string(),
+        ));
+    }
+    Ok(dim)
+}
+
+/// Fill an N×N symmetric matrix where entry `(i, j)` is `f(i, j)`. Computes the
+/// upper triangle (and diagonal) once and mirrors it.
+// Each iteration writes both `matrix[i][j]` and its mirror `matrix[j][i]` (two
+// different rows), which an `iter_mut().enumerate()` can't express — index
+// access is the natural form here.
+#[allow(clippy::needless_range_loop)]
+fn symmetric_matrix(n: usize, mut f: impl FnMut(usize, usize) -> f64) -> Vec<Vec<f64>> {
+    let mut matrix = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in i..n {
+            let value = f(i, j);
+            matrix[i][j] = value;
+            matrix[j][i] = value;
+        }
+    }
+    matrix
+}
+
+/// `util/pairwise_cosine` — full N×N cosine-similarity matrix over the input
+/// vectors, in one call instead of N² per-pair round-trips.
+pub(crate) fn run_pairwise_cosine(req: VectorsRequest) -> Result<MatrixResponse, RegistryError> {
+    validate_matrix(&req.vectors)?;
+    let n = req.vectors.len();
+    let matrix = match req.precision {
+        Precision::F32 => {
+            let cast: Vec<Vec<f32>> = req.vectors.iter().map(|v| cast_f32(v)).collect();
+            symmetric_matrix(n, |i, j| cosine_similarity(&cast[i], &cast[j]) as f64)
+        }
+        Precision::F64 => symmetric_matrix(n, |i, j| {
+            cosine_similarity_f64(&req.vectors[i], &req.vectors[j])
+        }),
+    };
+    Ok(MatrixResponse { matrix })
+}
+
+/// `util/pairwise_distance` — full N×N distance matrix under the chosen metric.
+pub(crate) fn run_pairwise_distance(
+    req: PairwiseDistanceRequest,
+) -> Result<MatrixResponse, RegistryError> {
+    validate_matrix(&req.vectors)?;
+    let n = req.vectors.len();
+    let matrix = match req.precision {
+        Precision::F32 => {
+            let c: Vec<Vec<f32>> = req.vectors.iter().map(|v| cast_f32(v)).collect();
+            symmetric_matrix(n, |i, j| match req.metric {
+                DistanceMetric::Euclidean => euclidean_distance(&c[i], &c[j]) as f64,
+                DistanceMetric::SquaredEuclidean => squared_euclidean_distance(&c[i], &c[j]) as f64,
+                DistanceMetric::Manhattan => manhattan_distance(&c[i], &c[j]) as f64,
+                DistanceMetric::Cosine => 1.0 - cosine_similarity(&c[i], &c[j]) as f64,
+            })
+        }
+        Precision::F64 => symmetric_matrix(n, |i, j| {
+            let (a, b) = (&req.vectors[i], &req.vectors[j]);
+            match req.metric {
+                DistanceMetric::Euclidean => euclidean_distance_f64(a, b),
+                DistanceMetric::SquaredEuclidean => squared_euclidean_distance_f64(a, b),
+                DistanceMetric::Manhattan => manhattan_distance_f64(a, b),
+                DistanceMetric::Cosine => 1.0 - cosine_similarity_f64(a, b),
+            }
+        }),
+    };
+    Ok(MatrixResponse { matrix })
 }
 
 // --- descriptive statistics (f64 only) ---
