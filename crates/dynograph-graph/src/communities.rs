@@ -31,6 +31,7 @@
 
 use std::collections::HashMap;
 
+use crate::error::GraphError;
 use crate::graph::Graph;
 
 /// A modularity-maximizing partition of the graph's nodes.
@@ -55,41 +56,64 @@ const MAX_PASSES_PER_LEVEL: usize = 100;
 /// Detect communities by Louvain modularity maximization at the given
 /// `resolution` (γ; pass `1.0` for classic modularity). The graph is treated
 /// as undirected via its symmetric adjacency.
-pub fn louvain(graph: &Graph, resolution: f64) -> Communities {
+///
+/// Errors:
+/// - [`GraphError::InvalidParameter`] if `resolution` is not a positive finite
+///   number (a non-positive γ makes every merge look beneficial; NaN poisons
+///   every gain).
+/// - [`GraphError::InvalidWeight`] on a negative edge weight — like
+///   PageRank/eigenvector, weights are **strengths** and must be non-negative;
+///   modularity is ill-defined for negative weights (they can cancel `2m` to
+///   zero or flip its sign), so reject rather than return a silently-wrong
+///   partition.
+pub fn louvain(graph: &Graph, resolution: f64) -> Result<Communities, GraphError> {
+    if !resolution.is_finite() || resolution <= 0.0 {
+        return Err(GraphError::InvalidParameter(format!(
+            "resolution must be a positive finite number, got {resolution}"
+        )));
+    }
     let n = graph.node_count();
     if n == 0 {
-        return Communities {
+        return Ok(Communities {
             labels: Vec::new(),
             num_communities: 0,
             modularity: 0.0,
-        };
+        });
     }
 
     // ---- Level 0 adjacency, derived from the (undirected) graph. ----
-    // `adj[u]` holds (neighbor, weight) for u != v; self-loops are tracked
-    // separately so the aggregated levels can carry intra-community weight
-    // without the builder's self-loop policy interfering.
-    let mut adj: Vec<Vec<(usize, f64)>> = (0..n)
-        .map(|u| {
-            graph
-                .out_neighbors(u)
-                .iter()
-                .copied()
-                .filter(|&(v, _)| v != u)
-                .collect()
-        })
-        .collect();
+    // `adj[u]` holds (neighbor, weight) for u != v; a self-loop on the input
+    // graph (if the builder kept it) folds into `self_loops[u]` rather than
+    // being dropped, so its weight still counts toward the degree and carries
+    // across aggregation levels (where intra-community weight also lives there).
+    let mut adj: Vec<Vec<(usize, f64)>> = Vec::with_capacity(n);
     let mut self_loops = vec![0.0f64; n];
+    for (u, self_loop) in self_loops.iter_mut().enumerate() {
+        let mut row = Vec::new();
+        for &(v, w) in graph.out_neighbors(u) {
+            if w < 0.0 {
+                return Err(GraphError::InvalidWeight(format!(
+                    "community detection weights are strengths and must be non-negative, got {w}"
+                )));
+            }
+            if v == u {
+                *self_loop += w;
+            } else {
+                row.push((v, w));
+            }
+        }
+        adj.push(row);
+    }
 
     // 2m = Σ degrees (m = total edge weight); invariant across aggregation levels.
     let two_m: f64 = (0..n).map(|u| degree(&adj[u], self_loops[u])).sum::<f64>();
     // Edgeless graph: every node is its own community, modularity 0.
     if two_m == 0.0 {
-        return Communities {
+        return Ok(Communities {
             labels: (0..n).collect(),
             num_communities: n,
             modularity: 0.0,
-        };
+        });
     }
     let m = two_m / 2.0;
 
@@ -111,7 +135,7 @@ pub fn louvain(graph: &Graph, resolution: f64) -> Communities {
 
         // Converged when local moving didn't reduce the community count.
         if k == level_n {
-            return finalize(graph, &node_to_super, k, m, resolution);
+            return Ok(finalize(graph, &node_to_super, k, m, resolution));
         }
 
         // ---- Aggregate into the next level's graph. ----
@@ -254,19 +278,23 @@ fn finalize(
     resolution: f64,
 ) -> Communities {
     let n = graph.node_count();
-    // tot[c] = Σ degrees; intra[c] = Σ intra-community edge weight (each
-    // undirected edge once). Level-0 has no self-loops.
+    // tot[c] = Σ degrees in c; intra[c] = Σ_in(c)/2 = intra-community edge
+    // weight (each off-diagonal edge once) plus self-loop weight. A self-loop
+    // contributes `2w` to its node's degree and `w` to intra (it is an
+    // in-community link), matching the level-0 `self_loops` folding.
     let mut tot = vec![0.0f64; num_communities];
     let mut intra = vec![0.0f64; num_communities];
     for u in 0..n {
         let cu = labels[u];
         for &(v, w) in graph.out_neighbors(u) {
             if v == u {
-                continue;
-            }
-            tot[cu] += w;
-            if u < v && labels[v] == cu {
+                tot[cu] += 2.0 * w;
                 intra[cu] += w;
+            } else {
+                tot[cu] += w;
+                if u < v && labels[v] == cu {
+                    intra[cu] += w;
+                }
             }
         }
     }
@@ -312,7 +340,7 @@ mod tests {
 
     #[test]
     fn empty_graph() {
-        let c = louvain(&GraphBuilder::new().build(false), 1.0);
+        let c = louvain(&GraphBuilder::new().build(false), 1.0).unwrap();
         assert!(c.labels.is_empty());
         assert_eq!(c.num_communities, 0);
         assert_eq!(c.modularity, 0.0);
@@ -323,7 +351,7 @@ mod tests {
         let mut b = GraphBuilder::new();
         b.add_node("a");
         b.add_node("b");
-        let c = louvain(&b.build(false), 1.0);
+        let c = louvain(&b.build(false), 1.0).unwrap();
         assert_eq!(c.num_communities, 2);
         assert_eq!(c.modularity, 0.0);
     }
@@ -331,7 +359,7 @@ mod tests {
     #[test]
     fn recovers_two_planted_triangles() {
         let g = two_triangles();
-        let c = louvain(&g, 1.0);
+        let c = louvain(&g, 1.0).unwrap();
         assert_eq!(c.num_communities, 2, "two communities: {c:?}");
         // The three a-nodes share a community; likewise the b-nodes; and the
         // two communities differ.
@@ -352,8 +380,8 @@ mod tests {
     #[test]
     fn deterministic_across_runs() {
         let g = two_triangles();
-        let a = louvain(&g, 1.0);
-        let b = louvain(&g, 1.0);
+        let a = louvain(&g, 1.0).unwrap();
+        let b = louvain(&g, 1.0).unwrap();
         assert_eq!(a, b);
     }
 
@@ -368,11 +396,54 @@ mod tests {
         bld.add_edge("b", "c", 1.0).unwrap();
         bld.add_edge("a", "d", 1.0).unwrap();
         let g = bld.build(false);
-        let c = louvain(&g, 1.0);
+        let c = louvain(&g, 1.0).unwrap();
         assert_eq!(c.num_communities, 2, "{c:?}");
         assert_eq!(group_of(&g, &c, "a"), group_of(&g, &c, "b"));
         assert_eq!(group_of(&g, &c, "c"), group_of(&g, &c, "d"));
         assert_ne!(group_of(&g, &c, "a"), group_of(&g, &c, "c"));
+    }
+
+    #[test]
+    fn invalid_resolution_is_rejected() {
+        let g = two_triangles();
+        assert!(matches!(
+            louvain(&g, 0.0),
+            Err(GraphError::InvalidParameter(_))
+        ));
+        assert!(matches!(
+            louvain(&g, -1.0),
+            Err(GraphError::InvalidParameter(_))
+        ));
+        assert!(matches!(
+            louvain(&g, f64::NAN),
+            Err(GraphError::InvalidParameter(_))
+        ));
+    }
+
+    #[test]
+    fn kept_self_loop_is_counted_not_dropped() {
+        // With SelfLoopPolicy::Keep, a self-loop's weight must fold into the
+        // node's strength rather than being silently dropped (which previously
+        // zeroed 2m and forced the all-singletons path). A lone self-looped node
+        // is one community wholly containing the graph => modularity 0.
+        let mut b =
+            crate::graph::GraphBuilder::new().self_loop_policy(crate::graph::SelfLoopPolicy::Keep);
+        b.add_edge("a", "a", 3.0).unwrap();
+        let c = louvain(&b.build(false), 1.0).unwrap();
+        assert_eq!(c.num_communities, 1, "{c:?}");
+        assert!(c.modularity.abs() < 1e-9, "modularity {}", c.modularity);
+    }
+
+    #[test]
+    fn negative_weight_is_rejected() {
+        // Strengths must be non-negative (like PageRank/eigenvector); a negative
+        // weight is rejected loudly rather than corrupting modularity.
+        let mut b = GraphBuilder::new();
+        b.add_edge("a", "b", -1.0).unwrap();
+        assert!(matches!(
+            louvain(&b.build(false), 1.0),
+            Err(GraphError::InvalidWeight(_))
+        ));
     }
 
     #[test]
@@ -382,7 +453,7 @@ mod tests {
         b.add_edge("a", "b", 1.0).unwrap();
         b.add_edge("b", "c", 1.0).unwrap();
         b.add_edge("c", "a", 1.0).unwrap();
-        let c = louvain(&b.build(false), 1.0);
+        let c = louvain(&b.build(false), 1.0).unwrap();
         assert_eq!(c.num_communities, 1);
     }
 }

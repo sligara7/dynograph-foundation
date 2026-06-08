@@ -801,7 +801,7 @@ mod imp {
             req.weight.as_ref(),
             false,
         )?;
-        let result = louvain(&graph, resolution);
+        let result = louvain(&graph, resolution).map_err(map_graph_err)?;
         Ok(communities_response(&graph, result))
     }
 
