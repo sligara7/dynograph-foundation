@@ -1,8 +1,8 @@
 //! POST /v1/graphs/{id}/nodes:scan — predicate-filtered scan over a
 //! single node type.
 //!
-//! Surfaced by market_graph's query service: "find all Persons with
-//! `influence_level = market_moving`" and similar property-filtered
+//! Surfaced by a query service: "find all Persons with
+//! `influence_level = high`" and similar property-filtered
 //! scans. Today's `list_nodes` query string takes one `(prop, value)`
 //! pair only and is `eq`-only; this primitive generalizes to a list
 //! of AND-combined predicates over the seven standard ops.

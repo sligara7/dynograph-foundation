@@ -94,7 +94,7 @@ async fn create_then_get_metadata_and_schema() {
     );
 
     // GET /v1/graphs/{id}/schema returns the full SchemaResponse —
-    // the shape generation_plus codegen reads (matches storyflow's
+    // the shape generation_plus codegen reads (matches the
     // C-partial `build_schema_contract`).
     let res = app
         .oneshot(
@@ -2641,10 +2641,11 @@ async fn batch_exceeding_cap_returns_400() {
 
 #[tokio::test]
 async fn batch_integrate_fragment_shaped_payload_succeeds() {
-    // Acceptance criterion from the storyflow audit memo: integrate_fragment
-    // sends ~67 writes per call (8 chars + 4 locs + 4 events + 4 concepts +
-    // 3 objects + 12 relationships + 1 epoch + assorted edges). We don't
-    // model storyflow's schema here — Item + Likes is enough to exercise the
+    // Acceptance criterion from the 2026-05-04 audit memo: a heavy
+    // fragment-integration handler sends ~67 writes per call (8 chars + 4
+    // locs + 4 events + 4 concepts + 3 objects + 12 relationships + 1 epoch
+    // + assorted edges). We don't model that consumer's schema here — Item
+    // + Likes is enough to exercise the
     // same shape (lots of node creates followed by lots of edge creates,
     // all atomic) at comparable scale.
     let app = build_app_with_item_graph().await;
@@ -3852,7 +3853,7 @@ async fn edges_adjacent_rejects_out_of_range_limit() {
 // /v1/graphs/{id}/traverse — typed BFS over edge-type steps
 // =========================================================================
 
-/// Schema mirroring the storyflow temporal use case: NarrativeEpoch
+/// Schema mirroring a temporal use case: NarrativeEpoch
 /// nodes joined by PRECEDES edges, scoped by `story_id`. Plus a Tag
 /// node type with a TAGS edge so the multi-step / multi-type tests
 /// have somewhere to chain to.
@@ -3971,7 +3972,7 @@ async fn seed_temporal_graph(app: &axum::Router) {
 
 #[tokio::test]
 async fn traverse_single_step_transitive_collects_all_descendants() {
-    // The storyflow `compute_predecessors` shape, but applied
+    // The `compute_predecessors` shape, but applied
     // forward: from e1, transitive PRECEDES outgoing → {e2, e3}.
     let app = build_app_with_temporal_schema().await;
     seed_temporal_graph(&app).await;
@@ -4032,7 +4033,7 @@ async fn traverse_single_step_non_transitive_one_hop_only() {
 
 #[tokio::test]
 async fn traverse_incoming_direction_walks_predecessors() {
-    // The actual storyflow compute_predecessors shape: from e3,
+    // The actual compute_predecessors shape: from e3,
     // incoming PRECEDES transitive → {e2, e1}.
     let app = build_app_with_temporal_schema().await;
     seed_temporal_graph(&app).await;

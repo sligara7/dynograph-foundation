@@ -835,7 +835,7 @@ async fn get_graph(
 }
 
 /// Full schema view: same shape consumed by generation_plus codegen
-/// (matches storyflow's C-partial `build_schema_contract` output).
+/// (matches the C-partial `build_schema_contract` output).
 #[utoipa::path(
     get,
     path = "/v1/graphs/{id}/schema",

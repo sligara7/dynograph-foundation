@@ -1,7 +1,7 @@
 //! POST /v1/graphs/{id}/batch — atomic multi-op transaction.
 //!
-//! Closes the dominant atomicity gap surfaced by the storyflow audit
-//! (2026-05-04): every multi-write storyflow handler currently relies
+//! Closes the dominant atomicity gap surfaced by the 2026-05-04 audit:
+//! every multi-write handler currently relies
 //! on the in-process write lock to make a sequence of mutations
 //! atomic, which doesn't survive the move to HTTP. This route lets a
 //! caller submit a list of node/edge mutations and have them either
@@ -36,8 +36,8 @@ use utoipa::ToSchema;
 use dynograph_core::Value;
 use dynograph_storage::StorageEngine;
 
-/// Soft cap on ops per batch. Storyflow's heaviest known case
-/// (`integrate_fragment`) runs ~67 writes; this leaves ample headroom
+/// Soft cap on ops per batch. The heaviest known consumer case
+/// runs ~67 writes; this leaves ample headroom
 /// while preventing a runaway request from holding the write lock for
 /// arbitrarily long. Lift if real workloads push past.
 pub(crate) const MAX_BATCH_OPS: usize = 1000;

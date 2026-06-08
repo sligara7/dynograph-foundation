@@ -1,12 +1,12 @@
 //! POST /v1/graphs/{id}/resolve-or-create — fuzzy/vector entity
 //! resolution with create-on-miss semantics.
 //!
-//! Closes audit primitive #2 (storyflow audit 2026-05-04). Exposes
+//! Closes audit primitive #2 (2026-05-04 audit). Exposes
 //! the existing `dynograph-resolution` crate (token_sort_ratio +
-//! jaro_winkler + cosine-similarity tiebreaker) over HTTP. Storyflow's
-//! LLM extraction pipeline funnels every Character through this gate
-//! today via the embedded `graph.create_or_resolve_node_scoped`;
-//! after migration, every Character extraction is one HTTP call.
+//! jaro_winkler + cosine-similarity tiebreaker) over HTTP. An
+//! LLM extraction pipeline funnels every entity through this gate
+//! today via an embedded resolve-or-create call; after migration,
+//! every entity resolution is one HTTP call.
 //!
 //! ## Wire shape
 //!

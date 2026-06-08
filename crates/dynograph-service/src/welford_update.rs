@@ -7,7 +7,7 @@
 //! update + Welford running-variance increment, and writes the new
 //! values back atomically under a single write lock.
 //!
-//! Surfaced by market_graph's edge-strength-learning project: causal
+//! Surfaced by an edge-strength-learning use case: causal
 //! edges (CAUSES / AFFECTS / PROPAGATES_TO / CORRELATES_WITH) carry a
 //! confidence score updated when new evidence arrives. Today that's a
 //! client-side read-modify-write — race-safe only if done inside a
@@ -74,7 +74,7 @@
 //! `edge_type` (foundation doesn't have an edge-property schema yet).
 //! Consumers that want different prefixes can add an `score_prop`
 //! override in a later iteration; v1 hardcodes the convention to
-//! match the market_graph design memo.
+//! match the edge-strength-learning design.
 
 use std::collections::HashMap;
 

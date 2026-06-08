@@ -1460,7 +1460,7 @@ schema:
 
     #[test]
     fn validate_edge_properties_enforces_required_and_enum() {
-        // Storyflow side-B 2026-04-29 surfaced the gap: engine::create_edge
+        // Consumer side-B testing 2026-04-29 surfaced the gap: engine::create_edge
         // checked edge_type + from/to but never validated the property
         // bag, so any caller could store edges with required fields
         // missing or with enum values outside the declared set. Anti-
