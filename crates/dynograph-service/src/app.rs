@@ -21,6 +21,14 @@ use dynograph_core::{PropertyType, Schema, Value};
 use dynograph_vector::HnswIndex;
 
 use crate::{
+    algo::{
+        AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ClusteringResponse,
+        ComponentsResponse, CutEdge, CutsResponse, CyclesResponse, DegreeModeWire, DegreeRequest,
+        EigenvectorRequest, FlowEdge, LinkPredictionMethodWire, LinkPredictionRequest,
+        LinkPredictionResponse, MaxFlowResponse, NodeScore, PageRankRequest,
+        PersonalizedPageRankRequest, PredictedLink, ScopedRequest, ScoresResponse,
+        ShortestPathResponse, SourceTargetRequest, ToposortResponse, WeightSpec,
+    },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
@@ -64,15 +72,16 @@ use crate::{
         run as run_traverse,
     },
     util::{
-        BinaryStringRequest, BinaryVectorRequest, PercentileRequest, PointsRequest, PowerRequest,
-        Precision, SampleRequest, ScalarResponse, ScaleRequest, TwoVectorF64Request,
-        UnaryVectorRequest, VectorResponse, VectorsRequest, run_add, run_centroid,
-        run_cosine_similarity, run_dot_product, run_elementwise_power, run_euclidean_distance,
-        run_hadamard, run_hadamard_division, run_jaro_winkler, run_l2_norm, run_l2_normalize,
+        BinaryStringRequest, BinaryVectorRequest, DistanceMetric, MatrixResponse,
+        PairwiseDistanceRequest, PercentileRequest, PointsRequest, PowerRequest, Precision,
+        SampleRequest, ScalarResponse, ScaleRequest, TwoVectorF64Request, UnaryVectorRequest,
+        VectorResponse, VectorsRequest, run_add, run_centroid, run_cosine_similarity,
+        run_dot_product, run_elementwise_power, run_euclidean_distance, run_hadamard,
+        run_hadamard_division, run_jaro_winkler, run_l2_norm, run_l2_normalize,
         run_linear_regression_slope, run_manhattan_distance, run_mean, run_median, run_negate,
-        run_pearson_correlation, run_percentile, run_scale, run_softmax, run_spearman_correlation,
-        run_squared_euclidean_distance, run_std_dev, run_subtract, run_token_sort_ratio,
-        run_variance, validate_embedding_values,
+        run_pairwise_cosine, run_pairwise_distance, run_pearson_correlation, run_percentile,
+        run_scale, run_softmax, run_spearman_correlation, run_squared_euclidean_distance,
+        run_std_dev, run_subtract, run_token_sort_ratio, run_variance, validate_embedding_values,
     },
     validation::validate_limit,
     welford_update::{WelfordUpdateRequest, WelfordUpdateResponse, run as run_welford_update},
@@ -114,6 +123,22 @@ use crate::{
         nodes_scan,
         welford_update,
         traverse,
+        // graph-theory algorithms (behind the `graph` feature)
+        algo_components,
+        algo_degree,
+        algo_pagerank,
+        algo_eigenvector,
+        algo_closeness,
+        algo_betweenness,
+        algo_cuts,
+        algo_scc,
+        algo_cycles,
+        algo_personalized_pagerank,
+        algo_shortest_path,
+        algo_link_prediction,
+        algo_clustering,
+        algo_toposort,
+        algo_max_flow,
         // embeddings + search
         set_embedding,
         get_embedding,
@@ -142,6 +167,8 @@ use crate::{
         util_elementwise_power,
         util_l2_normalize,
         util_centroid,
+        util_pairwise_cosine,
+        util_pairwise_distance,
         util_mean,
         util_variance,
         util_std_dev,
@@ -230,6 +257,34 @@ use crate::{
         ReturnFormat,
         TraversedNode,
         TraverseResponse,
+        // graph-theory algorithms
+        AlgoScope,
+        WeightSpec,
+        AlgoDirection,
+        DegreeModeWire,
+        ScopedRequest,
+        DegreeRequest,
+        PageRankRequest,
+        EigenvectorRequest,
+        ClosenessRequest,
+        BetweennessRequest,
+        PersonalizedPageRankRequest,
+        SourceTargetRequest,
+        LinkPredictionRequest,
+        LinkPredictionMethodWire,
+        ComponentsResponse,
+        ScoresResponse,
+        NodeScore,
+        CutsResponse,
+        CutEdge,
+        CyclesResponse,
+        ShortestPathResponse,
+        PredictedLink,
+        LinkPredictionResponse,
+        ClusteringResponse,
+        ToposortResponse,
+        MaxFlowResponse,
+        FlowEdge,
         // welford
         WelfordUpdateRequest,
         WelfordUpdateResponse,
@@ -248,6 +303,9 @@ use crate::{
         ScalarResponse<f64>,
         ScalarResponse<u32>,
         VectorResponse,
+        DistanceMetric,
+        PairwiseDistanceRequest,
+        MatrixResponse,
         // ops
         BuildInfoResponse,
     )),
@@ -258,6 +316,7 @@ use crate::{
         (name = "embeddings", description = "Per-node embeddings"),
         (name = "search", description = "Vector similarity search"),
         (name = "primitives", description = "Composite graph primitives (batch, resolve, edges:*, nodes:*, traverse, welford)"),
+        (name = "algo", description = "Graph-theory algorithms (components, centrality, ...). Requires the `graph` build feature; otherwise 501."),
         (name = "util", description = "Stateless pure-math utilities"),
         (name = "ops", description = "Health, readiness, metrics, build info"),
     )
@@ -396,6 +455,30 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/graphs/{id}/nodes:exists", post(nodes_exists))
         .route("/v1/graphs/{id}/nodes:scan", post(nodes_scan))
         .route("/v1/graphs/{id}/traverse", post(traverse))
+        .route("/v1/graphs/{id}/algo/components", post(algo_components))
+        .route("/v1/graphs/{id}/algo/degree", post(algo_degree))
+        .route("/v1/graphs/{id}/algo/pagerank", post(algo_pagerank))
+        .route("/v1/graphs/{id}/algo/eigenvector", post(algo_eigenvector))
+        .route("/v1/graphs/{id}/algo/closeness", post(algo_closeness))
+        .route("/v1/graphs/{id}/algo/betweenness", post(algo_betweenness))
+        .route("/v1/graphs/{id}/algo/cuts", post(algo_cuts))
+        .route("/v1/graphs/{id}/algo/scc", post(algo_scc))
+        .route("/v1/graphs/{id}/algo/cycles", post(algo_cycles))
+        .route(
+            "/v1/graphs/{id}/algo/personalized_pagerank",
+            post(algo_personalized_pagerank),
+        )
+        .route(
+            "/v1/graphs/{id}/algo/shortest_path",
+            post(algo_shortest_path),
+        )
+        .route(
+            "/v1/graphs/{id}/algo/link_prediction",
+            post(algo_link_prediction),
+        )
+        .route("/v1/graphs/{id}/algo/clustering", post(algo_clustering))
+        .route("/v1/graphs/{id}/algo/toposort", post(algo_toposort))
+        .route("/v1/graphs/{id}/algo/max_flow", post(algo_max_flow))
         .route(
             "/v1/graphs/{id}/nodes/{node_type}/{node_id}/embedding",
             get(get_embedding)
@@ -434,6 +517,8 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/util/elementwise_power", post(util_elementwise_power))
         .route("/v1/util/l2_normalize", post(util_l2_normalize))
         .route("/v1/util/centroid", post(util_centroid))
+        .route("/v1/util/pairwise_cosine", post(util_pairwise_cosine))
+        .route("/v1/util/pairwise_distance", post(util_pairwise_distance))
         .route("/v1/util/mean", post(util_mean))
         .route("/v1/util/variance", post(util_variance))
         .route("/v1/util/std_dev", post(util_std_dev))
@@ -1633,6 +1718,424 @@ async fn traverse(
     Ok(Json(response).into_response())
 }
 
+/// (Weakly-)connected components over the scoped subgraph. Read-only; the whole
+/// build + analysis runs under one `with_engine_read` lock. Requires the `graph`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/components",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "connected components", body = ComponentsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_components(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_components(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Degree centrality over the scoped subgraph. Read-only; runs under one
+/// `with_engine_read` lock. Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/degree",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = DegreeRequest,
+    responses(
+        (status = 200, description = "degree centrality scores", body = ScoresResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_degree(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<DegreeRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_degree(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// PageRank over the scoped subgraph (edge weights = strength). Read-only; runs
+/// under one `with_engine_read` lock. Requires the `graph` build feature;
+/// otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/pagerank",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = PageRankRequest,
+    responses(
+        (status = 200, description = "PageRank scores", body = ScoresResponse),
+        (status = 400, description = "validation error / did not converge"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_pagerank(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<PageRankRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_pagerank(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Eigenvector centrality over the scoped subgraph (edge weights = strength).
+/// Read-only; runs under one `with_engine_read` lock. Requires the `graph` build
+/// feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/eigenvector",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = EigenvectorRequest,
+    responses(
+        (status = 200, description = "eigenvector centrality scores", body = ScoresResponse),
+        (status = 400, description = "validation error / undefined or did not converge"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_eigenvector(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<EigenvectorRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_eigenvector(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Closeness centrality over the scoped subgraph (edge weights = positive path
+/// cost). Read-only; runs under one `with_engine_read` lock. Requires the
+/// `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/closeness",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ClosenessRequest,
+    responses(
+        (status = 200, description = "closeness centrality scores", body = ScoresResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_closeness(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ClosenessRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_closeness(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Betweenness centrality over the scoped subgraph (edge weights = positive path
+/// cost). Read-only; runs under one `with_engine_read` lock. Requires the
+/// `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/betweenness",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = BetweennessRequest,
+    responses(
+        (status = 200, description = "betweenness centrality scores", body = ScoresResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_betweenness(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<BetweennessRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_betweenness(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Articulation points and bridges of the scoped subgraph (treated undirected).
+/// Read-only; runs under one `with_engine_read` lock. Requires the `graph` build
+/// feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/cuts",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "articulation points + bridges", body = CutsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_cuts(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_cuts(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Strongly-connected components of the scoped directed subgraph. Read-only;
+/// runs under one `with_engine_read` lock. Requires the `graph` build feature;
+/// otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/scc",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "strongly-connected components", body = ComponentsResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_scc(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_scc(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Directed cycle detection: is the scoped subgraph acyclic, plus one witness
+/// cycle if not. Read-only; one `with_engine_read` lock. Requires the `graph`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/cycles",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "acyclic flag + witness cycle", body = CyclesResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_cycles(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_cycles(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Personalized PageRank (random walk with restart) over the scoped subgraph,
+/// seeded by node ids. Read-only; one `with_engine_read` lock. Requires the
+/// `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/personalized_pagerank",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = PersonalizedPageRankRequest,
+    responses(
+        (status = 200, description = "relevance scores", body = ScoresResponse),
+        (status = 400, description = "validation error / did not converge"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_personalized_pagerank(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<PersonalizedPageRankRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_personalized_pagerank(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// One shortest path between two nodes of the scoped subgraph. Read-only; one
+/// `with_engine_read` lock. Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/shortest_path",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = SourceTargetRequest,
+    responses(
+        (status = 200, description = "shortest path + distance", body = ShortestPathResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_shortest_path(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SourceTargetRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_shortest_path(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Link prediction over the scoped (undirected) subgraph — ranked candidate
+/// edges by neighborhood overlap. Read-only; one `with_engine_read` lock.
+/// Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/link_prediction",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = LinkPredictionRequest,
+    responses(
+        (status = 200, description = "ranked predicted links", body = LinkPredictionResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_link_prediction(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<LinkPredictionRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_link_prediction(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Local clustering coefficients + global transitivity over the scoped
+/// (undirected) subgraph. Read-only; one `with_engine_read` lock. Requires the
+/// `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/clustering",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "clustering coefficients + transitivity", body = ClusteringResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_clustering(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_clustering(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Topological order of the scoped directed subgraph (or a not-acyclic flag).
+/// Read-only; one `with_engine_read` lock. Requires the `graph` build feature;
+/// otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/toposort",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = ScopedRequest,
+    responses(
+        (status = 200, description = "topological order", body = ToposortResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_toposort(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ScopedRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_toposort(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Maximum flow and minimum s-t cut over the scoped subgraph (edge weights =
+/// capacities). Read-only; one `with_engine_read` lock. Requires the `graph`
+/// build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/max_flow",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = SourceTargetRequest,
+    responses(
+        (status = 200, description = "max flow value + min cut", body = MaxFlowResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_max_flow(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<SourceTargetRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_max_flow(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 struct SetEmbeddingBody {
     embedding: Vec<f32>,
@@ -2378,6 +2881,47 @@ async fn util_l2_normalize(Json(req): Json<UnaryVectorRequest>) -> Result<Respon
 )]
 async fn util_centroid(Json(req): Json<VectorsRequest>) -> Result<Response, RegistryError> {
     Ok(Json(run_centroid(req)?).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/pairwise_cosine",
+    request_body = VectorsRequest,
+    responses(
+        (status = 200, description = "N×N cosine-similarity matrix", body = MatrixResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_pairwise_cosine(Json(req): Json<VectorsRequest>) -> Result<Response, RegistryError> {
+    // O(N²·dim) — offload to the blocking pool so a large matrix can't pin a
+    // tokio worker (the timeout layer can't preempt CPU-bound work). Mirrors how
+    // the storage/engine wrappers run their synchronous work; a panic in the
+    // task is re-raised here, a validation error becomes a 400.
+    let resp = tokio::task::spawn_blocking(move || run_pairwise_cosine(req))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Json(resp).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/util/pairwise_distance",
+    request_body = PairwiseDistanceRequest,
+    responses(
+        (status = 200, description = "N×N distance matrix under the chosen metric", body = MatrixResponse),
+        (status = 400, description = "validation error"),
+    ),
+    tag = "util",
+)]
+async fn util_pairwise_distance(
+    Json(req): Json<PairwiseDistanceRequest>,
+) -> Result<Response, RegistryError> {
+    // O(N²·dim) — offload to the blocking pool (see `util_pairwise_cosine`).
+    let resp = tokio::task::spawn_blocking(move || run_pairwise_distance(req))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Json(resp).into_response())
 }
 
 #[utoipa::path(

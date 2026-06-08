@@ -188,6 +188,39 @@ Defaults to JSON-able structured logs on stderr at `INFO`. Set
 Each request is logged at `INFO` with method + path + status +
 latency.
 
+## Domain-neutral math: call DF, don't reimplement
+
+`dynograph` is the single home for **all** domain-neutral math its consumers
+need — graph topology, per-vector algebra, and descriptive statistics. The
+policy is: **call these endpoints instead of reimplementing the math locally**
+(no hand-rolled numpy adjacency SVD, no duplicated cosine loops). Keeping one
+audited implementation behind a stable wire contract is the whole point.
+
+Three families, all under the published OpenAPI spec (`GET /openapi.json`):
+
+- **Vector & stats** — `POST /v1/util/*`: per-pair algebra (`cosine_similarity`,
+  `euclidean_distance`, `add`, `scale`, `l2_normalize`, …), reductions
+  (`centroid`, `mean`, `variance`, `percentile`, `softmax`, `pearson_correlation`,
+  …), and **batch matrix** forms — `pairwise_cosine` and `pairwise_distance`
+  take N vectors and return the full N×N matrix in one call, so a consumer
+  ranking N entities does **one** request instead of N² per-pair round-trips.
+  Stateless; no graph required. Vectors capped at `MAX_VECTOR_LEN` (100k) and
+  pairwise inputs at 1000 vectors.
+
+- **Graph topology** — `POST /v1/graphs/{id}/algo/*`: components, strongly-
+  connected components, degree/PageRank/eigenvector/closeness/betweenness
+  centrality, personalized PageRank, articulation points & bridges, cycle
+  detection, shortest path, link prediction, clustering/transitivity,
+  topological sort, and max-flow/min-cut. Each request supplies the
+  domain-specific parts — a subgraph `scope` (node/edge-type filter), an
+  edge-weight projection, and a direction — and gets back a generic result
+  (scores, partitions, paths). Behind the optional `graph` build feature; the
+  published image enables it. Without the feature the routes return `501`.
+
+The smoke test (`scripts/smoke-test.sh`, run in CI after the release build)
+probes `/v1/util/pairwise_cosine` on the booted binary, so a build that fails to
+expose the math surface fails the pipeline rather than shipping.
+
 ## Resource shape
 
 The default RocksDB tuning (per `cf_options` in

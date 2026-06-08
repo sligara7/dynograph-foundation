@@ -2,6 +2,7 @@
 //! graphs, each backed by its own `StorageEngine`, behind a `/v1/`
 //! surface.
 
+mod algo;
 mod app;
 mod auth;
 mod batch;

@@ -12,6 +12,7 @@ members = [
     "crates/dynograph-storage",
     "crates/dynograph-resolution",
     "crates/dynograph-vector",
+    "crates/dynograph-graph",
     "crates/dynograph-text",
     "crates/dynograph-service",
     "crates/dynograph-client",

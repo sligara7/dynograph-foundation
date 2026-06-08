@@ -222,6 +222,816 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/betweenness": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Betweenness centrality over the scoped subgraph (edge weights = positive path\ncost). Read-only; runs under one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_betweenness",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BetweennessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "betweenness centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/closeness": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Closeness centrality over the scoped subgraph (edge weights = positive path\ncost). Read-only; runs under one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_closeness",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClosenessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "closeness centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/clustering": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Local clustering coefficients + global transitivity over the scoped\n(undirected) subgraph. Read-only; one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_clustering",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "clustering coefficients + transitivity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusteringResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/components": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "(Weakly-)connected components over the scoped subgraph. Read-only; the whole\nbuild + analysis runs under one `with_engine_read` lock. Requires the `graph`\nbuild feature; otherwise 501.",
+        "operationId": "algo_components",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "connected components",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/cuts": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Articulation points and bridges of the scoped subgraph (treated undirected).\nRead-only; runs under one `with_engine_read` lock. Requires the `graph` build\nfeature; otherwise 501.",
+        "operationId": "algo_cuts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "articulation points + bridges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CutsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/cycles": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Directed cycle detection: is the scoped subgraph acyclic, plus one witness\ncycle if not. Read-only; one `with_engine_read` lock. Requires the `graph`\nbuild feature; otherwise 501.",
+        "operationId": "algo_cycles",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "acyclic flag + witness cycle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CyclesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/degree": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Degree centrality over the scoped subgraph. Read-only; runs under one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_degree",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DegreeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "degree centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/eigenvector": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Eigenvector centrality over the scoped subgraph (edge weights = strength).\nRead-only; runs under one `with_engine_read` lock. Requires the `graph` build\nfeature; otherwise 501.",
+        "operationId": "algo_eigenvector",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EigenvectorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "eigenvector centrality scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / undefined or did not converge"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/link_prediction": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Link prediction over the scoped (undirected) subgraph — ranked candidate\nedges by neighborhood overlap. Read-only; one `with_engine_read` lock.\nRequires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_link_prediction",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkPredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "ranked predicted links",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkPredictionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/max_flow": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Maximum flow and minimum s-t cut over the scoped subgraph (edge weights =\ncapacities). Read-only; one `with_engine_read` lock. Requires the `graph`\nbuild feature; otherwise 501.",
+        "operationId": "algo_max_flow",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "max flow value + min cut",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaxFlowResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/pagerank": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "PageRank over the scoped subgraph (edge weights = strength). Read-only; runs\nunder one `with_engine_read` lock. Requires the `graph` build feature;\notherwise 501.",
+        "operationId": "algo_pagerank",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageRankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "PageRank scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / did not converge"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/personalized_pagerank": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Personalized PageRank (random walk with restart) over the scoped subgraph,\nseeded by node ids. Read-only; one `with_engine_read` lock. Requires the\n`graph` build feature; otherwise 501.",
+        "operationId": "algo_personalized_pagerank",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonalizedPageRankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "relevance scores",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScoresResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error / did not converge"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/scc": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Strongly-connected components of the scoped directed subgraph. Read-only;\nruns under one `with_engine_read` lock. Requires the `graph` build feature;\notherwise 501.",
+        "operationId": "algo_scc",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "strongly-connected components",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/shortest_path": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "One shortest path between two nodes of the scoped subgraph. Read-only; one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_shortest_path",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceTargetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "shortest path + distance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShortestPathResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
+    "/v1/graphs/{id}/algo/toposort": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Topological order of the scoped directed subgraph (or a not-acyclic flag).\nRead-only; one `with_engine_read` lock. Requires the `graph` build feature;\notherwise 501.",
+        "operationId": "algo_toposort",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScopedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "topological order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToposortResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/batch": {
       "post": {
         "tags": [
@@ -2223,6 +3033,78 @@
         }
       }
     },
+    "/v1/util/pairwise_cosine": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_pairwise_cosine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VectorsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "N×N cosine-similarity matrix",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatrixResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
+    "/v1/util/pairwise_distance": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "operationId": "util_pairwise_distance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairwiseDistanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "N×N distance matrix under the chosen metric",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatrixResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/pearson_correlation": {
       "post": {
         "tags": [
@@ -2646,6 +3528,40 @@
           }
         }
       },
+      "AlgoDirection": {
+        "type": "string",
+        "description": "Whether edges are treated as one-way or symmetric.",
+        "enum": [
+          "directed",
+          "undirected"
+        ]
+      },
+      "AlgoScope": {
+        "type": "object",
+        "description": "Subgraph selection shared by every algorithm. Omitted fields mean \"all\":\nno `node_types` => every node type in the schema; no `edge_types` => every\nedge type.",
+        "properties": {
+          "edge_types": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Edge types to include. Omit for all types."
+          },
+          "node_types": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Node types to include. Omit for all types."
+          }
+        }
+      },
       "BatchOp": {
         "oneOf": [
           {
@@ -2892,6 +3808,42 @@
           }
         }
       },
+      "BetweennessRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/betweenness`. Edge weights are path\n**costs** and must be strictly positive; omit `weight` for unit-cost\ndistances.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "normalized": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Normalize scores by the number of node pairs. Defaults to true."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
       "BinaryStringRequest": {
         "type": "object",
         "required": [
@@ -2957,6 +3909,63 @@
           }
         }
       },
+      "ClosenessRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path\n**costs** (higher = farther) and must be strictly positive; omit `weight`\nfor unit-cost (hop-count) distances. On a `directed` graph this is *outward*\ncloseness (distances from each node to the rest, following edge direction).",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
+      "ClusteringResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/clustering` (undirected). Per-node\nlocal clustering scores plus the two global summaries.",
+        "required": [
+          "scores",
+          "transitivity",
+          "average_clustering"
+        ],
+        "properties": {
+          "average_clustering": {
+            "type": "number",
+            "format": "double",
+            "description": "Mean local clustering coefficient over all nodes."
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeScore"
+            },
+            "description": "Local clustering coefficient per node, highest first."
+          },
+          "transitivity": {
+            "type": "number",
+            "format": "double",
+            "description": "Global transitivity: 3·triangles / connected-triples."
+          }
+        }
+      },
       "CollectPropertyFilter": {
         "type": "object",
         "required": [
@@ -3007,6 +4016,31 @@
           },
           "to_id": {
             "type": "string"
+          }
+        }
+      },
+      "ComponentsResponse": {
+        "type": "object",
+        "description": "One (weakly-)connected component: the node ids it contains. Also the response\nshape for strongly-connected components (`/algo/scc`).",
+        "required": [
+          "count",
+          "components"
+        ],
+        "properties": {
+          "components": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Components as lists of node ids; each list sorted, and the lists ordered\ndeterministically by their smallest id."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of components.",
+            "minimum": 0
           }
         }
       },
@@ -3072,6 +4106,117 @@
             "type": "object"
           }
         }
+      },
+      "CutEdge": {
+        "type": "object",
+        "description": "One bridge (cut edge), as the unordered pair of node ids it connects\n(`a < b`).",
+        "required": [
+          "a",
+          "b"
+        ],
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          }
+        }
+      },
+      "CutsResponse": {
+        "type": "object",
+        "description": "Articulation points and bridges of the (undirected) subgraph.",
+        "required": [
+          "articulation_points",
+          "bridges"
+        ],
+        "properties": {
+          "articulation_points": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids whose removal increases the number of connected components."
+          },
+          "bridges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CutEdge"
+            },
+            "description": "Edges whose removal increases the number of connected components."
+          }
+        }
+      },
+      "CyclesResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/cycles`. `acyclic` is true for a DAG;\notherwise `cycle` is one witness directed cycle (node ids, closed by the edge\nfrom the last back to the first).",
+        "required": [
+          "acyclic",
+          "cycle"
+        ],
+        "properties": {
+          "acyclic": {
+            "type": "boolean"
+          },
+          "cycle": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "DegreeModeWire": {
+        "type": "string",
+        "description": "Which incident edges degree centrality counts. For an undirected graph all\nthree read the same symmetric adjacency.",
+        "enum": [
+          "in",
+          "out",
+          "total"
+        ]
+      },
+      "DegreeRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/degree`.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DegreeModeWire"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec",
+                "description": "Edge-weight projection. When present, scores are weighted degree\n(strength); when absent, scores are plain incident-edge counts."
+              }
+            ]
+          }
+        }
+      },
+      "DistanceMetric": {
+        "type": "string",
+        "description": "Distance metric for `pairwise_distance`.",
+        "enum": [
+          "euclidean",
+          "squared_euclidean",
+          "manhattan",
+          "cosine"
+        ]
       },
       "EdgeResponse": {
         "type": "object",
@@ -3207,6 +4352,59 @@
         ],
         "description": "Untagged so the JSON has the shape the caller asked for: an\n`{\"edges\": [...], \"truncated\": ...}` object for `format = \"edges\"`,\nan `{\"adjacency\": {...}, \"truncated\": ...}` object for\n`format = \"adjacency\"`. Caller distinguishes by which field is\npresent (always exactly one)."
       },
+      "EigenvectorRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/eigenvector`. Edge weights are\n**strengths**; omit `weight` for an unweighted run.\n\nEigenvector centrality is computed on the **undirected** graph (it is only\nwell-defined there). `direction` therefore accepts only `undirected` (the\ndefault); `directed` is rejected with a 400 pointing to `/algo/pagerank`,\nwhich is the directed importance measure.",
+        "properties": {
+          "direction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoDirection",
+                "description": "Only `undirected` is accepted (the default). `directed` => 400."
+              }
+            ]
+          },
+          "max_iterations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Iteration budget before a non-convergence error. Defaults to 100.",
+            "minimum": 0
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "tolerance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "L1 convergence threshold. Defaults to 1e-6."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
       "EmbeddingResponse": {
         "type": "object",
         "required": [
@@ -3226,6 +4424,22 @@
             "type": "string"
           },
           "node_type": {
+            "type": "string"
+          }
+        }
+      },
+      "FlowEdge": {
+        "type": "object",
+        "description": "One min-cut edge crossing from the source side to the sink side. For an\nundirected graph `from` is always the source-side endpoint (there is no\nstored edge direction).",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
             "type": "string"
           }
         }
@@ -3363,6 +4577,64 @@
           }
         }
       },
+      "LinkPredictionMethodWire": {
+        "type": "string",
+        "description": "Which neighborhood-overlap score link prediction uses.",
+        "enum": [
+          "common_neighbors",
+          "jaccard",
+          "adamic_adar"
+        ]
+      },
+      "LinkPredictionRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/link_prediction`. Treats the subgraph\nas undirected. With `source`, predicts links from that node; without it,\nacross all non-adjacent pairs. Results are ranked by score and capped.",
+        "properties": {
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Max ranked results. Defaults to 100, capped at the standard result limit.",
+            "minimum": 0
+          },
+          "method": {
+            "$ref": "#/components/schemas/LinkPredictionMethodWire"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Predict links from this node only; omit for all non-adjacent pairs."
+          }
+        }
+      },
+      "LinkPredictionResponse": {
+        "type": "object",
+        "description": "Predicted links, highest score first.",
+        "required": [
+          "links"
+        ],
+        "properties": {
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PredictedLink"
+            }
+          }
+        }
+      },
       "MatchKind": {
         "type": "string",
         "enum": [
@@ -3370,6 +4642,52 @@
           "vector_merge",
           "created_new"
         ]
+      },
+      "MatrixResponse": {
+        "type": "object",
+        "description": "An N×N result matrix (row-major), e.g. a pairwise similarity/distance matrix.",
+        "required": [
+          "matrix"
+        ],
+        "properties": {
+          "matrix": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          }
+        }
+      },
+      "MaxFlowResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/max_flow`. The max flow value equals\nthe min-cut capacity; `source_side` is the node partition on the source side\nof that cut, and `cut_edges` the crossing edges.",
+        "required": [
+          "max_flow",
+          "source_side",
+          "cut_edges"
+        ],
+        "properties": {
+          "cut_edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowEdge"
+            }
+          },
+          "max_flow": {
+            "type": "number",
+            "format": "double"
+          },
+          "source_side": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "MergeEdgeBody": {
         "type": "object",
@@ -3450,6 +4768,23 @@
           },
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "NodeScore": {
+        "type": "object",
+        "description": "A single node's score.",
+        "required": [
+          "node",
+          "score"
+        ],
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -3560,6 +4895,84 @@
           "lte"
         ]
       },
+      "PageRankRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/pagerank`. Edge weights are\n**strengths** (a node splits its rank among out-edges in proportion to\nweight); omit `weight` for an unweighted (equal-split) run.",
+        "properties": {
+          "damping": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Damping factor in `[0, 1]`. Defaults to 0.85."
+          },
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "max_iterations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Iteration budget before a non-convergence error. Defaults to 100.",
+            "minimum": 0
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "tolerance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "L1 convergence threshold. Defaults to 1e-6."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
+      "PairwiseDistanceRequest": {
+        "type": "object",
+        "description": "A set of equal-length vectors plus a metric (for `pairwise_distance`).",
+        "required": [
+          "vectors"
+        ],
+        "properties": {
+          "metric": {
+            "$ref": "#/components/schemas/DistanceMetric"
+          },
+          "precision": {
+            "$ref": "#/components/schemas/Precision"
+          },
+          "vectors": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          }
+        }
+      },
       "PercentileRequest": {
         "type": "object",
         "description": "A sample plus the percentile `p` (in `0..=100`).",
@@ -3578,6 +4991,66 @@
               "type": "number",
               "format": "double"
             }
+          }
+        }
+      },
+      "PersonalizedPageRankRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/personalized_pagerank` (random walk\nwith restart). Like PageRank, but teleport mass returns to `seeds`, so scores\nmeasure relevance to that seed set. Edge weights are **strengths**.",
+        "properties": {
+          "damping": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Damping factor in `[0, 1]`. Defaults to 0.85."
+          },
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "max_iterations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Iteration budget before a non-convergence error. Defaults to 100.",
+            "minimum": 0
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "seeds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Seed node ids the walk restarts to. Required (non-empty)."
+          },
+          "tolerance": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "L1 convergence threshold. Defaults to 1e-6."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
           }
         }
       },
@@ -3637,6 +5110,27 @@
           "f32",
           "f64"
         ]
+      },
+      "PredictedLink": {
+        "type": "object",
+        "description": "One predicted (currently-absent) link and its score. `a`/`b` are the endpoint\nnode ids (for a single-source request, `a` is the source).",
+        "required": [
+          "a",
+          "b",
+          "score"
+        ],
+        "properties": {
+          "a": {
+            "type": "string"
+          },
+          "b": {
+            "type": "string"
+          },
+          "score": {
+            "type": "number",
+            "format": "double"
+          }
+        }
       },
       "ReplaceNodeBody": {
         "type": "object",
@@ -3823,6 +5317,37 @@
           }
         }
       },
+      "ScopedRequest": {
+        "type": "object",
+        "description": "A request that carries only a subgraph `scope` — shared by the purely\nstructural algorithms (`/algo/components`, `/algo/cuts`, `/algo/scc`), which\ntake no weights or direction.",
+        "properties": {
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          }
+        }
+      },
+      "ScoresResponse": {
+        "type": "object",
+        "description": "Per-node centrality scores, highest first (ties broken by node id). Shared by\nevery score-producing algorithm (degree, PageRank, eigenvector, closeness,\nbetweenness, personalized PageRank).",
+        "required": [
+          "scores"
+        ],
+        "properties": {
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeScore"
+            }
+          }
+        }
+      },
       "SearchHybridBody": {
         "type": "object",
         "properties": {
@@ -3986,6 +5511,32 @@
           }
         }
       },
+      "ShortestPathResponse": {
+        "type": "object",
+        "description": "A shortest path between two nodes. `found` is false (with an empty `path`)\nwhen the target is unreachable from the source.",
+        "required": [
+          "found",
+          "path",
+          "distance"
+        ],
+        "properties": {
+          "distance": {
+            "type": "number",
+            "format": "double",
+            "description": "Total path cost (hop count when unweighted); 0 when not found."
+          },
+          "found": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Node ids in order, source first and target last; empty when not found."
+          }
+        }
+      },
       "SimilarBody": {
         "type": "object",
         "required": [
@@ -4061,6 +5612,49 @@
           }
         }
       },
+      "SourceTargetRequest": {
+        "type": "object",
+        "description": "A request carrying a `source`/`target` node pair plus the usual scope, weight,\nand direction — shared by `/algo/shortest_path` (weight = path cost) and\n`/algo/max_flow` (weight = capacity). The two `source`/`target` ids are\nrequired; the per-endpoint weight semantics are documented on each route.",
+        "properties": {
+          "direction": {
+            "$ref": "#/components/schemas/AlgoDirection"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Start node id (required)."
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "End node id (required)."
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
       "SourceTypeFilter": {
         "oneOf": [
           {
@@ -4106,6 +5700,25 @@
           },
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "ToposortResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/toposort` (directed). `acyclic` is\ntrue for a DAG, with `order` a topological ordering; otherwise `order` is\nempty (the graph has a cycle).",
+        "required": [
+          "acyclic",
+          "order"
+        ],
+        "properties": {
+          "acyclic": {
+            "type": "boolean"
+          },
+          "order": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -4281,7 +5894,7 @@
       },
       "VectorsRequest": {
         "type": "object",
-        "description": "A set of equal-length vectors (for `centroid`).",
+        "description": "A set of equal-length vectors (for `centroid` and `pairwise_cosine`).",
         "required": [
           "vectors"
         ],
@@ -4298,6 +5911,33 @@
                 "format": "double"
               }
             }
+          }
+        }
+      },
+      "WeightSpec": {
+        "type": "object",
+        "description": "Edge-weight projection. With neither field set, edges are unweighted (every\nweight is `1.0`). `property` takes precedence over `edge_type_weights` if\nboth are given.",
+        "properties": {
+          "edge_type_weights": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Per-edge-type constant weights. An in-scope edge whose type is absent\nfrom this map is a 400.",
+            "additionalProperties": {
+              "type": "number",
+              "format": "double"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "property": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Read this numeric edge property as the weight. Missing or non-numeric on\nany in-scope edge is a 400 (fail loud)."
           }
         }
       },
@@ -4400,6 +6040,10 @@
     {
       "name": "primitives",
       "description": "Composite graph primitives (batch, resolve, edges:*, nodes:*, traverse, welford)"
+    },
+    {
+      "name": "algo",
+      "description": "Graph-theory algorithms (components, centrality, ...). Requires the `graph` build feature; otherwise 501."
     },
     {
       "name": "util",

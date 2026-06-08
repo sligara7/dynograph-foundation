@@ -9,6 +9,7 @@ publish.workspace = true
 dynograph-core = { path = "../dynograph-core" }
 dynograph-storage = { path = "../dynograph-storage" }
 dynograph-vector = { path = "../dynograph-vector" }
+dynograph-graph = { path = "../dynograph-graph", optional = true }
 dynograph-resolution = { path = "../dynograph-resolution" }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -28,6 +29,10 @@ utoipa = { workspace = true }
 # Turns on `dynograph-storage/fulltext` (which compiles Tantivy); without it
 # the routes still exist but return 501 Not Implemented.
 fulltext = ["dynograph-storage/fulltext"]
+# Enable the graph-theory algorithm endpoints (`algo/*`). Pulls in the
+# `dynograph-graph` crate; without it the routes still exist but return 501
+# Not Implemented (keeping the OpenAPI contract feature-independent).
+graph = ["dep:dynograph-graph"]
 
 [[bin]]
 name = "dynograph"
