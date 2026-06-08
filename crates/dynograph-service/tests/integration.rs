@@ -5881,6 +5881,19 @@ async fn algo_degree_missing_weight_property_fails_loud() {
 
 #[cfg(feature = "graph")]
 #[tokio::test]
+async fn algo_degree_empty_weight_spec_fails_loud() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+
+    // weight: {} specifies neither projection — must 400, not silently score
+    // every edge 1.0 and mislabel counts as strengths.
+    let (status, resp) = post_algo(&app, "degree", json!({"weight": {}})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert!(err_msg(&resp).contains("weight requires"), "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
 async fn algo_unknown_node_type_in_scope_returns_400() {
     let app = build_app_with_knowledge_graph().await;
     seed_two_story_graph(&app).await;

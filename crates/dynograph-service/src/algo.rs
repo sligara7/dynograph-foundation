@@ -29,10 +29,13 @@
 //! 3. Project each kept edge to a finite `f64` weight, **failing loud** (400) on
 //!    a missing/non-numeric weight property rather than defaulting silently.
 //!
-//! Node identity in the in-memory graph is the bare `node_id`. If the same id
-//! appears under two different node types within scope, the build fails loud
-//! (400) rather than conflate two distinct nodes — narrow `scope.node_types` to
-//! disambiguate.
+//! Node identity in the in-memory graph is the bare `node_id`, and edges (which
+//! store only ids, not endpoint types) are matched to nodes by that bare id. If
+//! the same id appears under two different node types **both in scope**, the
+//! build fails loud (400) rather than conflate two distinct nodes — narrow
+//! `scope.node_types` to disambiguate. The guard only sees in-scope types, so an
+//! id reused across an in-scope and an out-of-scope type can't be detected;
+//! callers that rely on id uniqueness should keep ids globally unique per graph.
 
 use std::collections::HashMap;
 
@@ -140,10 +143,42 @@ pub(crate) struct DegreeResponse {
     pub scores: Vec<NodeScore>,
 }
 
-// ---- Algorithm implementation (only when the `graph` feature is on) ----
+// ---- Algorithm entry points ----
+//
+// Both `run_*` functions share one signature `(&StorageEngine, &str, Req) ->
+// Result<Resp, RegistryError>` regardless of the feature, so the app-layer
+// handlers are uniform (no `cfg` in app.rs). With the `graph` feature they run
+// the algorithm; without it they return 501. New algo endpoints (PRs B-D) add a
+// `run_*` here and a thin handler — no per-endpoint feature plumbing.
 
 #[cfg(feature = "graph")]
 pub(crate) use imp::{run_components, run_degree};
+
+#[cfg(not(feature = "graph"))]
+fn not_enabled() -> crate::registry::RegistryError {
+    crate::registry::RegistryError::NotImplemented(
+        "graph algorithms are not enabled in this build (compile with --features graph)"
+            .to_string(),
+    )
+}
+
+#[cfg(not(feature = "graph"))]
+pub(crate) fn run_components(
+    _engine: &dynograph_storage::StorageEngine,
+    _graph_id: &str,
+    _req: ComponentsRequest,
+) -> Result<ComponentsResponse, crate::registry::RegistryError> {
+    Err(not_enabled())
+}
+
+#[cfg(not(feature = "graph"))]
+pub(crate) fn run_degree(
+    _engine: &dynograph_storage::StorageEngine,
+    _graph_id: &str,
+    _req: DegreeRequest,
+) -> Result<DegreeResponse, crate::registry::RegistryError> {
+    Err(not_enabled())
+}
 
 #[cfg(feature = "graph")]
 mod imp {
@@ -160,6 +195,10 @@ mod imp {
     /// a scope that pulls far more is almost certainly a mis-scoped request, so
     /// fail loud rather than risk an OOM building the in-memory graph.
     const MAX_ALGO_NODES: usize = 100_000;
+    /// Companion cap on edge count: a subgraph can stay under the node cap yet be
+    /// dense (a hub/near-complete graph), so the node cap alone doesn't bound the
+    /// in-memory adjacency. Cap edges too, for the same fail-loud-not-OOM reason.
+    const MAX_ALGO_EDGES: usize = 2_000_000;
 
     impl From<DegreeModeWire> for DegreeMode {
         fn from(w: DegreeModeWire) -> Self {
@@ -239,6 +278,18 @@ mod imp {
         weight: Option<&WeightSpec>,
         directed: bool,
     ) -> Result<Graph, RegistryError> {
+        // A weight projection that specifies neither source is a no-op that would
+        // silently score every edge 1.0 — i.e. return counts when the caller
+        // asked for strengths. Reject it rather than mislabel the result.
+        if let Some(w) = weight
+            && w.property.is_none()
+            && w.edge_type_weights.is_none()
+        {
+            return Err(RegistryError::BadRequest(
+                "weight requires either 'property' or 'edge_type_weights'".to_string(),
+            ));
+        }
+
         let schema = engine.schema();
 
         // Resolve in-scope node types (validate any explicitly requested).
@@ -305,6 +356,7 @@ mod imp {
         }
 
         // Add in-scope edges (both endpoints in scope), projecting weights.
+        let mut edge_count = 0usize;
         for from_id in &ids {
             for edge in engine.scan_outgoing_edges(graph_id, from_id.as_str(), None)? {
                 if !edge_types.contains(&edge.edge_type) || !id_type.contains_key(&edge.to_id) {
@@ -314,6 +366,12 @@ mod imp {
                 builder
                     .add_edge(from_id.as_str(), &edge.to_id, w)
                     .map_err(|e| RegistryError::BadRequest(e.to_string()))?;
+                edge_count += 1;
+                if edge_count > MAX_ALGO_EDGES {
+                    return Err(RegistryError::BadRequest(format!(
+                        "algorithm scope exceeds the {MAX_ALGO_EDGES}-edge limit; narrow scope"
+                    )));
+                }
             }
         }
 

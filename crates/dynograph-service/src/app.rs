@@ -1662,31 +1662,10 @@ async fn algo_components(
     Json(req): Json<ComponentsRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    algo_components_impl(entry, id, req).await
-}
-
-#[cfg(feature = "graph")]
-async fn algo_components_impl(
-    entry: Arc<GraphEntry>,
-    id: String,
-    req: ComponentsRequest,
-) -> Result<Response, RegistryError> {
     let response = entry
         .with_engine_read(move |engine| crate::algo::run_components(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
-}
-
-#[cfg(not(feature = "graph"))]
-async fn algo_components_impl(
-    _entry: Arc<GraphEntry>,
-    _id: String,
-    _req: ComponentsRequest,
-) -> Result<Response, RegistryError> {
-    Err(RegistryError::NotImplemented(
-        "graph algorithms are not enabled in this build (compile with --features graph)"
-            .to_string(),
-    ))
 }
 
 /// Degree centrality over the scoped subgraph. Read-only; runs under one
@@ -1710,31 +1689,10 @@ async fn algo_degree(
     Json(req): Json<DegreeRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
-    algo_degree_impl(entry, id, req).await
-}
-
-#[cfg(feature = "graph")]
-async fn algo_degree_impl(
-    entry: Arc<GraphEntry>,
-    id: String,
-    req: DegreeRequest,
-) -> Result<Response, RegistryError> {
     let response = entry
         .with_engine_read(move |engine| crate::algo::run_degree(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
-}
-
-#[cfg(not(feature = "graph"))]
-async fn algo_degree_impl(
-    _entry: Arc<GraphEntry>,
-    _id: String,
-    _req: DegreeRequest,
-) -> Result<Response, RegistryError> {
-    Err(RegistryError::NotImplemented(
-        "graph algorithms are not enabled in this build (compile with --features graph)"
-            .to_string(),
-    ))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

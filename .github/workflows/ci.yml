@@ -58,7 +58,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-      - run: cargo build --release --bin dynograph
+      # Build with the same features as the published image (Dockerfile uses
+      # `--features graph`) so the binary we smoke-test matches what ships.
+      - run: cargo build --release --bin dynograph --features graph
       - run: ./scripts/smoke-test.sh
 
   storage-rocksdb:
