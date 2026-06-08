@@ -437,7 +437,7 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 
 [[package]]
 name = "dynograph-client"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "axum",
  "dynograph-core",
@@ -458,7 +458,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-core"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -469,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-resolution"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "dynograph-core",
  "dynograph-vector",
@@ -477,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-service"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "axum",
  "dynograph-core",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-storage"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "dynograph-core",
  "dynograph-text",
@@ -519,7 +519,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-text"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "tantivy",
  "tempfile",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "dynograph-vector"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "rand 0.10.1",
 ]

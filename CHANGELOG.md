@@ -4,6 +4,39 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.6.3 — 2026-06-08
+
+A domain-neutral hybrid-search primitive that fuses the retrieval legs the
+foundation already has, so consumers' NL→graph / GraphRAG layers stop
+reimplementing rank fusion.
+
+### Added (dynograph-service)
+
+- **`POST /v1/graphs/{id}/search:hybrid`** — fans out to the vector (HNSW) and
+  keyword (BM25) legs and **Reciprocal-Rank-Fuses** their ranked outputs into a
+  single ranked node list (`score = Σ_leg weight_leg / (k_rrf + rank_leg)`,
+  `k_rrf = 60`). Rank-based on purpose, so it's immune to un-normalized
+  embedding magnitudes — no score normalization needed. Each hit carries a
+  per-leg `{rank, score}` breakdown.
+  - An optional structured `where` clause acts as an **intersect prefilter**
+    (same grammar as `nodes:scan`), constraining every ranked leg; it is not a
+    fusion leg of its own. At least one ranked leg (`query` and/or
+    `query_vector`) is required — a pure `where` filter is what `nodes:scan` is
+    for.
+  - The vector leg requires `node_type` (HNSW indexes are per-type; a cross-type
+    fan-out would silently skip mismatched-dim indexes, so it fails loud).
+  - The keyword leg is behind the opt-in `fulltext` cargo feature; requesting it
+    in a build without the feature returns `501`, exactly like `search:text`.
+    Vector-only requests succeed in any build.
+  - Optional per-leg `weights`, `k_per_leg` (candidates per leg pre-fusion), and
+    `limit` (final cap). Foundation never embeds — the caller supplies
+    `query_vector`.
+
+### Changed (packaging)
+
+- Bump workspace version 0.6.2 → 0.6.3; promote docs/version strings and the
+  generated `docs/openapi.json` (`info.version`) to match.
+
 ## v0.6.2 — 2026-06-07
 
 Turn on full-text/BM25 search in the shipped artifact and cover it in CI. The
