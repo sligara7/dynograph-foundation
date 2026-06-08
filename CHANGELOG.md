@@ -4,7 +4,11 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## Unreleased
+## v0.6.1 — 2026-06-07
+
+Domain-neutral vector/stats math: more distances, element-wise algebra,
+descriptive statistics, and filtered HNSW search — exposed over 17 new
+`POST /v1/util/*` endpoints and wrapped in `dynograph-client`.
 
 ### Added (dynograph-vector)
 
