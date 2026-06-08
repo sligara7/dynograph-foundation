@@ -5930,6 +5930,26 @@ async fn algo_where_on_unindexed_property_fails_loud() {
 
 #[cfg(feature = "graph")]
 #[tokio::test]
+async fn algo_empty_node_types_scope_fails_loud() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    // An explicit empty node_types would scope to zero nodes (a silent empty
+    // result) and skip `where` validation; reject it instead. A bogus `where`
+    // rides along to confirm validation isn't being silently skipped.
+    let (status, resp) = post_algo(
+        &app,
+        "components",
+        json!({"scope": {
+            "node_types": [],
+            "where": [{"property": "not_a_real_prop", "op": "eq", "value": 1}]
+        }}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
 async fn algo_degree_ranks_hub_node_first() {
     let app = build_app_with_knowledge_graph().await;
     seed_two_story_graph(&app).await;

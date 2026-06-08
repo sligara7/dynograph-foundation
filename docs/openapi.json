@@ -3558,7 +3558,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Node types to include. Omit for all types."
+            "description": "Node types to include. Omit for all types; an explicit empty list is a\n400. Note this interacts with `where`: omitting it means a `where`\nclause's property must be indexed on *every* node type in the schema, so\nto predicate on a property only some types carry, name those types here."
           },
           "where": {
             "type": "array",

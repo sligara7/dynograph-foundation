@@ -52,7 +52,10 @@ use crate::nodes_scan::WhereClause;
 #[derive(Debug, Deserialize, ToSchema)]
 #[cfg_attr(not(feature = "graph"), allow(dead_code))]
 pub(crate) struct AlgoScope {
-    /// Node types to include. Omit for all types.
+    /// Node types to include. Omit for all types; an explicit empty list is a
+    /// 400. Note this interacts with `where`: omitting it means a `where`
+    /// clause's property must be indexed on *every* node type in the schema, so
+    /// to predicate on a property only some types carry, name those types here.
     #[serde(default)]
     pub node_types: Option<Vec<String>>,
     /// Edge types to include. Omit for all types.
@@ -1054,9 +1057,20 @@ mod imp {
 
         let schema = engine.schema();
 
-        // Resolve in-scope node types (validate any explicitly requested).
+        // Resolve in-scope node types (validate any explicitly requested). An
+        // explicitly empty list is rejected rather than silently treated as the
+        // empty graph: it would scope every algorithm to zero nodes (an empty
+        // result that reads like a real answer) and would also skip the `where`
+        // validation below, which runs per in-scope type. Omit the field for
+        // "all types".
         let node_types: Vec<String> = match scope.and_then(|s| s.node_types.as_ref()) {
             Some(types) => {
+                if types.is_empty() {
+                    return Err(RegistryError::BadRequest(
+                        "scope.node_types must be non-empty (omit it to scope to all node types)"
+                            .to_string(),
+                    ));
+                }
                 for t in types {
                     if !schema.node_types.contains_key(t) {
                         return Err(RegistryError::BadRequest(format!(
