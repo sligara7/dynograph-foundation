@@ -184,6 +184,28 @@ pub(crate) struct EigenvectorRequest {
     pub max_iterations: Option<usize>,
 }
 
+/// Request for `POST /v1/graphs/{id}/algo/communities`. Edge weights are
+/// **strengths** (tighter tie); omit `weight` for an unweighted run.
+///
+/// Community detection (Louvain) is defined on the **undirected** graph, so
+/// `direction` accepts only `undirected` (the default); `directed` is rejected
+/// with a 400, the same posture as `/algo/eigenvector`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[cfg_attr(not(feature = "graph"), allow(dead_code))]
+pub(crate) struct CommunitiesRequest {
+    #[serde(default)]
+    pub scope: Option<AlgoScope>,
+    #[serde(default)]
+    pub weight: Option<WeightSpec>,
+    /// Only `undirected` is accepted (the default). `directed` => 400.
+    #[serde(default)]
+    pub direction: Option<AlgoDirection>,
+    /// Resolution γ (strictly positive, finite). Higher => more, smaller
+    /// communities; lower => fewer, larger. Defaults to 1.0 (classic modularity).
+    #[serde(default)]
+    pub resolution: Option<f64>,
+}
+
 /// Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path
 /// **costs** (higher = farther) and must be strictly positive; omit `weight`
 /// for unit-cost (hop-count) distances. On a `directed` graph this is *outward*
@@ -242,6 +264,19 @@ pub(crate) struct ComponentsResponse {
     /// Components as lists of node ids; each list sorted, and the lists ordered
     /// deterministically by their smallest id.
     pub components: Vec<Vec<String>>,
+}
+
+/// Response for `POST /v1/graphs/{id}/algo/communities`. The Louvain partition
+/// plus its modularity under the requested resolution.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct CommunitiesResponse {
+    /// Number of communities.
+    pub count: usize,
+    /// Communities as lists of node ids; each list sorted, and the lists
+    /// ordered deterministically by their smallest id (as `/algo/components`).
+    pub communities: Vec<Vec<String>>,
+    /// Modularity of the partition (0.0 for an edgeless or empty subgraph).
+    pub modularity: f64,
 }
 
 /// A single node's score.
@@ -420,8 +455,8 @@ pub(crate) struct MaxFlowResponse {
 
 #[cfg(feature = "graph")]
 pub(crate) use imp::{
-    run_betweenness, run_closeness, run_clustering, run_components, run_cuts, run_cycles,
-    run_degree, run_eigenvector, run_link_prediction, run_max_flow, run_pagerank,
+    run_betweenness, run_closeness, run_clustering, run_communities, run_components, run_cuts,
+    run_cycles, run_degree, run_eigenvector, run_link_prediction, run_max_flow, run_pagerank,
     run_personalized_pagerank, run_scc, run_shortest_path, run_toposort,
 };
 
@@ -483,6 +518,8 @@ not_enabled_stub!(
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_clustering, ScopedRequest, ClusteringResponse);
 #[cfg(not(feature = "graph"))]
+not_enabled_stub!(run_communities, CommunitiesRequest, CommunitiesResponse);
+#[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_toposort, ScopedRequest, ToposortResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_max_flow, SourceTargetRequest, MaxFlowResponse);
@@ -492,10 +529,10 @@ mod imp {
     use super::*;
 
     use dynograph_graph::{
-        Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError,
+        Communities, Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError,
         LinkPredictionMethod, PageRankConfig, betweenness_centrality, closeness_centrality,
         clustering, connected_components, cut_structure, degree_centrality, eigenvector_centrality,
-        find_cycle, link_prediction_all, link_prediction_from, max_flow_min_cut, pagerank,
+        find_cycle, link_prediction_all, link_prediction_from, louvain, max_flow_min_cut, pagerank,
         personalized_pagerank, shortest_path, strongly_connected_components, topological_sort,
     };
     use dynograph_storage::{StorageEngine, StoredEdge};
@@ -737,6 +774,51 @@ mod imp {
         })
     }
 
+    /// `algo/communities` — Louvain community detection over the scoped
+    /// undirected graph (weights = strengths).
+    pub(crate) fn run_communities(
+        engine: &StorageEngine,
+        graph_id: &str,
+        req: CommunitiesRequest,
+    ) -> Result<CommunitiesResponse, RegistryError> {
+        // Modularity is defined on an undirected graph; reject an explicit
+        // `directed` and always build undirected (mirrors `/algo/eigenvector`).
+        if req.direction == Some(AlgoDirection::Directed) {
+            return Err(RegistryError::BadRequest(
+                "community detection is only defined for undirected graphs; pass \
+                 direction=undirected (or omit it)"
+                    .to_string(),
+            ));
+        }
+        let resolution = match req.resolution {
+            None => 1.0,
+            Some(r) => validate_positive("resolution", r)?,
+        };
+        let graph = build_graph(
+            engine,
+            graph_id,
+            req.scope.as_ref(),
+            req.weight.as_ref(),
+            false,
+        )?;
+        let result = louvain(&graph, resolution);
+        Ok(communities_response(&graph, result))
+    }
+
+    /// Map a Louvain partition to the wire response. Invert the per-node labels
+    /// into index groups, then share the sort/id-mapping with components.
+    fn communities_response(graph: &Graph, c: Communities) -> CommunitiesResponse {
+        let mut groups: Vec<Vec<usize>> = vec![Vec::new(); c.num_communities];
+        for (idx, &label) in c.labels.iter().enumerate() {
+            groups[label].push(idx);
+        }
+        CommunitiesResponse {
+            count: c.num_communities,
+            communities: id_groups_sorted(graph, groups),
+            modularity: c.modularity,
+        }
+    }
+
     /// `algo/toposort` — topological order of the directed subgraph, or a
     /// not-acyclic flag if it has a cycle.
     pub(crate) fn run_toposort(
@@ -813,12 +895,20 @@ mod imp {
         })
     }
 
-    /// Map a [`Components`] partition to the wire response: each component a
-    /// sorted list of node ids, the lists ordered by their smallest id (so the
-    /// output is deterministic regardless of internal label assignment).
+    /// Map a [`Components`] partition to the wire response.
     fn components_response(graph: &Graph, comps: Components) -> ComponentsResponse {
-        let mut components: Vec<Vec<String>> = comps
-            .groups()
+        ComponentsResponse {
+            count: comps.count,
+            components: id_groups_sorted(graph, comps.groups()),
+        }
+    }
+
+    /// Map index-keyed groups to wire form: each group a sorted list of node
+    /// ids, the lists ordered by their smallest id — deterministic regardless
+    /// of internal label assignment. Shared by `/algo/components`, `/algo/scc`,
+    /// and `/algo/communities`.
+    fn id_groups_sorted(graph: &Graph, groups: Vec<Vec<usize>>) -> Vec<Vec<String>> {
+        let mut out: Vec<Vec<String>> = groups
             .into_iter()
             .map(|group| {
                 let mut ids: Vec<String> = group
@@ -829,11 +919,8 @@ mod imp {
                 ids
             })
             .collect();
-        components.sort();
-        ComponentsResponse {
-            count: comps.count,
-            components,
-        }
+        out.sort();
+        out
     }
 
     /// `algo/degree` — degree centrality over the scoped graph.
@@ -1010,13 +1097,20 @@ mod imp {
         RegistryError::BadRequest(e.to_string())
     }
 
-    fn validate_tolerance(t: f64) -> Result<f64, RegistryError> {
-        if !t.is_finite() || t <= 0.0 {
+    /// Validate a strictly-positive finite parameter, naming it in the 400.
+    /// Shared by `tolerance` (power-iteration configs) and `resolution`
+    /// (communities).
+    fn validate_positive(name: &str, x: f64) -> Result<f64, RegistryError> {
+        if !x.is_finite() || x <= 0.0 {
             return Err(RegistryError::BadRequest(format!(
-                "tolerance must be a positive number, got {t}"
+                "{name} must be a positive number, got {x}"
             )));
         }
-        Ok(t)
+        Ok(x)
+    }
+
+    fn validate_tolerance(t: f64) -> Result<f64, RegistryError> {
+        validate_positive("tolerance", t)
     }
 
     /// Upper bound on `max_iterations`. The power-iteration loops are CPU-bound

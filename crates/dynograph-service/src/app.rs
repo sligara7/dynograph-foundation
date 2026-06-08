@@ -23,11 +23,11 @@ use dynograph_vector::HnswIndex;
 use crate::{
     algo::{
         AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ClusteringResponse,
-        ComponentsResponse, CutEdge, CutsResponse, CyclesResponse, DegreeModeWire, DegreeRequest,
-        EigenvectorRequest, FlowEdge, LinkPredictionMethodWire, LinkPredictionRequest,
-        LinkPredictionResponse, MaxFlowResponse, NodeScore, PageRankRequest,
-        PersonalizedPageRankRequest, PredictedLink, ScopedRequest, ScoresResponse,
-        ShortestPathResponse, SourceTargetRequest, ToposortResponse, WeightSpec,
+        CommunitiesRequest, CommunitiesResponse, ComponentsResponse, CutEdge, CutsResponse,
+        CyclesResponse, DegreeModeWire, DegreeRequest, EigenvectorRequest, FlowEdge,
+        LinkPredictionMethodWire, LinkPredictionRequest, LinkPredictionResponse, MaxFlowResponse,
+        NodeScore, PageRankRequest, PersonalizedPageRankRequest, PredictedLink, ScopedRequest,
+        ScoresResponse, ShortestPathResponse, SourceTargetRequest, ToposortResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
@@ -137,6 +137,7 @@ use crate::{
         algo_shortest_path,
         algo_link_prediction,
         algo_clustering,
+        algo_communities,
         algo_toposort,
         algo_max_flow,
         // embeddings + search
@@ -282,6 +283,8 @@ use crate::{
         PredictedLink,
         LinkPredictionResponse,
         ClusteringResponse,
+        CommunitiesRequest,
+        CommunitiesResponse,
         ToposortResponse,
         MaxFlowResponse,
         FlowEdge,
@@ -477,6 +480,7 @@ pub fn app(state: AppState) -> Router {
             post(algo_link_prediction),
         )
         .route("/v1/graphs/{id}/algo/clustering", post(algo_clustering))
+        .route("/v1/graphs/{id}/algo/communities", post(algo_communities))
         .route("/v1/graphs/{id}/algo/toposort", post(algo_toposort))
         .route("/v1/graphs/{id}/algo/max_flow", post(algo_max_flow))
         .route(
@@ -2076,6 +2080,34 @@ async fn algo_clustering(
     let entry = graph_entry(&state, &id)?;
     let response = entry
         .with_engine_read(move |engine| crate::algo::run_clustering(engine, &id, req))
+        .await?;
+    Ok(Json(response).into_response())
+}
+
+/// Louvain community detection over the scoped undirected subgraph: returns the
+/// partition (communities as id lists) plus its modularity. Read-only; one
+/// `with_engine_read` lock. Requires the `graph` build feature; otherwise 501.
+#[utoipa::path(
+    post,
+    path = "/v1/graphs/{id}/algo/communities",
+    params(("id" = String, Path, description = "graph id")),
+    request_body = CommunitiesRequest,
+    responses(
+        (status = 200, description = "communities + modularity", body = CommunitiesResponse),
+        (status = 400, description = "validation error"),
+        (status = 404, description = "graph not found"),
+        (status = 501, description = "graph feature not enabled in this build"),
+    ),
+    tag = "algo",
+)]
+async fn algo_communities(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<CommunitiesRequest>,
+) -> Result<Response, RegistryError> {
+    let entry = graph_entry(&state, &id)?;
+    let response = entry
+        .with_engine_read(move |engine| crate::algo::run_communities(engine, &id, req))
         .await?;
     Ok(Json(response).into_response())
 }
