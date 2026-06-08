@@ -22,9 +22,9 @@ use dynograph_vector::HnswIndex;
 
 use crate::{
     algo::{
-        AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ComponentsRequest,
-        ComponentsResponse, CutEdge, CutsRequest, CutsResponse, DegreeModeWire, DegreeRequest,
-        EigenvectorRequest, NodeScore, PageRankRequest, SccRequest, ScoresResponse, WeightSpec,
+        AlgoDirection, AlgoScope, BetweennessRequest, ClosenessRequest, ComponentsResponse,
+        CutEdge, CutsResponse, DegreeModeWire, DegreeRequest, EigenvectorRequest, NodeScore,
+        PageRankRequest, ScopedRequest, ScoresResponse, WeightSpec,
     },
     auth::{AuthProvider, NoAuth},
     batch::{BatchOp, BatchOpError, BatchRequest, BatchResponse, MAX_BATCH_OPS, run_ops},
@@ -237,14 +237,12 @@ use crate::{
         WeightSpec,
         AlgoDirection,
         DegreeModeWire,
-        ComponentsRequest,
+        ScopedRequest,
         DegreeRequest,
         PageRankRequest,
         EigenvectorRequest,
         ClosenessRequest,
         BetweennessRequest,
-        CutsRequest,
-        SccRequest,
         ComponentsResponse,
         ScoresResponse,
         NodeScore,
@@ -1668,7 +1666,7 @@ async fn traverse(
     post,
     path = "/v1/graphs/{id}/algo/components",
     params(("id" = String, Path, description = "graph id")),
-    request_body = ComponentsRequest,
+    request_body = ScopedRequest,
     responses(
         (status = 200, description = "connected components", body = ComponentsResponse),
         (status = 400, description = "validation error"),
@@ -1680,7 +1678,7 @@ async fn traverse(
 async fn algo_components(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<ComponentsRequest>,
+    Json(req): Json<ScopedRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry
@@ -1835,7 +1833,7 @@ async fn algo_betweenness(
     post,
     path = "/v1/graphs/{id}/algo/cuts",
     params(("id" = String, Path, description = "graph id")),
-    request_body = CutsRequest,
+    request_body = ScopedRequest,
     responses(
         (status = 200, description = "articulation points + bridges", body = CutsResponse),
         (status = 400, description = "validation error"),
@@ -1847,7 +1845,7 @@ async fn algo_betweenness(
 async fn algo_cuts(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<CutsRequest>,
+    Json(req): Json<ScopedRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry
@@ -1863,7 +1861,7 @@ async fn algo_cuts(
     post,
     path = "/v1/graphs/{id}/algo/scc",
     params(("id" = String, Path, description = "graph id")),
-    request_body = SccRequest,
+    request_body = ScopedRequest,
     responses(
         (status = 200, description = "strongly-connected components", body = ComponentsResponse),
         (status = 400, description = "validation error"),
@@ -1875,7 +1873,7 @@ async fn algo_cuts(
 async fn algo_scc(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<SccRequest>,
+    Json(req): Json<ScopedRequest>,
 ) -> Result<Response, RegistryError> {
     let entry = graph_entry(&state, &id)?;
     let response = entry

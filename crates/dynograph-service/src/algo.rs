@@ -96,10 +96,12 @@ pub(crate) enum DegreeModeWire {
     Total,
 }
 
-/// Request for `POST /v1/graphs/{id}/algo/components`.
+/// A request that carries only a subgraph `scope` — shared by the purely
+/// structural algorithms (`/algo/components`, `/algo/cuts`, `/algo/scc`), which
+/// take no weights or direction.
 #[derive(Debug, Deserialize, ToSchema)]
 #[cfg_attr(not(feature = "graph"), allow(dead_code))]
-pub(crate) struct ComponentsRequest {
+pub(crate) struct ScopedRequest {
     #[serde(default)]
     pub scope: Option<AlgoScope>,
 }
@@ -200,25 +202,6 @@ pub(crate) struct BetweennessRequest {
     pub normalized: Option<bool>,
 }
 
-/// Request for `POST /v1/graphs/{id}/algo/cuts` (articulation points + bridges).
-/// Purely structural — treats the subgraph as undirected and ignores weights —
-/// so it carries only `scope`.
-#[derive(Debug, Deserialize, ToSchema)]
-#[cfg_attr(not(feature = "graph"), allow(dead_code))]
-pub(crate) struct CutsRequest {
-    #[serde(default)]
-    pub scope: Option<AlgoScope>,
-}
-
-/// Request for `POST /v1/graphs/{id}/algo/scc` (strongly-connected components).
-/// Purely structural over the directed subgraph; carries only `scope`.
-#[derive(Debug, Deserialize, ToSchema)]
-#[cfg_attr(not(feature = "graph"), allow(dead_code))]
-pub(crate) struct SccRequest {
-    #[serde(default)]
-    pub scope: Option<AlgoScope>,
-}
-
 /// One bridge (cut edge), as the unordered pair of node ids it connects
 /// (`a < b`).
 #[derive(Debug, Serialize, ToSchema)]
@@ -301,7 +284,7 @@ macro_rules! not_enabled_stub {
 }
 
 #[cfg(not(feature = "graph"))]
-not_enabled_stub!(run_components, ComponentsRequest, ComponentsResponse);
+not_enabled_stub!(run_components, ScopedRequest, ComponentsResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_degree, DegreeRequest, ScoresResponse);
 #[cfg(not(feature = "graph"))]
@@ -313,9 +296,9 @@ not_enabled_stub!(run_closeness, ClosenessRequest, ScoresResponse);
 #[cfg(not(feature = "graph"))]
 not_enabled_stub!(run_betweenness, BetweennessRequest, ScoresResponse);
 #[cfg(not(feature = "graph"))]
-not_enabled_stub!(run_cuts, CutsRequest, CutsResponse);
+not_enabled_stub!(run_cuts, ScopedRequest, CutsResponse);
 #[cfg(not(feature = "graph"))]
-not_enabled_stub!(run_scc, SccRequest, ComponentsResponse);
+not_enabled_stub!(run_scc, ScopedRequest, ComponentsResponse);
 
 #[cfg(feature = "graph")]
 mod imp {
@@ -355,7 +338,7 @@ mod imp {
     pub(crate) fn run_components(
         engine: &StorageEngine,
         graph_id: &str,
-        req: ComponentsRequest,
+        req: ScopedRequest,
     ) -> Result<ComponentsResponse, RegistryError> {
         let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, true)?;
         Ok(components_response(&graph, connected_components(&graph)))
@@ -365,7 +348,7 @@ mod imp {
     pub(crate) fn run_scc(
         engine: &StorageEngine,
         graph_id: &str,
-        req: SccRequest,
+        req: ScopedRequest,
     ) -> Result<ComponentsResponse, RegistryError> {
         let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, true)?;
         Ok(components_response(
@@ -379,7 +362,7 @@ mod imp {
     pub(crate) fn run_cuts(
         engine: &StorageEngine,
         graph_id: &str,
-        req: CutsRequest,
+        req: ScopedRequest,
     ) -> Result<CutsResponse, RegistryError> {
         let graph = build_graph(engine, graph_id, req.scope.as_ref(), None, false)?;
         let cuts = cut_structure(&graph);

@@ -352,7 +352,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ComponentsRequest"
+                "$ref": "#/components/schemas/ScopedRequest"
               }
             }
           },
@@ -406,7 +406,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CutsRequest"
+                "$ref": "#/components/schemas/ScopedRequest"
               }
             }
           },
@@ -622,7 +622,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SccRequest"
+                "$ref": "#/components/schemas/ScopedRequest"
               }
             }
           },
@@ -3487,22 +3487,6 @@
           }
         }
       },
-      "ComponentsRequest": {
-        "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/components`.",
-        "properties": {
-          "scope": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/AlgoScope"
-              }
-            ]
-          }
-        }
-      },
       "ComponentsResponse": {
         "type": "object",
         "description": "One (weakly-)connected component: the node ids it contains. Also the response\nshape for strongly-connected components (`/algo/scc`).",
@@ -3604,22 +3588,6 @@
           },
           "b": {
             "type": "string"
-          }
-        }
-      },
-      "CutsRequest": {
-        "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/cuts` (articulation points + bridges).\nPurely structural — treats the subgraph as undirected and ignores weights —\nso it carries only `scope`.",
-        "properties": {
-          "scope": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/AlgoScope"
-              }
-            ]
           }
         }
       },
@@ -4424,22 +4392,6 @@
           }
         }
       },
-      "SccRequest": {
-        "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/scc` (strongly-connected components).\nPurely structural over the directed subgraph; carries only `scope`.",
-        "properties": {
-          "scope": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/AlgoScope"
-              }
-            ]
-          }
-        }
-      },
       "SchemaResponse": {
         "type": "object",
         "required": [
@@ -4475,6 +4427,22 @@
           },
           "value": {
             "type": "object"
+          }
+        }
+      },
+      "ScopedRequest": {
+        "type": "object",
+        "description": "A request that carries only a subgraph `scope` — shared by the purely\nstructural algorithms (`/algo/components`, `/algo/cuts`, `/algo/scc`), which\ntake no weights or direction.",
+        "properties": {
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
           }
         }
       },
