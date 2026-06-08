@@ -153,6 +153,90 @@ pub type UtilVectorResponse = UtilResult<Vec<f64>>;
 /// `T = u32` (0..=100) — jaro_winkler, token_sort_ratio.
 pub type UtilRatioResponse = UtilResult<u32>;
 
+/// Returned by `POST /v1/util/pairwise_cosine` and
+/// `POST /v1/util/pairwise_distance` — the N×N result matrix
+/// (row-major) over the input `vectors`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MatrixResponse {
+    pub matrix: Vec<Vec<f64>>,
+}
+
+/// Distance metric for [`util_pairwise_distance`](crate::DynographClient::util_pairwise_distance).
+/// Wire form is the snake_case variant name. Mirrors the service-side
+/// `DistanceMetric` (duplicated, not imported — see the module note).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DistanceMetric {
+    #[default]
+    Euclidean,
+    SquaredEuclidean,
+    Manhattan,
+    /// Cosine distance, `1 - cosine_similarity`.
+    Cosine,
+}
+
+// =========================================================================
+// search:text / search:hybrid (v0.7.0 service surface). The keyword leg of
+// each is behind the server's `fulltext` build feature: without it the route
+// returns 501, surfaced as `ClientError::Http { status: 501, .. }`.
+// =========================================================================
+
+/// One hit in a `POST /v1/graphs/{id}/search:text` response.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchTextHit {
+    pub node_id: String,
+    pub node_type: String,
+    pub score: f32,
+}
+
+/// Returned by `POST /v1/graphs/{id}/search:text`. Hits are
+/// highest-score-first.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchTextResponse {
+    pub results: Vec<SearchTextHit>,
+}
+
+/// Returned by `POST /v1/graphs/{id}/search:reindex` — the number of
+/// nodes (re)indexed into the full-text index.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchReindexResponse {
+    pub indexed: usize,
+}
+
+/// One leg's contribution to a fused `search:hybrid` hit: its 1-based
+/// rank within that leg and that leg's native score (BM25 for keyword,
+/// similarity for vector).
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct HybridLegInfo {
+    pub rank: usize,
+    pub score: f32,
+}
+
+/// Per-leg breakdown attached to each hybrid hit. Only legs that ranked
+/// the node are present.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct HybridLegBreakdown {
+    pub vector: Option<HybridLegInfo>,
+    pub keyword: Option<HybridLegInfo>,
+}
+
+/// One fused result from `search:hybrid`, ordered by RRF `score`
+/// (highest first).
+#[derive(Debug, Clone, Deserialize)]
+pub struct HybridHit {
+    pub node_id: String,
+    pub node_type: String,
+    /// Fused Reciprocal-Rank-Fusion score.
+    pub score: f32,
+    pub legs: HybridLegBreakdown,
+}
+
+/// Returned by `POST /v1/graphs/{id}/search:hybrid`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchHybridResponse {
+    pub hits: Vec<HybridHit>,
+}
+
 /// Numeric precision for `/v1/util/*` vector ops. Wire form is the
 /// lowercase variant name (`"f32"` / `"f64"`). Duplicated rather
 /// than re-exported from `dynograph-service` for the same reason the
