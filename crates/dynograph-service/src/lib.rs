@@ -13,6 +13,7 @@ mod edges_adjacent;
 mod edges_collect;
 mod embedding_response;
 mod error_body;
+mod game;
 mod metadata_response;
 mod metrics_state;
 mod node_response;

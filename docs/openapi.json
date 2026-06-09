@@ -2728,6 +2728,43 @@
         }
       }
     },
+    "/v1/util/game/analyze": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "summary": "Normal-form game-theory analysis (dominant strategies, pure/mixed Nash,\nPareto optimality, the `nash_is_pareto_suboptimal` headline). Stateless pure\nmath — see `crate::game` for the wire shape and the explicit out-of-scope\nboundary. The Pareto pass is O(cells²·players); offload to the blocking pool\nlike the pairwise matrix ops.",
+        "operationId": "util_game_analyze",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GameAnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "game-theoretic analysis",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameAnalyzeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error (malformed or oversized game)"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/hadamard": {
       "post": {
         "tags": [
@@ -4034,6 +4071,31 @@
           }
         }
       },
+      "CellSpec": {
+        "type": "object",
+        "required": [
+          "profile",
+          "utilities"
+        ],
+        "properties": {
+          "profile": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "One strategy index per player (in player order)."
+          },
+          "utilities": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "One payoff per player (in player order)."
+          }
+        }
+      },
       "ClosenessRequest": {
         "type": "object",
         "description": "Request for `POST /v1/graphs/{id}/algo/closeness`. Edge weights are path\n**costs** (higher = farther) and must be strictly positive; omit `weight`\nfor unit-cost (hop-count) distances. On a `directed` graph this is *outward*\ncloseness (distances from each node to the rest, following edge direction).",
@@ -4419,6 +4481,26 @@
           "cosine"
         ]
       },
+      "DominantInfo": {
+        "type": "object",
+        "description": "Per-player dominant-strategy result; a field is the dominant strategy's\nindex, or absent when none exists.",
+        "properties": {
+          "strictly_dominant": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "weakly_dominant": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        }
+      },
       "EdgeResponse": {
         "type": "object",
         "required": [
@@ -4642,6 +4724,92 @@
           },
           "to": {
             "type": "string"
+          }
+        }
+      },
+      "GameAnalyzeRequest": {
+        "type": "object",
+        "required": [
+          "players",
+          "payoffs"
+        ],
+        "properties": {
+          "payoffs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CellSpec"
+            },
+            "description": "One cell per strategy profile, covering every profile exactly once."
+          },
+          "players": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlayerSpec"
+            },
+            "description": "Players in a fixed order; `profile`/`utilities` index them by position."
+          }
+        }
+      },
+      "GameAnalyzeResponse": {
+        "type": "object",
+        "required": [
+          "dominant",
+          "pure_nash",
+          "pareto_optimal",
+          "nash_is_pareto_suboptimal",
+          "nash_domination"
+        ],
+        "properties": {
+          "dominant": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DominantInfo"
+            },
+            "description": "Per player (request order): strict/weak dominant strategy, if any."
+          },
+          "mixed_2x2": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Mixed2x2Info",
+                "description": "Interior 2×2 mixed equilibrium, when the game is 2×2 and one exists."
+              }
+            ]
+          },
+          "nash_domination": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NashDominationInfo"
+            },
+            "description": "For each suboptimal equilibrium, a Pareto outcome that dominates it."
+          },
+          "nash_is_pareto_suboptimal": {
+            "type": "boolean",
+            "description": "True iff some pure equilibrium is Pareto-dominated by another outcome."
+          },
+          "pareto_optimal": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "description": "Pareto-optimal outcomes, as strategy-index profiles."
+          },
+          "pure_nash": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "description": "Pure-strategy Nash equilibria, as strategy-index profiles."
           }
         }
       },
@@ -4895,6 +5063,54 @@
         "properties": {
           "properties": {
             "type": "object"
+          }
+        }
+      },
+      "Mixed2x2Info": {
+        "type": "object",
+        "description": "The interior 2×2 mixed Nash equilibrium: each player's mixing probabilities.",
+        "required": [
+          "player0_probs",
+          "player1_probs"
+        ],
+        "properties": {
+          "player0_probs": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "player1_probs": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        }
+      },
+      "NashDominationInfo": {
+        "type": "object",
+        "description": "A Pareto-suboptimal pure equilibrium and a Pareto outcome that dominates it.",
+        "required": [
+          "nash",
+          "dominated_by"
+        ],
+        "properties": {
+          "dominated_by": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "nash": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       },
@@ -5252,6 +5468,21 @@
                 "$ref": "#/components/schemas/WeightSpec"
               }
             ]
+          }
+        }
+      },
+      "PlayerSpec": {
+        "type": "object",
+        "required": [
+          "strategies"
+        ],
+        "properties": {
+          "strategies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "This player's pure strategies; its length is the player's strategy count\nand a `profile` entry indexes into it. (The strategy labels document the\nindex meaning; results report profiles as those indices.)"
           }
         }
       },
