@@ -11,7 +11,7 @@ Published Docker image:
 ```bash
 docker run --rm -p 8080:8080 -v dynograph-data:/data \
     -e DYNOGRAPH_STORAGE_ROOT=/data \
-    ghcr.io/sligara7/dynograph-foundation:0.9.0
+    ghcr.io/sligara7/dynograph-foundation:0.9.1
 ```
 
 Or build from this repo:

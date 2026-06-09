@@ -1,6 +1,6 @@
 # Endpoint reference
 
-The complete published surface of `dynograph-foundation` (v0.9.0): **80 routes**
+The complete published surface of `dynograph-foundation` (v0.9.1): **80 routes**
 in the OpenAPI contract (the operational probes + everything under `/v1`), plus
 the meta `GET /openapi.json` that serves the contract itself. This is the
 human-readable catalog; the machine-readable source of truth is

@@ -4,6 +4,22 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.9.1 — 2026-06-09
+
+Internal refactor only — no behavior, API, or wire-contract change
+(`cargo-semver-checks` and the OpenAPI drift gate both confirm the public
+surface is unchanged).
+
+### Changed
+
+- Split the monolithic `crates/dynograph-storage/src/engine.rs` (3660 lines)
+  into an `engine/` module: the `StorageEngine` public API methods are grouped
+  by concern (`nodes` / `edges` / `scan` / `batch` / `fulltext` / `embeddings`),
+  with the shared private machinery in `engine/mod.rs` and the test suites in
+  their own files. Pure code move — `StorageEngine` / `StoredNode` / `StoredEdge`
+  and all behavior are unchanged. Completes the monolithic-file split arc begun
+  in v0.9.0 (`algo.rs` / `app.rs` / `integration.rs`).
+
 ## v0.9.0 — 2026-06-09
 
 Adds density-based clustering to the stateless math surface and makes the
