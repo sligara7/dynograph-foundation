@@ -326,8 +326,8 @@ mod tests {
         // Only the coordination point yields positive payoff, so it is the lone
         // Pareto-optimal outcome.
         assert_eq!(a.pareto_optimal, vec![vec![0, 0, 0]]);
-        // Mis-coordination profiles (≥2 players off the point) are weak NE that
-        // the coordination outcome Pareto-dominates → suboptimal.
+        // Failed-coordination profiles (≥2 players off the point) are weak NE
+        // that the coordination outcome Pareto-dominates → suboptimal.
         assert!(a.nash_is_pareto_suboptimal);
         // No mixed result for N != 2.
         assert_eq!(a.mixed_2x2, None);
