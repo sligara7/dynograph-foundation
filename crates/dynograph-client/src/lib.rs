@@ -31,12 +31,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub use error::ClientError;
 pub use wire::{
-    DistanceMetric, EdgeResponse, EmbeddingResponse, GraphMetadataResponse, HybridHit,
-    HybridLegBreakdown, HybridLegInfo, MatrixResponse, NodeExistence, NodeListResponse,
-    NodeResponse, NodesExistsResponse, Precision, ResolveOrCreateResponse, SchemaResponse,
-    SearchHybridResponse, SearchReindexResponse, SearchTextHit, SearchTextResponse, SimilarHit,
-    SimilarResponse, UtilRatioResponse, UtilResult, UtilScalarResponse, UtilVectorResponse,
-    WelfordUpdateResponse,
+    BatchOpResult, BatchValidation, ClusteringResponse, CommunitiesResponse, ComponentsResponse,
+    CutEdge, CutsResponse, CyclesResponse, DistanceMetric, EdgeResponse, EmbeddingResponse,
+    FlowEdge, GraphMetadataResponse, HybridHit, HybridLegBreakdown, HybridLegInfo,
+    LinkPredictionResponse, MatrixResponse, MaxFlowResponse, NodeExistence, NodeListResponse,
+    NodeResponse, NodeScore, NodesExistsResponse, Precision, PredictedLink,
+    ResolveOrCreateResponse, SchemaResponse, ScoresResponse, SearchHybridResponse,
+    SearchReindexResponse, SearchTextHit, SearchTextResponse, ShortestPathResponse, SimilarHit,
+    SimilarResponse, ToposortResponse, UtilRatioResponse, UtilResult, UtilScalarResponse,
+    UtilVectorResponse, WelfordUpdateResponse,
 };
 
 /// The service's JSON error envelope, `{ "error": "<message>" }`,
@@ -647,6 +650,187 @@ impl DynographClient {
     }
 
     // =========================================================================
+    // Graph-theory algorithms — POST /v1/graphs/{id}/algo/* (v0.7.0). Behind
+    // the server's `graph` build feature; a service compiled without it returns
+    // 501 (surfaced as `ClientError::Http { status: 501, .. }`). The request
+    // body is passed through untyped (like batch/traverse) so the shared
+    // `scope` (incl. the #23 `where` predicate) / `weight` / `direction`
+    // grammar isn't duplicated here; see service-side `crate::algo` for it.
+    // Responses are typed.
+    // =========================================================================
+
+    /// `algo/components` — (weakly-)connected components. Body: `{scope?}`.
+    pub async fn algo_components(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ComponentsResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/components"), body)
+            .await
+    }
+
+    /// `algo/scc` — strongly-connected components. Body: `{scope?}`.
+    pub async fn algo_scc(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ComponentsResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/scc"), body)
+            .await
+    }
+
+    /// `algo/degree` — degree centrality. Body: `{scope?, weight?, direction?, mode?}`.
+    pub async fn algo_degree(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ScoresResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/degree"), body)
+            .await
+    }
+
+    /// `algo/pagerank` — PageRank (weights = strengths). Body:
+    /// `{scope?, weight?, direction?, damping?, tolerance?, max_iterations?}`.
+    pub async fn algo_pagerank(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ScoresResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/pagerank"), body)
+            .await
+    }
+
+    /// `algo/eigenvector` — eigenvector centrality (undirected only). Body:
+    /// `{scope?, weight?, direction?, tolerance?, max_iterations?}`.
+    pub async fn algo_eigenvector(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ScoresResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/eigenvector"), body)
+            .await
+    }
+
+    /// `algo/closeness` — closeness centrality (weights = path cost). Body:
+    /// `{scope?, weight?, direction?}`.
+    pub async fn algo_closeness(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ScoresResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/closeness"), body)
+            .await
+    }
+
+    /// `algo/betweenness` — betweenness centrality (weights = path cost). Body:
+    /// `{scope?, weight?, direction?, normalized?}`.
+    pub async fn algo_betweenness(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ScoresResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/betweenness"), body)
+            .await
+    }
+
+    /// `algo/personalized_pagerank` — PageRank with restart to `seeds`. Body:
+    /// `{scope?, weight?, direction?, seeds, damping?, tolerance?, max_iterations?}`.
+    pub async fn algo_personalized_pagerank(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ScoresResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/personalized_pagerank"), body)
+            .await
+    }
+
+    /// `algo/cuts` — articulation points and bridges. Body: `{scope?}`.
+    pub async fn algo_cuts(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<CutsResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/cuts"), body)
+            .await
+    }
+
+    /// `algo/cycles` — is the directed subgraph acyclic, with a witness cycle.
+    /// Body: `{scope?}`.
+    pub async fn algo_cycles(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<CyclesResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/cycles"), body)
+            .await
+    }
+
+    /// `algo/toposort` — topological order of the directed subgraph. Body: `{scope?}`.
+    pub async fn algo_toposort(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ToposortResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/toposort"), body)
+            .await
+    }
+
+    /// `algo/clustering` — local clustering + global transitivity. Body: `{scope?}`.
+    pub async fn algo_clustering(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ClusteringResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/clustering"), body)
+            .await
+    }
+
+    /// `algo/shortest_path` — one shortest route between two nodes. Body:
+    /// `{source, target, scope?, weight?, direction?}`.
+    pub async fn algo_shortest_path(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<ShortestPathResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/shortest_path"), body)
+            .await
+    }
+
+    /// `algo/max_flow` — max flow / min s-t cut (weights = capacities). Body:
+    /// `{source, target, scope?, weight?, direction?}`.
+    pub async fn algo_max_flow(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<MaxFlowResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/max_flow"), body)
+            .await
+    }
+
+    /// `algo/link_prediction` — neighborhood-overlap link scores. Body:
+    /// `{scope?, method?, source?, limit?}`.
+    pub async fn algo_link_prediction(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<LinkPredictionResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/link_prediction"), body)
+            .await
+    }
+
+    /// `algo/communities` — Louvain community detection (undirected). Body:
+    /// `{scope?, weight?, direction?, resolution?}`. Returns the partition plus
+    /// modularity.
+    pub async fn algo_communities(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<CommunitiesResponse, ClientError> {
+        self.post_json(&format!("/v1/graphs/{id}/algo/communities"), body)
+            .await
+    }
+
+    // =========================================================================
     // Audit-promoted primitives (v0.5.1 → v0.5.4) and v0.5.6 additions.
     //
     // The complex-body endpoints take `&serde_json::Value` for the
@@ -667,6 +851,26 @@ impl DynographClient {
         body: &serde_json::Value,
     ) -> Result<serde_json::Value, ClientError> {
         self.post_json(&format!("/v1/graphs/{id}/batch"), body)
+            .await
+    }
+
+    /// `POST /v1/graphs/{id}/batch` with `dry_run: true` — validate-only.
+    /// Runs `body`'s ops against the batch buffer (the `dry_run` flag is forced
+    /// on, overriding any in `body`) and returns a typed per-op report without
+    /// mutating the graph. `body` carries `{"ops": [...]}`. Like the commit
+    /// path, evaluation stops at the first failing op.
+    pub async fn batch_dry_run(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<BatchValidation, ClientError> {
+        let mut body = body.clone();
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("dry_run".to_string(), serde_json::Value::Bool(true));
+        }
+        // A non-object body passes through unmodified — the server fail-loud
+        // rejects it rather than us faking a dry_run.
+        self.post_json(&format!("/v1/graphs/{id}/batch"), &body)
             .await
     }
 
