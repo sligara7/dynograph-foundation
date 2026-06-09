@@ -7,7 +7,10 @@ publish.workspace = true
 
 [dependencies]
 dynograph-core = { path = "../dynograph-core" }
-dynograph-storage = { path = "../dynograph-storage" }
+# `default-features = false` so the storage `rocksdb` default isn't force-enabled
+# through this edge (which would defeat `--no-default-features`). The service's
+# own `rocksdb` / `fulltext` features forward to storage instead.
+dynograph-storage = { path = "../dynograph-storage", default-features = false }
 dynograph-vector = { path = "../dynograph-vector" }
 dynograph-graph = { path = "../dynograph-graph", optional = true }
 dynograph-game = { path = "../dynograph-game" }
@@ -27,6 +30,13 @@ uuid = { workspace = true }
 utoipa = { workspace = true }
 
 [features]
+default = ["rocksdb"]
+# On-disk RocksDB storage (the `storage.root` / `DYNOGRAPH_STORAGE_ROOT` mode).
+# Forwards to `dynograph-storage/rocksdb`. On by default; build with
+# `--no-default-features` to ship an in-memory-only binary that skips the
+# RocksDB C++ compile. Such a binary fails loud at startup if `storage.root`
+# is set (it cannot honour on-disk mode).
+rocksdb = ["dynograph-storage/rocksdb"]
 # Enable the full-text search endpoints (`search:text` / `search:reindex`).
 # Turns on `dynograph-storage/fulltext` (which compiles Tantivy); without it
 # the routes still exist but return 501 Not Implemented.
@@ -53,5 +63,8 @@ tempfile = "3"
 jsonwebtoken = { workspace = true }
 # Used by persistence tests to plant raw on-disk state (e.g. a degenerate
 # embedding the HTTP boundary would reject) and verify rehydrate fails loud.
-dynograph-storage = { path = "../dynograph-storage" }
+# `default-features = false` for the same reason as the normal edge above —
+# the persistence tests that need RocksDB are gated on the service `rocksdb`
+# feature, which forwards `dynograph-storage/rocksdb` when enabled.
+dynograph-storage = { path = "../dynograph-storage", default-features = false }
 dynograph-core = { path = "../dynograph-core" }

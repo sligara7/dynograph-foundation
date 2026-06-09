@@ -12,11 +12,19 @@ dynograph-core = { path = "../dynograph-core" }
 dynograph-text = { path = "../dynograph-text", optional = true }
 serde = { workspace = true }
 rmp-serde = { workspace = true }
-rocksdb = { workspace = true }
+# Optional RocksDB backend. Pulled in (and the librocksdb-sys C++ compiled)
+# only with the `rocksdb` feature, which is on by default. Build with
+# `--no-default-features` to drop it and run the in-memory backend alone —
+# useful for fast test/CI builds that don't need persistence.
+rocksdb = { workspace = true, optional = true }
 lru = "0.18"
 tracing = { workspace = true }
 
 [features]
+default = ["rocksdb"]
+# The on-disk RocksDB backend (`StorageEngine::new_rocksdb`). Without it, only
+# the in-memory backend is compiled and `new_rocksdb` fails loud at call time.
+rocksdb = ["dep:rocksdb"]
 # Mirror schema-declared `fulltext` properties into an embedded inverted index
 # on node writes, and expose `search_fulltext` / `reindex_fulltext`.
 fulltext = ["dep:dynograph-text"]
