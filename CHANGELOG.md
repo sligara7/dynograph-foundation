@@ -4,7 +4,13 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## Unreleased
+## v0.9.0 — 2026-06-09
+
+Adds density-based clustering to the stateless math surface and makes the
+RocksDB backend an opt-out build feature, plus a round of internal
+restructuring (the monolithic `algo.rs` / `app.rs` / `integration.rs` split into
+modules, and a `KvBackend` storage trait). All additive — default runtime
+behavior is unchanged.
 
 ### Added (`dynograph-cluster` — new crate)
 
@@ -28,6 +34,25 @@ workspace `version` in `Cargo.toml`.
   produces exactly the kind of matrix it consumes. Fail-loud on a malformed
   matrix (empty / non-square / non-finite / negative) or parameter (`eps`
   non-finite/negative, `min_points` zero), and capped at 4096 points.
+
+### Changed
+
+- **RocksDB is now an optional cargo feature** (`dynograph-storage` and
+  `dynograph-service` both gain a `rocksdb` feature, **on by default**). The
+  default build and the published image are unchanged (RocksDB on); building
+  with `--no-default-features` produces an in-memory-only binary that skips the
+  RocksDB C++ compile and fails loud at startup if `storage.root` is set.
+
+### Internal
+
+- Storage is now backend-agnostic behind a `KvBackend` trait (RocksDB and the
+  in-memory map sit behind one trait; a new backend is one file). No public
+  behavior change; includes a `MemoryBackend` `prefix_scan` ordering fix to
+  honour the key-order contract.
+- Split the monolithic `algo.rs` → `algo/` module, `app.rs` → `app/` module
+  (handlers + apidoc), and the integration test file → per-domain `it_*.rs` with
+  a shared `common/` (pure code moves; behavior and the wire contract unchanged).
+- Expanded endpoint-catalog and schema-driven-configuration docs.
 
 ## v0.8.0 — 2026-06-09
 
