@@ -855,10 +855,12 @@ impl DynographClient {
     }
 
     /// `POST /v1/graphs/{id}/batch` with `dry_run: true` — validate-only.
-    /// Runs `body`'s ops against the batch buffer (the `dry_run` flag is forced
-    /// on, overriding any in `body`) and returns a typed per-op report without
-    /// mutating the graph. `body` carries `{"ops": [...]}`. Like the commit
-    /// path, evaluation stops at the first failing op.
+    /// Runs `body`'s ops against the batch buffer and returns a typed per-op
+    /// report without mutating the graph; like the commit path, evaluation
+    /// stops at the first failing op. `body` must be the batch object
+    /// `{"ops": [...]}` — `dry_run` is set to `true` on it, overriding any value
+    /// already present. A non-object `body` is sent through unchanged for the
+    /// server to reject (rather than faking a dry_run client-side).
     pub async fn batch_dry_run(
         &self,
         id: &str,
