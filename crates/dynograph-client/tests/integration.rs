@@ -1116,3 +1116,177 @@ async fn search_hybrid_keyword_leg_surfaces_server_status() {
         "expected 501 (no fulltext) or 400 (fulltext, non-searchable schema), got {status:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// algo/* (v0.7.0). The in-process test service is built WITHOUT the `graph`
+// feature, so every algo route returns 501 — asserted as the typed passthrough.
+// The typed response shapes are pinned separately by deserializing
+// representative payloads (so client/server wire drift fails here in CI). The
+// batch dry_run path is NOT graph-gated and round-trips for real.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn algo_methods_pass_through_501_without_graph_feature() {
+    let (client, _server) = spawn_service().await;
+    client.create_graph("g1", &tiny_schema()).await.unwrap();
+    let b = &json!({});
+    let n = Some(reqwest::StatusCode::NOT_IMPLEMENTED);
+    // Every algo route exists in the contract but 501s without `graph`.
+    assert_eq!(
+        client.algo_components("g1", b).await.unwrap_err().status(),
+        n
+    );
+    assert_eq!(client.algo_scc("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(client.algo_degree("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(client.algo_pagerank("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(
+        client.algo_eigenvector("g1", b).await.unwrap_err().status(),
+        n
+    );
+    assert_eq!(
+        client.algo_closeness("g1", b).await.unwrap_err().status(),
+        n
+    );
+    assert_eq!(
+        client.algo_betweenness("g1", b).await.unwrap_err().status(),
+        n
+    );
+    assert_eq!(
+        client
+            .algo_personalized_pagerank("g1", b)
+            .await
+            .unwrap_err()
+            .status(),
+        n
+    );
+    assert_eq!(client.algo_cuts("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(client.algo_cycles("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(client.algo_toposort("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(
+        client.algo_clustering("g1", b).await.unwrap_err().status(),
+        n
+    );
+    assert_eq!(
+        client
+            .algo_shortest_path("g1", b)
+            .await
+            .unwrap_err()
+            .status(),
+        n
+    );
+    assert_eq!(client.algo_max_flow("g1", b).await.unwrap_err().status(), n);
+    assert_eq!(
+        client
+            .algo_link_prediction("g1", b)
+            .await
+            .unwrap_err()
+            .status(),
+        n
+    );
+    assert_eq!(
+        client.algo_communities("g1", b).await.unwrap_err().status(),
+        n
+    );
+}
+
+#[test]
+fn algo_wire_types_deserialize_server_shapes() {
+    use dynograph_client::{
+        ClusteringResponse, CommunitiesResponse, ComponentsResponse, CutsResponse, CyclesResponse,
+        LinkPredictionResponse, MaxFlowResponse, ScoresResponse, ShortestPathResponse,
+        ToposortResponse,
+    };
+    // Payloads mirror the documented server response shapes; a renamed/retyped
+    // client field would fail to deserialize here.
+    let s: ScoresResponse =
+        serde_json::from_value(json!({"scores": [{"node": "a", "score": 1.5}]})).unwrap();
+    assert_eq!(s.scores[0].node, "a");
+    assert_eq!(s.scores[0].score, 1.5);
+
+    let c: ComponentsResponse =
+        serde_json::from_value(json!({"count": 2, "components": [["a", "b"], ["c"]]})).unwrap();
+    assert_eq!(c.count, 2);
+    assert_eq!(c.components[1], vec!["c"]);
+
+    let cuts: CutsResponse = serde_json::from_value(
+        json!({"articulation_points": ["a"], "bridges": [{"a": "a", "b": "b"}]}),
+    )
+    .unwrap();
+    assert_eq!(cuts.bridges[0].a, "a");
+    assert_eq!(cuts.bridges[0].b, "b");
+
+    let cy: CyclesResponse =
+        serde_json::from_value(json!({"acyclic": false, "cycle": ["a", "b"]})).unwrap();
+    assert!(!cy.acyclic);
+
+    let topo: ToposortResponse =
+        serde_json::from_value(json!({"acyclic": true, "order": ["a", "b"]})).unwrap();
+    assert!(topo.acyclic);
+
+    let sp: ShortestPathResponse =
+        serde_json::from_value(json!({"found": true, "path": ["a", "b"], "distance": 2.0}))
+            .unwrap();
+    assert!(sp.found);
+    assert_eq!(sp.distance, 2.0);
+
+    let lp: LinkPredictionResponse =
+        serde_json::from_value(json!({"links": [{"a": "a", "b": "c", "score": 0.5}]})).unwrap();
+    assert_eq!(lp.links[0].score, 0.5);
+
+    let cl: ClusteringResponse = serde_json::from_value(
+        json!({"scores": [{"node": "a", "score": 1.0}], "transitivity": 0.5, "average_clustering": 0.4}),
+    )
+    .unwrap();
+    assert_eq!(cl.transitivity, 0.5);
+    assert_eq!(cl.average_clustering, 0.4);
+
+    let mf: MaxFlowResponse = serde_json::from_value(
+        json!({"max_flow": 3.0, "source_side": ["a"], "cut_edges": [{"from": "a", "to": "b"}]}),
+    )
+    .unwrap();
+    assert_eq!(mf.max_flow, 3.0);
+    assert_eq!(mf.cut_edges[0].from, "a");
+
+    let com: CommunitiesResponse = serde_json::from_value(
+        json!({"count": 2, "communities": [["a"], ["b"]], "modularity": 0.42}),
+    )
+    .unwrap();
+    assert_eq!(com.count, 2);
+    assert_eq!(com.modularity, 0.42);
+}
+
+#[tokio::test]
+async fn batch_dry_run_round_trip_validates_without_committing() {
+    let (client, _server) = spawn_service().await;
+    client.create_graph("g1", &tiny_schema()).await.unwrap();
+    client
+        .create_node("g1", "Item", "x", &props(&[("name", json!("x"))]))
+        .await
+        .unwrap();
+
+    // Valid: create y, then edge x->y (read-your-own-writes). Nothing persists.
+    let body = json!({"ops": [
+        {"op": "create_node", "node_type": "Item", "node_id": "y", "properties": {"name": "y"}},
+        {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "x", "to_type": "Item", "to_id": "y", "properties": {}},
+    ]});
+    let v = client.batch_dry_run("g1", &body).await.unwrap();
+    assert!(v.valid, "{v:?}");
+    assert_eq!(v.results.len(), 2);
+    assert!(v.results.iter().all(|r| r.ok));
+    assert_eq!(v.results[0].op, "create_node");
+    let err = client.get_node("g1", "Item", "y").await.unwrap_err();
+    assert_eq!(
+        err.status(),
+        Some(reqwest::StatusCode::NOT_FOUND),
+        "y must not persist"
+    );
+
+    // Invalid: replace a missing node — valid:false, the failing op is reported.
+    let bad = json!({"ops": [
+        {"op": "replace_node", "node_type": "Item", "node_id": "nope", "properties": {}},
+    ]});
+    let v = client.batch_dry_run("g1", &bad).await.unwrap();
+    assert!(!v.valid);
+    assert!(!v.results[0].ok);
+    assert!(v.results[0].error.is_some(), "{v:?}");
+}

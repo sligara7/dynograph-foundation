@@ -251,3 +251,138 @@ pub enum Precision {
     #[default]
     F64,
 }
+
+// =========================================================================
+// algo/* (v0.7.0 service surface). Behind the server's `graph` build feature:
+// without it every algo route returns 501 (surfaced as `ClientError::Http`).
+// Requests are passed through untyped (the `scope`/`where`/`weight` grammar
+// would otherwise be duplicated, as with batch/traverse); responses are typed.
+// =========================================================================
+
+/// One node's score. Shared by every score-producing algorithm (degree,
+/// pagerank, eigenvector, closeness, betweenness, personalized_pagerank).
+#[derive(Debug, Clone, Deserialize)]
+pub struct NodeScore {
+    pub node: String,
+    pub score: f64,
+}
+
+/// Per-node centrality scores, highest first. Returned by `algo/degree`,
+/// `pagerank`, `eigenvector`, `closeness`, `betweenness`,
+/// `personalized_pagerank`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScoresResponse {
+    pub scores: Vec<NodeScore>,
+}
+
+/// Returned by `algo/components` (weakly-connected) and `algo/scc` (strongly-
+/// connected): the partition as lists of node ids.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ComponentsResponse {
+    pub count: usize,
+    pub components: Vec<Vec<String>>,
+}
+
+/// One bridge edge (unordered pair, `a < b`) from `algo/cuts`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CutEdge {
+    pub a: String,
+    pub b: String,
+}
+
+/// Returned by `algo/cuts`: articulation points and bridges.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CutsResponse {
+    pub articulation_points: Vec<String>,
+    pub bridges: Vec<CutEdge>,
+}
+
+/// Returned by `algo/cycles`: `acyclic` for a DAG, else a witness `cycle`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CyclesResponse {
+    pub acyclic: bool,
+    pub cycle: Vec<String>,
+}
+
+/// Returned by `algo/toposort`: `acyclic` with a topological `order`, else
+/// `order` empty.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ToposortResponse {
+    pub acyclic: bool,
+    pub order: Vec<String>,
+}
+
+/// Returned by `algo/shortest_path`. `found` is false (empty `path`) when the
+/// target is unreachable.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ShortestPathResponse {
+    pub found: bool,
+    pub path: Vec<String>,
+    pub distance: f64,
+}
+
+/// One predicted (currently-absent) link from `algo/link_prediction`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PredictedLink {
+    pub a: String,
+    pub b: String,
+    pub score: f64,
+}
+
+/// Returned by `algo/link_prediction`, highest score first.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LinkPredictionResponse {
+    pub links: Vec<PredictedLink>,
+}
+
+/// Returned by `algo/clustering`: per-node local clustering plus the two global
+/// summaries.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClusteringResponse {
+    pub scores: Vec<NodeScore>,
+    pub transitivity: f64,
+    pub average_clustering: f64,
+}
+
+/// One min-cut edge from `algo/max_flow`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FlowEdge {
+    pub from: String,
+    pub to: String,
+}
+
+/// Returned by `algo/max_flow`: the max-flow value, the source-side partition,
+/// and the crossing cut edges.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MaxFlowResponse {
+    pub max_flow: f64,
+    pub source_side: Vec<String>,
+    pub cut_edges: Vec<FlowEdge>,
+}
+
+/// Returned by `algo/communities` (Louvain): the partition plus its modularity.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommunitiesResponse {
+    pub count: usize,
+    pub communities: Vec<Vec<String>>,
+    pub modularity: f64,
+}
+
+/// One op's outcome in a `/batch` `dry_run` report.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchOpResult {
+    pub index: usize,
+    pub op: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Returned by `POST /v1/graphs/{id}/batch` with `dry_run: true`: a per-op
+/// pass/fail report (covering ops up to and including the first failure) and an
+/// overall `valid` flag. The graph is never mutated.
+#[derive(Debug, Clone, Deserialize)]
+pub struct BatchValidation {
+    pub valid: bool,
+    pub results: Vec<BatchOpResult>,
+}
