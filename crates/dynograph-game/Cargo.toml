@@ -1,0 +1,15 @@
+[package]
+name = "dynograph-game"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Pure, dependency-free normal-form game-theory analysis (payoff matrix in,
+# strategic analysis out). Mirrors `dynograph-vector` / `dynograph-graph`:
+# domain-neutral math with no storage, service, or core dependency. The
+# service layer parses a game off the wire and hands it in. Scope is the
+# closed-form O(matrix) analysis (dominant strategies, pure-strategy Nash,
+# Pareto optimality, 2x2 mixed Nash) — not the research-hard general mixed
+# Nash, cooperative solution concepts, or iterated-game simulation.
+[dependencies]

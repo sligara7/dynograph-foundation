@@ -48,6 +48,10 @@ use crate::{
     },
     embedding_response::EmbeddingResponse,
     error_body::error_response,
+    game::{
+        CellSpec, DominantInfo, GameAnalyzeRequest, GameAnalyzeResponse, Mixed2x2Info,
+        NashDominationInfo, PlayerSpec, run_analyze as run_game_analyze,
+    },
     metadata_response::GraphMetadataResponse,
     metrics_state::MetricsState,
     node_response::{NodeListResponse, NodeResponse},
@@ -173,6 +177,7 @@ use crate::{
         util_centroid,
         util_pairwise_cosine,
         util_pairwise_distance,
+        util_game_analyze,
         util_mean,
         util_variance,
         util_std_dev,
@@ -315,6 +320,14 @@ use crate::{
         DistanceMetric,
         PairwiseDistanceRequest,
         MatrixResponse,
+        // game theory
+        GameAnalyzeRequest,
+        PlayerSpec,
+        CellSpec,
+        GameAnalyzeResponse,
+        DominantInfo,
+        NashDominationInfo,
+        Mixed2x2Info,
         // ops
         BuildInfoResponse,
     )),
@@ -529,6 +542,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/util/centroid", post(util_centroid))
         .route("/v1/util/pairwise_cosine", post(util_pairwise_cosine))
         .route("/v1/util/pairwise_distance", post(util_pairwise_distance))
+        .route("/v1/util/game/analyze", post(util_game_analyze))
         .route("/v1/util/mean", post(util_mean))
         .route("/v1/util/variance", post(util_variance))
         .route("/v1/util/std_dev", post(util_std_dev))
@@ -2975,6 +2989,28 @@ async fn util_pairwise_distance(
 ) -> Result<Response, RegistryError> {
     // O(N²·dim) — offload to the blocking pool (see `util_pairwise_cosine`).
     let resp = tokio::task::spawn_blocking(move || run_pairwise_distance(req))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Json(resp).into_response())
+}
+
+/// Normal-form game-theory analysis (dominant strategies, pure/mixed Nash,
+/// Pareto optimality, the `nash_is_pareto_suboptimal` headline). Stateless pure
+/// math — see `crate::game` for the wire shape and the explicit out-of-scope
+/// boundary. The Pareto pass is O(cells²·players); offload to the blocking pool
+/// like the pairwise matrix ops.
+#[utoipa::path(
+    post,
+    path = "/v1/util/game/analyze",
+    request_body = GameAnalyzeRequest,
+    responses(
+        (status = 200, description = "game-theoretic analysis", body = GameAnalyzeResponse),
+        (status = 400, description = "validation error (malformed or oversized game)"),
+    ),
+    tag = "util",
+)]
+async fn util_game_analyze(Json(req): Json<GameAnalyzeRequest>) -> Result<Response, RegistryError> {
+    let resp = tokio::task::spawn_blocking(move || run_game_analyze(req))
         .await
         .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
     Ok(Json(resp).into_response())
