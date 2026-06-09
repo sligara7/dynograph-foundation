@@ -388,8 +388,10 @@ impl RocksBackend {
         prefix: &[u8],
     ) -> Result<Vec<Vec<u8>>, DynoError> {
         let mut keys = Vec::new();
-        for item in db.iterator_cf(cf_handle, IteratorMode::From(prefix, rocksdb::Direction::Forward))
-        {
+        for item in db.iterator_cf(
+            cf_handle,
+            IteratorMode::From(prefix, rocksdb::Direction::Forward),
+        ) {
             let (key, _) = item.map_err(|e| DynoError::Storage(e.to_string()))?;
             if !key.starts_with(prefix) {
                 break;
@@ -441,9 +443,10 @@ impl KvBackend for RocksBackend {
             .db
             .cf_handle(cf)
             .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-        let iter = self
-            .db
-            .iterator_cf(&cf_handle, IteratorMode::From(prefix, rocksdb::Direction::Forward));
+        let iter = self.db.iterator_cf(
+            &cf_handle,
+            IteratorMode::From(prefix, rocksdb::Direction::Forward),
+        );
         let mut results = Vec::new();
         for item in iter {
             let (key, value) = item.map_err(|e| DynoError::Storage(e.to_string()))?;

@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use dynograph_core::{DynoError, Schema, Value};
 
 use crate::backend::{
-    ALL_CFS, BufferedEffect, BufferedOp, CF_ADJ_IN, CF_ADJ_OUT, CF_EDGES, CF_EMBEDDINGS, CF_NODES,
-    CF_NODE_IDX, CfId, KvBackend, MemoryBackend, RocksBackend,
+    ALL_CFS, BufferedEffect, BufferedOp, CF_ADJ_IN, CF_ADJ_OUT, CF_EDGES, CF_EMBEDDINGS,
+    CF_NODE_IDX, CF_NODES, CfId, KvBackend, MemoryBackend, RocksBackend,
 };
 use crate::cache::{CacheConfig, ReadCache};
 
