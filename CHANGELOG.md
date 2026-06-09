@@ -4,6 +4,31 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## Unreleased
+
+### Added (`dynograph-cluster` — new crate)
+
+- A pure, dependency-free **density-based clustering** crate (the fourth math
+  sibling of `dynograph-vector` / `dynograph-graph` / `dynograph-game`): a
+  precomputed distance matrix in, a cluster label per point out. `dbscan(
+  distance_matrix, eps, min_points) -> Result<Vec<i32>, ClusterError>`
+  implements the classic Ester et al. (1996) algorithm — exact and
+  deterministic, `-1` = noise and `1..` = (1-based) cluster id, fail-loud
+  validation of the matrix and parameters. The caller supplies the distances
+  (the same way it supplies dimension vectors); this is matrix in / labels out,
+  not a graph algorithm. Distinct from `dynograph-graph`'s Louvain
+  (community-on-edges) — this is density-on-points.
+
+### Added (`dynograph-service`)
+
+- **`POST /v1/util/dbscan`** — DBSCAN over a caller-supplied distance matrix,
+  exposed beside the other stateless `util/*` pure-math ops (no graph id, no
+  `graph` feature gate — it takes a matrix, not the stored graph's topology).
+  Returns `{ labels, num_clusters }`. Pairs with `util/pairwise_distance`, which
+  produces exactly the kind of matrix it consumes. Fail-loud on a malformed
+  matrix (empty / non-square / non-finite / negative) or parameter (`eps`
+  non-finite/negative, `min_points` zero), and capped at 4096 points.
+
 ## v0.8.0 — 2026-06-09
 
 Closes the consumer graph-analytics integration arc: a single graph can now be

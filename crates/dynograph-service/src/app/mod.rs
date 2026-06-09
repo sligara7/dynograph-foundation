@@ -36,6 +36,7 @@ use crate::{
     },
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     config::ServerLimits,
+    dbscan::{DbscanRequest, DbscanResponse, run as run_dbscan},
     edge_response::EdgeResponse,
     edges_adjacent::{
         AdjacentEdge, Direction as AdjacentDirection, EdgesAdjacentRequest, EdgesAdjacentResponse,
@@ -282,6 +283,7 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/util/pairwise_cosine", post(util_pairwise_cosine))
         .route("/v1/util/pairwise_distance", post(util_pairwise_distance))
         .route("/v1/util/game/analyze", post(util_game_analyze))
+        .route("/v1/util/dbscan", post(util_dbscan))
         .route("/v1/util/mean", post(util_mean))
         .route("/v1/util/variance", post(util_variance))
         .route("/v1/util/std_dev", post(util_std_dev))

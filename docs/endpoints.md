@@ -144,3 +144,10 @@ identical result instead of re-deriving cosine / Pearson / Nash in each language
 
 **Game theory**: `util/game/analyze` — normal-form analysis (dominant
 strategies, pure & 2×2-mixed Nash, Pareto optimality, `nash_is_pareto_suboptimal`).
+
+**Clustering**: `util/dbscan` — DBSCAN density-based clustering over a
+caller-supplied N×N distance matrix (`eps`, `min_points`); returns a label per
+point (`-1` = noise, `1..` = cluster id) and the cluster count. Lives under
+`util/` (matrix in, labels out) rather than `algo/*` because it clusters points
+by their pairwise distances, not the stored graph's topology — distinct from
+the graph suite's Louvain (community-on-edges).

@@ -2620,6 +2620,43 @@
         }
       }
     },
+    "/v1/util/dbscan": {
+      "post": {
+        "tags": [
+          "util"
+        ],
+        "summary": "DBSCAN density-based clustering over a precomputed distance matrix. Stateless\npure math — see `crate::dbscan` for the wire shape and why this lives under\n`util/` (matrix in, labels out — not a graph algorithm). O(N²) over the\nmatrix; offload to the blocking pool like the pairwise matrix ops.",
+        "operationId": "util_dbscan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DbscanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "cluster label per point",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DbscanResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error (malformed matrix/params or oversized)"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          }
+        }
+      }
+    },
     "/v1/util/dot_product": {
       "post": {
         "tags": [
@@ -4426,6 +4463,60 @@
             "items": {
               "type": "string"
             }
+          }
+        }
+      },
+      "DbscanRequest": {
+        "type": "object",
+        "required": [
+          "distance_matrix",
+          "eps",
+          "min_points"
+        ],
+        "properties": {
+          "distance_matrix": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            },
+            "description": "Row-major N×N precomputed distance matrix (assumed symmetric,\nnon-negative, finite). The caller computes the distances."
+          },
+          "eps": {
+            "type": "number",
+            "format": "double",
+            "description": "Neighborhood radius: two points are neighbors when their distance is\n`<= eps`. Finite and non-negative.",
+            "minimum": 0
+          },
+          "min_points": {
+            "type": "integer",
+            "description": "Minimum neighborhood size (including the point itself) for a point to be\na core point. At least 1.",
+            "minimum": 1
+          }
+        }
+      },
+      "DbscanResponse": {
+        "type": "object",
+        "required": [
+          "labels",
+          "num_clusters"
+        ],
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "description": "One label per input point, in input order: `-1` = noise, `1..` =\n(1-based) cluster id."
+          },
+          "num_clusters": {
+            "type": "integer",
+            "description": "Number of distinct clusters found (noise excluded).",
+            "minimum": 0
           }
         }
       },

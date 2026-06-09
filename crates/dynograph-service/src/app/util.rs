@@ -381,6 +381,29 @@ pub(crate) async fn util_game_analyze(
     Ok(Json(resp).into_response())
 }
 
+/// DBSCAN density-based clustering over a precomputed distance matrix. Stateless
+/// pure math — see `crate::dbscan` for the wire shape and why this lives under
+/// `util/` (matrix in, labels out — not a graph algorithm). O(N²) over the
+/// matrix; offload to the blocking pool like the pairwise matrix ops.
+#[utoipa::path(
+    post,
+    path = "/v1/util/dbscan",
+    request_body = DbscanRequest,
+    responses(
+        (status = 200, description = "cluster label per point", body = DbscanResponse),
+        (status = 400, description = "validation error (malformed matrix/params or oversized)"),
+    ),
+    tag = "util",
+)]
+pub(crate) async fn util_dbscan(
+    Json(req): Json<DbscanRequest>,
+) -> Result<Response, RegistryError> {
+    let resp = tokio::task::spawn_blocking(move || run_dbscan(req))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Json(resp).into_response())
+}
+
 #[utoipa::path(
     post,
     path = "/v1/util/mean",
