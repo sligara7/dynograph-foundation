@@ -4,6 +4,64 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.8.0 — 2026-06-09
+
+Closes the consumer graph-analytics integration arc: a single graph can now be
+**partitioned by a node property** and analyzed per-partition, **community
+detection** finds dense sub-groups within a connected graph, `/batch` gains an
+honest **validate-before-apply** mode, and the typed **client** wraps the whole
+v0.7.0+ surface so consumers reach it without hand-rolling HTTP. Plus a new
+domain-neutral **game-theory analyzer**. All additive — no breaking changes.
+
+### Added (`dynograph-game` — new crate)
+
+- A pure, dependency-free normal-form game-theory crate (the third math sibling
+  of `dynograph-vector` / `dynograph-graph`): a payoff matrix in, the strategic
+  analysis out. Per-player strict/weak **dominant strategies**, **pure-strategy
+  Nash** equilibria, **Pareto-optimal** outcomes, the headline
+  **`nash_is_pareto_suboptimal`** classification (the prisoner's-dilemma
+  "rational play → collectively worse" signal) with the Pareto outcome that
+  dominates each suboptimal equilibrium, and the closed-form interior **2×2
+  mixed** Nash. Out of scope by design: general/non-2×2 mixed Nash, cooperative
+  solution concepts, iterated-game simulation.
+
+### Added (`dynograph-service`)
+
+- **`scope.where` on every `algo/*` endpoint** — an optional property predicate
+  (the `nodes:scan` / `search:hybrid` clause grammar) that projects an algorithm
+  onto one logical subgraph **partitioned by a node property**, not just by
+  node/edge type. Enables per-tenant analytics (e.g. per-story PageRank) over a
+  single shared graph; only matching nodes and the edges between them enter the
+  projection. An explicit empty `scope.node_types` is now a `400` (was a silent
+  empty graph).
+- **`POST /v1/graphs/{id}/algo/communities`** — Louvain community detection
+  (modularity maximization, undirected): the faction/cluster-discovery primitive
+  that components (reachability) and clustering (local cliquiness) don't cover.
+  Returns the partition plus its modularity; honors the shared `scope`/`where`
+  and edge weights. Behind the `graph` feature like the rest of `algo/*`.
+- **`/batch` `dry_run` (validate-only)** — runs every op against the batch
+  buffer to produce a per-op pass/fail report, then discards without mutating
+  the graph (HTTP 200 with a `BatchValidation` body). Unblocks
+  preview-before-apply flows. The `200` body is now a `oneOf` of the commit
+  summary or the dry-run report; the commit path is byte-for-byte unchanged.
+- **`POST /v1/util/game/analyze`** — the game-theory analyzer over HTTP
+  (stateless pure math, always-on like the other `util/*` ops). Caps the profile
+  count and offloads to the blocking pool like the pairwise matrix ops.
+
+### Added (`dynograph-client`)
+
+- Typed wrappers for the v0.7.0+ surface so consumers reach it through the
+  client instead of raw HTTP: **`search_hybrid`**, **`search_text`**,
+  **`search_reindex`**; **`util_pairwise_cosine`** / **`util_pairwise_distance`**
+  (with `DistanceMetric`); the **15 `algo_*`** methods plus **`algo_communities`**
+  (untyped request, typed responses); and a typed **`batch_dry_run`**. Feature-
+  gated server routes surface a `501` as a typed `ClientError::Http`.
+
+### Changed (packaging)
+
+- Bump workspace version 0.7.0 → 0.8.0; promote docs/version strings and the
+  generated `docs/openapi.json` (`info.version`) to match.
+
 ## v0.7.0 — 2026-06-08
 
 The domain-neutral graph-theory algorithm suite plus batch vector math, so
