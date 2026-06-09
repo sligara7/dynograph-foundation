@@ -7,6 +7,7 @@
 //! - Batch writes for extraction integration
 //! - Iterator-based scans
 
+mod backend;
 mod cache;
 mod engine;
 mod keys;
