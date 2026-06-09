@@ -8,6 +8,7 @@ mod auth;
 mod batch;
 mod buildinfo_response;
 mod config;
+mod dbscan;
 mod edge_response;
 mod edges_adjacent;
 mod edges_collect;

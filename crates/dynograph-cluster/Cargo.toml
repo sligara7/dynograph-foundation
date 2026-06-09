@@ -1,0 +1,15 @@
+[package]
+name = "dynograph-cluster"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Pure, dependency-free density-based clustering (precomputed distance matrix
+# in, cluster labels out). Mirrors `dynograph-vector` / `dynograph-graph` /
+# `dynograph-game`: domain-neutral math with no storage, service, or core
+# dependency. The service layer parses a distance matrix off the wire and hands
+# it in. The caller computes the distances (embeddings/vectors aren't this
+# crate's to compute) — same matrix-in/result-out shape as the `util/pairwise_*`
+# family, which produces exactly the kind of matrix DBSCAN consumes.
+[dependencies]

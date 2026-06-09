@@ -14,6 +14,7 @@ dynograph-storage = { path = "../dynograph-storage", default-features = false }
 dynograph-vector = { path = "../dynograph-vector" }
 dynograph-graph = { path = "../dynograph-graph", optional = true }
 dynograph-game = { path = "../dynograph-game" }
+dynograph-cluster = { path = "../dynograph-cluster" }
 dynograph-resolution = { path = "../dynograph-resolution" }
 serde = { workspace = true }
 serde_json = { workspace = true }

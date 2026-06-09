@@ -196,7 +196,7 @@ policy is: **call these endpoints instead of reimplementing the math locally**
 (no hand-rolled numpy adjacency SVD, no duplicated cosine loops). Keeping one
 audited implementation behind a stable wire contract is the whole point.
 
-Three families, all under the published OpenAPI spec (`GET /openapi.json`):
+These families, all under the published OpenAPI spec (`GET /openapi.json`):
 
 - **Vector & stats** — `POST /v1/util/*`: per-pair algebra (`cosine_similarity`,
   `euclidean_distance`, `add`, `scale`, `l2_normalize`, …), reductions
@@ -216,6 +216,15 @@ Three families, all under the published OpenAPI spec (`GET /openapi.json`):
   edge-weight projection, and a direction — and gets back a generic result
   (scores, partitions, paths). Behind the optional `graph` build feature; the
   published image enables it. Without the feature the routes return `501`.
+
+- **Stateless analysis** — also `POST /v1/util/*`, but operating on a
+  caller-supplied matrix rather than vectors or a stored graph: `game/analyze`
+  (normal-form game theory — dominant strategies, pure & 2×2-mixed Nash, Pareto
+  optimality, `nash_is_pareto_suboptimal`) and `dbscan` (density-based
+  clustering of a precomputed N×N distance matrix → a label per point, `-1` =
+  noise). These live under `util/` (not `algo/`) and need no `graph` feature —
+  they take the matrix in the request, not the graph's topology. `dbscan` is
+  distinct from the graph suite's Louvain: density-on-points vs community-on-edges.
 
 The smoke test (`scripts/smoke-test.sh`, run in CI after the release build)
 probes `/v1/util/pairwise_cosine` on the booted binary, so a build that fails to

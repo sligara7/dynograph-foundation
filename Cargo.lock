@@ -457,6 +457,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dynograph-cluster"
+version = "0.8.0"
+
+[[package]]
 name = "dynograph-core"
 version = "0.8.0"
 dependencies = [
@@ -488,6 +492,7 @@ name = "dynograph-service"
 version = "0.8.0"
 dependencies = [
  "axum",
+ "dynograph-cluster",
  "dynograph-core",
  "dynograph-game",
  "dynograph-graph",

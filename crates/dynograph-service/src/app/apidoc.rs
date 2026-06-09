@@ -90,6 +90,7 @@ use super::*;
         util_pairwise_cosine,
         util_pairwise_distance,
         util_game_analyze,
+        util_dbscan,
         util_mean,
         util_variance,
         util_std_dev,
@@ -240,6 +241,9 @@ use super::*;
         DominantInfo,
         NashDominationInfo,
         Mixed2x2Info,
+        // clustering
+        DbscanRequest,
+        DbscanResponse,
         // ops
         BuildInfoResponse,
     )),
