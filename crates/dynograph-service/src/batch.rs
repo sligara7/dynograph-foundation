@@ -45,6 +45,12 @@ pub(crate) const MAX_BATCH_OPS: usize = 1000;
 #[derive(Debug, Deserialize, ToSchema)]
 pub(crate) struct BatchRequest {
     pub ops: Vec<BatchOp>,
+    /// Validate-only: run every op against the batch buffer (read-your-own-
+    /// writes intact) to compute a per-op pass/fail report, then discard
+    /// without committing. The graph is never mutated. Defaults to false
+    /// (commit). See [`BatchValidation`].
+    #[serde(default)]
+    pub dry_run: bool,
 }
 
 /// One mutation. Field names match the existing single-handler bodies
@@ -140,6 +146,41 @@ pub(crate) struct BatchOpError {
     pub error: String,
     pub op_index: usize,
     pub op_type: &'static str,
+}
+
+/// One op's outcome in a `dry_run` validation report.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BatchOpResult {
+    pub index: usize,
+    pub op: &'static str,
+    pub ok: bool,
+    /// The would-be failure message; absent when `ok`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Response for a `dry_run` batch: a per-op pass/fail report plus an overall
+/// flag. Like the real commit, evaluation **stops at the first failing op** (a
+/// commit aborts there, so reporting failures past it would describe a sequence
+/// that can never run). `results` therefore covers the ops up to and including
+/// the first failure; when `valid` is true it covers all of them.
+#[derive(Debug, Serialize, ToSchema)]
+pub(crate) struct BatchValidation {
+    /// True iff every op would apply; when false, the last entry in `results`
+    /// is the first op that failed and why.
+    pub valid: bool,
+    pub results: Vec<BatchOpResult>,
+}
+
+/// The `200 OK` body of `POST /batch`: a commit summary on the normal path, or
+/// a per-op validation report for a `dry_run`. Untagged so the serialized bytes
+/// are exactly the inner struct (no added discriminant — the commit response is
+/// byte-for-byte unchanged) while utoipa still emits an accurate `oneOf`.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub(crate) enum BatchOk {
+    Commit(BatchResponse),
+    DryRun(BatchValidation),
 }
 
 /// Apply one op against `engine` with batching active. The "missing
@@ -245,4 +286,49 @@ pub(crate) fn run_ops(
     }
 
     Ok((response, deleted_nodes))
+}
+
+/// Run ops against `engine` (which must already have `begin_batch()` active)
+/// for a `dry_run`, recording each op's pass/fail, and **stop at the first
+/// failure** — exactly where a real commit would abort. Stopping there is both
+/// faithful (a commit never reaches ops past the first failure) and necessary
+/// for correctness: a node write can buffer its RocksDB put *before* a fallible
+/// full-text mirror step (`StorageEngine` documents this authoritative-then-
+/// mirror order), so a failed op may leave a partial buffer entry; not
+/// evaluating later ops against it avoids mislabeling them. The caller must
+/// `discard_batch()` afterwards — a dry run never commits, so the partial entry
+/// of a failed op is thrown away with the rest.
+pub(crate) fn dry_run_ops(
+    engine: &mut StorageEngine,
+    graph_id: &str,
+    ops: Vec<BatchOp>,
+) -> BatchValidation {
+    let mut results = Vec::with_capacity(ops.len());
+    for (index, op) in ops.into_iter().enumerate() {
+        let op_type = op.kind();
+        match apply_op(engine, graph_id, op) {
+            Ok(_) => results.push(BatchOpResult {
+                index,
+                op: op_type,
+                ok: true,
+                error: None,
+            }),
+            Err(e) => {
+                results.push(BatchOpResult {
+                    index,
+                    op: op_type,
+                    ok: false,
+                    error: Some(e),
+                });
+                return BatchValidation {
+                    valid: false,
+                    results,
+                };
+            }
+        }
+    }
+    BatchValidation {
+        valid: true,
+        results,
+    }
 }

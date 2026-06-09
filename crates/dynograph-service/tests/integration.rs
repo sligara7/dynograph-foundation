@@ -2505,6 +2505,97 @@ async fn batch_happy_path_mixed_ops_returns_correct_counts() {
     assert!(edge_exists(&app, "Likes", "b", "d").await, "b->d created");
 }
 
+#[tokio::test]
+async fn batch_dry_run_valid_reports_all_ok_and_commits_nothing() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "x").await;
+    // create y, then an edge x->y (read-your-own-writes: op 1 sees the buffered
+    // y). All valid — but dry_run must not persist anything.
+    let (status, resp) = post_batch(
+        &app,
+        json!({
+            "dry_run": true,
+            "ops": [
+                {"op": "create_node", "node_type": "Item", "node_id": "y", "properties": {"name": "y"}},
+                {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "x", "to_type": "Item", "to_id": "y", "properties": {"weight": 0.5}},
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["valid"], true, "body: {resp}");
+    let results = resp["results"].as_array().unwrap();
+    assert_eq!(results.len(), 2);
+    assert!(results.iter().all(|r| r["ok"] == true), "body: {resp}");
+    assert_eq!(results[0]["op"], "create_node");
+    // Nothing committed.
+    assert!(!node_exists(&app, "Item", "y").await, "y must not persist");
+    assert!(
+        !edge_exists(&app, "Likes", "x", "y").await,
+        "edge must not persist"
+    );
+}
+
+#[tokio::test]
+async fn batch_dry_run_reports_failing_op_and_commits_nothing() {
+    let app = build_app_with_item_graph().await;
+    // op 0 creates x (ok); op 1 replaces a node that doesn't exist (fails).
+    let (status, resp) = post_batch(
+        &app,
+        json!({
+            "dry_run": true,
+            "ops": [
+                {"op": "create_node", "node_type": "Item", "node_id": "x", "properties": {"name": "x"}},
+                {"op": "replace_node", "node_type": "Item", "node_id": "missing", "properties": {"name": "z"}},
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "dry_run is a 200 report: {resp}");
+    assert_eq!(resp["valid"], false, "body: {resp}");
+    let results = resp["results"].as_array().unwrap();
+    assert_eq!(results[0]["ok"], true);
+    assert_eq!(results[1]["ok"], false);
+    assert_eq!(results[1]["index"], 1);
+    assert_eq!(results[1]["op"], "replace_node");
+    assert!(results[1]["error"].is_string(), "body: {resp}");
+    // op 0's create is rolled back with the rest.
+    assert!(!node_exists(&app, "Item", "x").await, "nothing persists");
+}
+
+#[tokio::test]
+async fn batch_dry_run_stops_at_the_first_failure() {
+    // dry_run reports the partition up to and INCLUDING the first failing op,
+    // then stops — mirroring the commit path, which aborts there (so later ops
+    // would never run). Op 1 is valid but comes after the op-0 failure, so it
+    // is never evaluated.
+    let app = build_app_with_item_graph().await;
+    let ops = json!({
+        "dry_run": true,
+        "ops": [
+            {"op": "replace_node", "node_type": "Item", "node_id": "nope1", "properties": {}},
+            {"op": "create_node", "node_type": "Item", "node_id": "ok", "properties": {"name": "ok"}},
+        ]
+    });
+    let (status, resp) = post_batch(&app, ops.clone()).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["valid"], false);
+    let results = resp["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1, "stops at the first failure: {resp}");
+    assert_eq!(results[0]["ok"], false);
+    assert_eq!(results[0]["index"], 0);
+    assert_eq!(results[0]["op"], "replace_node");
+
+    // The commit path (dry_run:false) stops at the same first failure with the
+    // unchanged per-op error shape, committing nothing.
+    let commit = json!({"ops": ops["ops"].clone()});
+    let (status, resp) = post_batch(&app, commit).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+    assert_eq!(resp["op_index"], 0);
+    assert_eq!(resp["op_type"], "replace_node");
+    assert!(!node_exists(&app, "Item", "ok").await, "atomic rollback");
+}
+
 /// Cascade-delete sees in-batch edges via buffer-aware reads (v0.5.5+).
 /// Pre-v0.5.5 this test asserted the opposite — that the cascade missed
 /// in-batch edges and left orphans. The engine grew buffer-aware reads

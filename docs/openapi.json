@@ -1092,6 +1092,7 @@
           "primitives"
         ],
         "summary": "Atomic multi-op transaction. See `crate::batch` for the wire shape\nand design rationale. Whole batch runs under one `with_state_write`\nlock so (a) ops and HNSW maintenance for any `delete_node` happen\nin lockstep, and (b) concurrent readers either see pre-batch or\npost-batch state, never a torn intermediate.",
+        "description": "With `dry_run: true` the ops run against the batch buffer for a per-op\nvalidation report and are then discarded — the graph is never mutated and\nthe response is a `BatchValidation` (HTTP 200 regardless of `valid`).",
         "operationId": "batch",
         "parameters": [
           {
@@ -1116,17 +1117,17 @@
         },
         "responses": {
           "200": {
-            "description": "all ops applied",
+            "description": "commit summary, or a dry_run per-op report (incl. dry_run failures)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BatchResponse"
+                  "$ref": "#/components/schemas/BatchOk"
                 }
               }
             }
           },
           "400": {
-            "description": "validation error or per-op failure",
+            "description": "request-shape error, or a commit-path per-op failure (dry_run failures are reported via 200)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3623,6 +3624,17 @@
           }
         }
       },
+      "BatchOk": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BatchResponse"
+          },
+          {
+            "$ref": "#/components/schemas/BatchValidation"
+          }
+        ],
+        "description": "The `200 OK` body of `POST /batch`: a commit summary on the normal path, or\na per-op validation report for a `dry_run`. Untagged so the serialized bytes\nare exactly the inner struct (no added discriminant — the commit response is\nbyte-for-byte unchanged) while utoipa still emits an accurate `oneOf`."
+      },
       "BatchOp": {
         "oneOf": [
           {
@@ -3813,12 +3825,44 @@
           }
         }
       },
+      "BatchOpResult": {
+        "type": "object",
+        "description": "One op's outcome in a `dry_run` validation report.",
+        "required": [
+          "index",
+          "op",
+          "ok"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The would-be failure message; absent when `ok`."
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "op": {
+            "type": "string"
+          }
+        }
+      },
       "BatchRequest": {
         "type": "object",
         "required": [
           "ops"
         ],
         "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "Validate-only: run every op against the batch buffer (read-your-own-\nwrites intact) to compute a per-op pass/fail report, then discard\nwithout committing. The graph is never mutated. Defaults to false\n(commit). See [`BatchValidation`]."
+          },
           "ops": {
             "type": "array",
             "items": {
@@ -3866,6 +3910,26 @@
           "ops_applied": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "BatchValidation": {
+        "type": "object",
+        "description": "Response for a `dry_run` batch: a per-op pass/fail report plus an overall\nflag. Like the real commit, evaluation **stops at the first failing op** (a\ncommit aborts there, so reporting failures past it would describe a sequence\nthat can never run). `results` therefore covers the ops up to and including\nthe first failure; when `valid` is true it covers all of them.",
+        "required": [
+          "valid",
+          "results"
+        ],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BatchOpResult"
+            }
+          },
+          "valid": {
+            "type": "boolean",
+            "description": "True iff every op would apply; when false, the last entry in `results`\nis the first op that failed and why."
           }
         }
       },
