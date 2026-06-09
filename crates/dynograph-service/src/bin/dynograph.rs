@@ -49,6 +49,24 @@ fn tracing_subscriber_init() {
     }
 }
 
+/// On-disk storage is only available when this binary is built with the
+/// `rocksdb` feature (on by default). The two `cfg`-selected variants keep the
+/// call site clean and avoid a constant-condition branch.
+#[cfg(feature = "rocksdb")]
+fn ensure_on_disk_supported() -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+#[cfg(not(feature = "rocksdb"))]
+fn ensure_on_disk_supported() -> Result<(), Box<dyn std::error::Error>> {
+    Err(
+        "storage.root is set (on-disk / RocksDB mode), but this binary was built without the \
+         `rocksdb` feature. Rebuild with default features (or `--features rocksdb`), or unset \
+         storage.root / DYNOGRAPH_STORAGE_ROOT to run in-memory."
+            .into(),
+    )
+}
+
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = parse_config_arg()?;
     let cfg = Config::load(config_path.as_deref())?;
@@ -58,10 +76,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // both the registry backend and whether the service starts
     // not-ready (waiting for rehydrate).
     let (registry, readiness) = match &cfg.storage.root {
-        Some(root) => (
-            Arc::new(GraphRegistry::on_disk(root.clone())),
-            Arc::new(Readiness::not_ready()),
-        ),
+        Some(root) => {
+            // On-disk mode needs the `rocksdb` feature compiled in. Fail loud at
+            // startup rather than constructing a registry that would error on
+            // the first graph op (or look like it booted fine).
+            ensure_on_disk_supported()?;
+            (
+                Arc::new(GraphRegistry::on_disk(root.clone())),
+                Arc::new(Readiness::not_ready()),
+            )
+        }
         None => (
             Arc::new(GraphRegistry::in_memory()),
             Arc::new(Readiness::ready()),

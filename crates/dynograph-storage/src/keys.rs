@@ -199,6 +199,10 @@ pub fn node_idx_key_node_id<'a>(key: &'a [u8], value_prefix: &[u8]) -> Option<&'
 /// e.g. `[g, 1, 0x00]` → `[g, 1, 0x01]`. Returns `None` if every byte
 /// in the prefix is `0xFF` (no bounded successor exists — caller must
 /// fall back to per-key iteration).
+// Only the RocksDB backend calls this (range tombstones); without that
+// feature it's exercised solely by its own unit tests, so allow dead_code
+// in a non-rocksdb production build rather than gate it (and its tests) out.
+#[cfg_attr(not(feature = "rocksdb"), allow(dead_code))]
 pub fn next_prefix(prefix: &[u8]) -> Option<Vec<u8>> {
     let mut end = prefix.to_vec();
     while let Some(last) = end.last_mut() {
