@@ -104,6 +104,31 @@ jobs:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
       - run: cargo test -p dynograph-storage
 
+  no-default-features:
+    # The mirror image of storage-rocksdb: proves the in-memory-ONLY build
+    # (`--no-default-features`, so the `rocksdb` feature is off) compiles,
+    # tests, and lints clean — and, crucially, does NOT compile librocksdb-sys.
+    # This is the fast path a consumer or local dev uses to skip the
+    # ~10-minute C++ build when persistence isn't needed (the whole point of
+    # gating RocksDB). clippy -D warnings here also catches code that only the
+    # RocksDB backend uses but wasn't gated (e.g. a dead_code helper).
+    #
+    # Scoped to `-p dynograph-storage -p dynograph-service` (the only crates
+    # that touch RocksDB) rather than `--workspace`: on a *virtual* manifest,
+    # `cargo --workspace --no-default-features` still builds each member with
+    # its own default features, so storage's `rocksdb` default would sneak back
+    # in. Explicit `-p` selection honours `--no-default-features` correctly.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/setup-rust
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: clippy
+      - run: cargo build -p dynograph-storage -p dynograph-service --all-targets --no-default-features
+      - run: cargo test -p dynograph-storage -p dynograph-service --no-default-features
+      - run: cargo clippy -p dynograph-storage -p dynograph-service --all-targets --no-default-features -- -D warnings
+
   graph-feature:
     # The graph-theory algorithm endpoints (`/v1/graphs/{id}/algo/*`) live
     # behind the optional `graph` feature, so the default `cargo test

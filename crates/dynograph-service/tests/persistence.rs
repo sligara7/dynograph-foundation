@@ -5,6 +5,10 @@
 //! the load-bearing behavior of slice 4. RocksDB tests are slow
 //! relative to in-memory ones (each open/close is ~50ms on this
 //! laptop) but unavoidable; we keep the count low.
+//!
+//! Entirely gated on the `rocksdb` feature: every case drives the on-disk
+//! backend, which isn't compiled without it.
+#![cfg(feature = "rocksdb")]
 
 use std::sync::Arc;
 

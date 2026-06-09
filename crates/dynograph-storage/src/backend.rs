@@ -16,10 +16,12 @@
 //! are built on.
 
 use std::collections::HashMap;
+#[cfg(feature = "rocksdb")]
 use std::path::Path;
 use std::sync::Arc;
 
 use dynograph_core::DynoError;
+#[cfg(feature = "rocksdb")]
 use rocksdb::{BlockBasedOptions, ColumnFamilyDescriptor, DB, IteratorMode, Options, WriteBatch};
 
 /// Column family names.
@@ -52,6 +54,7 @@ pub const ALL_CFS: &[&str] = &[
 ];
 
 /// Per-column-family RocksDB options tuned for access patterns.
+#[cfg(feature = "rocksdb")]
 fn cf_options(cf_name: &str) -> Options {
     let mut opts = Options::default();
     match cf_name {
@@ -361,10 +364,12 @@ impl KvBackend for MemoryBackend {
 // =============================================================================
 
 /// RocksDB on disk, one column family per [`ALL_CFS`] entry.
+#[cfg(feature = "rocksdb")]
 pub(crate) struct RocksBackend {
     db: DB,
 }
 
+#[cfg(feature = "rocksdb")]
 impl RocksBackend {
     /// Open (creating if missing) a RocksDB store with all column
     /// families at `path`.
@@ -411,6 +416,7 @@ impl RocksBackend {
     }
 }
 
+#[cfg(feature = "rocksdb")]
 impl KvBackend for RocksBackend {
     fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Arc<[u8]>>, DynoError> {
         let cf_handle = self

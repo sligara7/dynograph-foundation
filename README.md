@@ -30,6 +30,14 @@ itself is backend-agnostic. If you'd rather run on something else — PostgreSQL
 SQLite, sled — it's a matter of implementing that one trait; nothing in the
 graph engine has to change.
 
+RocksDB sits behind the **`rocksdb` cargo feature, which is on by default**, so
+the shipped binary and library behave exactly as before. Building with
+`--no-default-features` drops RocksDB (and its ~10-minute C++ compile),
+leaving the in-memory backend alone — handy for fast test/CI builds and for
+consumers that don't need on-disk persistence. Such a build fails loud if asked
+to use on-disk storage (a set `storage.root`/`DYNOGRAPH_STORAGE_ROOT`) rather
+than silently falling back to memory.
+
 ## Schema-driven configuration
 
 The pitch in one line: **one generic engine, configured by a schema, becomes a

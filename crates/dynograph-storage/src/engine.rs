@@ -5,9 +5,11 @@ use std::sync::{Arc, Mutex};
 
 use dynograph_core::{DynoError, Schema, Value};
 
+#[cfg(feature = "rocksdb")]
+use crate::backend::RocksBackend;
 use crate::backend::{
     ALL_CFS, BufferedEffect, BufferedOp, CF_ADJ_IN, CF_ADJ_OUT, CF_EDGES, CF_EMBEDDINGS,
-    CF_NODE_IDX, CF_NODES, CfId, KvBackend, MemoryBackend, RocksBackend,
+    CF_NODE_IDX, CF_NODES, CfId, KvBackend, MemoryBackend,
 };
 use crate::cache::{CacheConfig, ReadCache};
 
@@ -80,6 +82,13 @@ impl StorageEngine {
     }
 
     /// Create a RocksDB-backed storage engine (for production).
+    ///
+    /// Requires the `rocksdb` feature (on by default). A crate built with
+    /// `--no-default-features` keeps this method but fails loud (see the
+    /// `cfg(not(feature = "rocksdb"))` variant below) rather than silently
+    /// degrading to an in-memory store — on-disk mode is selected explicitly,
+    /// so quietly dropping it would lose the caller's data.
+    #[cfg(feature = "rocksdb")]
     pub fn new_rocksdb(schema: Schema, path: &str) -> Result<Self, DynoError> {
         let backend = RocksBackend::open(path)?;
 
@@ -104,6 +113,20 @@ impl StorageEngine {
             #[cfg(feature = "fulltext")]
             text_index,
         })
+    }
+
+    /// Fail-loud stub when the crate is built without the `rocksdb` feature.
+    /// The method stays in the API so callers (e.g. the service registry) need
+    /// no `cfg` gating, but on-disk storage genuinely isn't compiled into this
+    /// build, so we return an actionable error instead of a silent fallback.
+    #[cfg(not(feature = "rocksdb"))]
+    pub fn new_rocksdb(_schema: Schema, _path: &str) -> Result<Self, DynoError> {
+        Err(DynoError::Storage(
+            "on-disk RocksDB storage is unavailable: this build was compiled without the \
+             `rocksdb` feature. Rebuild with default features (or `--features rocksdb`), or \
+             use the in-memory backend."
+                .to_string(),
+        ))
     }
 
     /// Get the schema.
@@ -1502,6 +1525,11 @@ schema:
     /// `new_in_memory` / `new_rocksdb` directly.
     fn test_engine(schema: Schema) -> StorageEngine {
         match std::env::var("DYNOGRAPH_TEST_BACKEND").as_deref() {
+            // Only honour the rocksdb backend when it's actually compiled in.
+            // Without the feature the arm is removed, so a stray
+            // `DYNOGRAPH_TEST_BACKEND=rocksdb` falls through to in-memory — the
+            // only backend this build has — rather than panicking on the stub.
+            #[cfg(feature = "rocksdb")]
             Ok("rocksdb") => {
                 let dir = tempfile::tempdir()
                     .expect("create temp dir for rocksdb test")
@@ -2218,6 +2246,7 @@ schema:
         );
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn index_survives_through_rocksdb_reopen() {
         let dir = tempfile::tempdir().unwrap();
@@ -2279,6 +2308,7 @@ schema:
 
     // RocksDB tests
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_create_and_get_node() {
         let dir = tempfile::tempdir().unwrap();
@@ -2297,6 +2327,7 @@ schema:
         assert_eq!(node.properties["name"].as_str().unwrap(), "Alice");
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_persistence() {
         let dir = tempfile::tempdir().unwrap();
@@ -2338,6 +2369,7 @@ schema:
         }
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_scan_and_count() {
         let dir = tempfile::tempdir().unwrap();
@@ -2361,6 +2393,7 @@ schema:
         assert_eq!(chars.len(), 2);
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_delete_node() {
         let dir = tempfile::tempdir().unwrap();
@@ -2374,6 +2407,7 @@ schema:
         assert!(engine.get_node("g1", "Character", "c1").unwrap().is_none());
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_outgoing_edges() {
         let dir = tempfile::tempdir().unwrap();
@@ -2956,6 +2990,7 @@ schema:
         assert_eq!(scanned[1].1, vec![0.0, 1.0]);
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_embedding_persistence() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -2978,6 +3013,7 @@ schema:
     /// bounds. Reachable in production via the `/batch` endpoint. The
     /// in-memory backend keys CFs by string so it never hit this; the
     /// bug only surfaces on RocksDB, hence the explicit backend here.
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_batched_delete_node_with_embedding_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3004,6 +3040,7 @@ schema:
     /// Companion to the above: the batched `set_embedding` *put* path
     /// also resolves the `CF_EMBEDDINGS` handle on commit, the same
     /// handle that was missing from the old array.
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_batched_set_embedding_commits() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -3177,6 +3214,7 @@ schema:
         );
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn rocksdb_short_graph_id_adjacency_is_correct() {
         // S7 regression: with `fixed_prefix(48)` on adjacency CFs, a
@@ -3230,6 +3268,7 @@ schema:
 
     /// RocksDB engine over a fresh temp dir (leaked — the engine holds it open
     /// for the test, mirroring `test_engine`'s rocksdb arm).
+    #[cfg(feature = "rocksdb")]
     fn rocks_engine(schema: Schema) -> StorageEngine {
         let dir = tempfile::tempdir().expect("temp dir").keep();
         let path = dir.to_str().expect("utf-8 temp path");
@@ -3412,6 +3451,7 @@ schema:
         );
     }
 
+    #[cfg(feature = "rocksdb")]
     #[test]
     fn reindex_rebuilds_and_survives_rocksdb_reopen() {
         let dir = tempfile::tempdir().expect("temp dir");
