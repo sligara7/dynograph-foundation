@@ -384,6 +384,60 @@
         }
       }
     },
+    "/v1/graphs/{id}/algo/communities": {
+      "post": {
+        "tags": [
+          "algo"
+        ],
+        "summary": "Louvain community detection over the scoped undirected subgraph: returns the\npartition (communities as id lists) plus its modularity. Read-only; one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
+        "operationId": "algo_communities",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "graph id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommunitiesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "communities + modularity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommunitiesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "validation error"
+          },
+          "401": {
+            "description": "missing or invalid credentials (when bearer auth is enabled)"
+          },
+          "404": {
+            "description": "graph not found"
+          },
+          "501": {
+            "description": "graph feature not enabled in this build"
+          }
+        }
+      }
+    },
     "/v1/graphs/{id}/algo/components": {
       "post": {
         "tags": [
@@ -4023,6 +4077,82 @@
           },
           "to_id": {
             "type": "string"
+          }
+        }
+      },
+      "CommunitiesRequest": {
+        "type": "object",
+        "description": "Request for `POST /v1/graphs/{id}/algo/communities`. Edge weights are\n**strengths** (tighter tie); omit `weight` for an unweighted run.\n\nCommunity detection (Louvain) is defined on the **undirected** graph, so\n`direction` accepts only `undirected` (the default); `directed` is rejected\nwith a 400, the same posture as `/algo/eigenvector`.",
+        "properties": {
+          "direction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoDirection",
+                "description": "Only `undirected` is accepted (the default). `directed` => 400."
+              }
+            ]
+          },
+          "resolution": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Resolution γ (strictly positive, finite). Higher => more, smaller\ncommunities; lower => fewer, larger. Defaults to 1.0 (classic modularity)."
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AlgoScope"
+              }
+            ]
+          },
+          "weight": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WeightSpec"
+              }
+            ]
+          }
+        }
+      },
+      "CommunitiesResponse": {
+        "type": "object",
+        "description": "Response for `POST /v1/graphs/{id}/algo/communities`. The Louvain partition\nplus its modularity under the requested resolution.",
+        "required": [
+          "count",
+          "communities",
+          "modularity"
+        ],
+        "properties": {
+          "communities": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Communities as lists of node ids; each list sorted, and the lists\nordered deterministically by their smallest id (as `/algo/components`)."
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of communities.",
+            "minimum": 0
+          },
+          "modularity": {
+            "type": "number",
+            "format": "double",
+            "description": "Modularity of the partition (0.0 for an edgeless or empty subgraph)."
           }
         }
       },
