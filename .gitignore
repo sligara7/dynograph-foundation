@@ -9,3 +9,9 @@
 # noise (e.g. seeds from a deliberately-broken local experiment). If a
 # real shrink is worth pinning, add it as an explicit unit test instead.
 proptest-regressions/
+
+# Claude Code harness runtime state (e.g. the scheduled-task lock). Per-session
+# transient — not project source — so it shouldn't be tracked. Scoped to the
+# lock file rather than all of .claude/ so intentional project config (e.g. a
+# committed settings.json) can still be added later.
+.claude/scheduled_tasks.lock
