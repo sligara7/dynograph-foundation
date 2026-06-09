@@ -11,11 +11,86 @@ crates or as the `dynograph` binary.
 | `dynograph-core` | Schema model (`Schema`, `NodeTypeDef`, `EdgeTypeDef`, `Value`, `DynoError`); YAML/JSON parse + validate. |
 | `dynograph-storage` | RocksDB-backed node/edge persistence; sidecar embedding store; atomic batches. |
 | `dynograph-resolution` | Three-tier entity resolution: fuzzy → vector tiebreaker → new. |
-| `dynograph-vector` | f32 vector ops + HNSW index. |
+| `dynograph-vector` | Pure f32/f64 vector + stats math, and the HNSW index. |
+| `dynograph-graph` | Pure, dependency-free graph-theory algorithms (centrality, components, communities, paths, flow). |
+| `dynograph-game` | Pure, dependency-free normal-form game-theory analysis. |
+| `dynograph-text` | Tantivy-backed full-text (BM25) index. |
 | `dynograph-service` | axum HTTP service; multi-graph registry; pluggable auth; `/v1/*` REST + `/metrics`. |
 | `dynograph-client` | Async `reqwest` client for `/v1/*`. |
 
 No crates are published to crates.io; consume by git tag (below).
+
+## Schema-driven configuration
+
+The pitch in one line: **one generic engine, configured by a schema, becomes a
+typed, indexed, searchable graph service — with no code, no migration, and no
+redeploy.** You `POST` a schema; the same binary now validates writes, builds
+indexes, answers vector/keyword searches, dedups entities, and runs graph
+algorithms over *your* node and edge types.
+
+```mermaid
+flowchart LR
+    S["Schema (YAML/JSON)<br/>node types · edge types<br/>property flags"]
+    E(("dynograph<br/>engine"))
+    G["Configured graph<br/>typed · indexed · searchable"]
+    S -->|"POST /v1/graphs"| E --> G
+    G --> CRUD["Typed CRUD<br/>+ write validation"]
+    G --> SCAN["Indexed scans<br/>+ where-filters"]
+    G --> VEC["Vector similarity<br/>(HNSW)"]
+    G --> FT["Keyword search<br/>(BM25)"]
+    G --> RES["Entity resolution<br/>(fuzzy + vector)"]
+    G --> ALGO["Graph algorithms<br/>(scoped per-property)"]
+```
+
+Each declaration in the schema is what *turns on* a capability — the engine has
+no hardcoded domain types, only the ones your schema names:
+
+```mermaid
+flowchart LR
+    d1["type · required ·<br/>range · enum · default"] --> u1["write-time validation<br/>+ defaults"]
+    d2["indexed: true"] --> u2["nodes:scan · list filters ·<br/>algo where-prefilter"]
+    d3["fulltext: true"] --> u3["search:text ·<br/>search:hybrid keyword leg"]
+    d4["embedding_field"] --> u4["similar ·<br/>search:hybrid vector leg"]
+    d5["resolution rules"] --> u5["resolve-or-create<br/>dedup"]
+```
+
+A minimal schema (a `Character` type whose `name` is exact-match indexed and
+also full-text searchable, with embeddings drawn from `description`, plus a
+`KNOWS` edge):
+
+```yaml
+schema:
+  name: stories
+  version: 1
+  node_types:
+    Character:
+      properties:
+        name:        { type: string, required: true, indexed: true, fulltext: true }
+        role:        { type: enum, values: [protagonist, antagonist, supporting] }
+        story_id:    { type: string, indexed: true }
+        description: { type: string }
+      embedding_field: description
+      resolution: { strategy: fuzzy_then_vector, fuzzy_threshold: 70 }
+  edge_types:
+    KNOWS:
+      from: Character
+      to:   Character
+```
+
+One service hosts many independent graphs, each with its own schema — so a
+single deployment is multi-tenant and turnkey:
+
+```mermaid
+flowchart TB
+    E(("single service · generic engine"))
+    E --> A["graph: stories<br/>schema A"]
+    E --> B["graph: market<br/>schema B"]
+    E --> C["graph: …<br/>schema N"]
+```
+
+Because `story_id` above is an indexed *property* (not a type), the `algo/*`
+endpoints can scope analytics to one logical sub-graph (e.g. per-story PageRank)
+inside that one shared graph via a `where` predicate.
 
 ## Build
 
@@ -106,8 +181,10 @@ let metadata = client.get_graph("g1").await?;
 
 ## Docs
 
+- [`docs/endpoints.md`](docs/endpoints.md) — **the complete endpoint catalog** (all 79 `/v1` routes)
+- [`docs/openapi.json`](docs/openapi.json) — machine-readable OpenAPI 3 contract
+- [`docs/api.md`](docs/api.md) — worked request/response examples for the core CRUD + primitives
 - [`docs/service.md`](docs/service.md) — config, deployment, probes
-- [`docs/api.md`](docs/api.md) — `/v1/*` REST reference
 - [`docs/migration.md`](docs/migration.md) — embedded → service
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 
