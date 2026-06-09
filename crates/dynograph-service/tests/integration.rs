@@ -6037,6 +6037,108 @@ async fn algo_empty_node_types_scope_fails_loud() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
 }
 
+// algo/communities (#24) — Louvain. Build a connected two-faction graph (two
+// Character triangles joined by a single bridge MENTIONS edge) so the split is
+// a genuine within-component community partition, not just two components.
+#[cfg(feature = "graph")]
+async fn seed_two_faction_graph(app: &axum::Router) {
+    for id in ["a1", "a2", "a3", "b1", "b2", "b3"] {
+        create_typed_node(app, "Character", id, id, "s").await;
+    }
+    for (x, y) in [
+        ("a1", "a2"),
+        ("a2", "a3"),
+        ("a3", "a1"),
+        ("b1", "b2"),
+        ("b2", "b3"),
+        ("b3", "b1"),
+        ("a1", "b1"), // the single bridge
+    ] {
+        create_typed_edge(app, "MENTIONS", "Character", x, "Character", y).await;
+    }
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_communities_recovers_two_factions() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_faction_graph(&app).await;
+
+    let (status, resp) = post_algo(&app, "communities", json!({})).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["count"], 2, "two factions: {resp}");
+    assert!(
+        resp["modularity"].as_f64().unwrap() > 0.3,
+        "modularity should clear 0.3: {resp}"
+    );
+    // Each triangle lands wholly in one community.
+    let comms = resp["communities"].as_array().unwrap();
+    let as_sets: Vec<std::collections::BTreeSet<String>> = comms
+        .iter()
+        .map(|c| {
+            c.as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect()
+        })
+        .collect();
+    let faction_a: std::collections::BTreeSet<String> =
+        ["a1", "a2", "a3"].iter().map(|s| s.to_string()).collect();
+    let faction_b: std::collections::BTreeSet<String> =
+        ["b1", "b2", "b3"].iter().map(|s| s.to_string()).collect();
+    assert!(as_sets.contains(&faction_a), "faction A intact: {resp}");
+    assert!(as_sets.contains(&faction_b), "faction B intact: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_communities_rejects_directed() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_faction_graph(&app).await;
+    let (status, resp) = post_algo(&app, "communities", json!({"direction": "directed"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_communities_invalid_resolution_fails_loud() {
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_faction_graph(&app).await;
+    let (status, resp) = post_algo(&app, "communities", json!({"resolution": 0})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");
+}
+
+#[cfg(feature = "graph")]
+#[tokio::test]
+async fn algo_communities_honors_where_scope() {
+    // Compose #24 with #23: scope communities to one story. story-A is a star
+    // centered on char-A1 (one community); story-B never enters.
+    let app = build_app_with_knowledge_graph().await;
+    seed_two_story_graph(&app).await;
+    let (status, resp) = post_algo(
+        &app,
+        "communities",
+        json!({"scope": {"where": [
+            {"property": "story_id", "op": "eq", "value": "story-A"}
+        ]}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let ids: std::collections::BTreeSet<String> = resp["communities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|c| c.as_array().unwrap())
+        .map(|v| v.as_str().unwrap().to_string())
+        .collect();
+    let story_a: std::collections::BTreeSet<String> = ["char-A1", "char-A2", "loc-A1", "ev-A1"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(ids, story_a, "only story-A nodes partitioned: {resp}");
+}
+
 #[cfg(feature = "graph")]
 #[tokio::test]
 async fn algo_degree_ranks_hub_node_first() {
@@ -6513,6 +6615,7 @@ async fn algo_endpoints_return_501_without_graph_feature() {
         "shortest_path",
         "link_prediction",
         "clustering",
+        "communities",
         "toposort",
         "max_flow",
     ] {
