@@ -195,7 +195,7 @@ mod tests {
             (0.0, 0.1), // blob A (indices 0..=2)
             (10.0, 10.0),
             (10.1, 10.0),
-            (10.0, 10.1), // blob B (indices 3..=5)
+            (10.0, 10.1),   // blob B (indices 3..=5)
             (100.0, 100.0), // outlier (index 6)
         ];
         let d = distance_matrix(&points);
@@ -277,7 +277,10 @@ mod tests {
     #[test]
     fn rejects_non_square() {
         let d = vec![vec![0.0, 1.0], vec![1.0]];
-        assert!(matches!(dbscan(&d, 1.0, 2), Err(ClusterError::NotSquare(_))));
+        assert!(matches!(
+            dbscan(&d, 1.0, 2),
+            Err(ClusterError::NotSquare(_))
+        ));
     }
 
     #[test]

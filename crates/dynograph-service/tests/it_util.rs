@@ -126,8 +126,12 @@ async fn dbscan_rejects_non_square_matrix() {
 async fn dbscan_rejects_empty_and_bad_params() {
     let app = build_app();
     // Empty matrix.
-    let (status, _) =
-        post_util(&app, "dbscan", json!({"distance_matrix": [], "eps": 1.0, "min_points": 2})).await;
+    let (status, _) = post_util(
+        &app,
+        "dbscan",
+        json!({"distance_matrix": [], "eps": 1.0, "min_points": 2}),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     // Negative eps.
     let (status, _) = post_util(

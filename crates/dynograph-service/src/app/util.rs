@@ -395,9 +395,7 @@ pub(crate) async fn util_game_analyze(
     ),
     tag = "util",
 )]
-pub(crate) async fn util_dbscan(
-    Json(req): Json<DbscanRequest>,
-) -> Result<Response, RegistryError> {
+pub(crate) async fn util_dbscan(Json(req): Json<DbscanRequest>) -> Result<Response, RegistryError> {
     let resp = tokio::task::spawn_blocking(move || run_dbscan(req))
         .await
         .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
