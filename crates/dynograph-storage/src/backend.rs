@@ -310,12 +310,21 @@ impl KvBackend for MemoryBackend {
         reason = "raw KV pairs straight out of the store; an alias would only obscure"
     )]
     fn prefix_scan(&self, cf: &str, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DynoError> {
-        Ok(self
+        let mut results: Vec<(Vec<u8>, Vec<u8>)> = self
             .store(cf)?
             .iter()
             .filter(|(k, _)| k.starts_with(prefix))
             .map(|(k, v)| (k.clone(), v.clone()))
-            .collect())
+            .collect();
+        // Sort by key so the in-memory backend honours the trait's
+        // ordered-prefix-scan contract. `HashMap` iteration is otherwise
+        // arbitrary, which would diverge from RocksDB's lexicographic SST
+        // ordering — and the in-memory backend is the default *test*
+        // backend, so it must be a faithful stand-in for production order.
+        // `Vec<u8>`'s `Ord` is lexicographic, matching RocksDB's default
+        // byte-wise comparator.
+        results.sort_by(|(a, _), (b, _)| a.cmp(b));
+        Ok(results)
     }
 
     fn prefix_delete(&mut self, cf: &str, prefix: &[u8]) -> Result<(), DynoError> {
