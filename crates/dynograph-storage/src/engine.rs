@@ -1,42 +1,15 @@
 //! Storage engine — supports in-memory (testing) and RocksDB (production).
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use dynograph_core::{DynoError, Schema, Value};
-use rocksdb::{BlockBasedOptions, ColumnFamilyDescriptor, DB, IteratorMode, Options, WriteBatch};
 
+use crate::backend::{
+    ALL_CFS, BufferedEffect, BufferedOp, CF_ADJ_IN, CF_ADJ_OUT, CF_EDGES, CF_EMBEDDINGS, CF_NODES,
+    CF_NODE_IDX, CfId, KvBackend, MemoryBackend, RocksBackend,
+};
 use crate::cache::{CacheConfig, ReadCache};
-
-/// Column family names.
-pub const CF_NODES: &str = "nodes";
-pub const CF_EDGES: &str = "edges";
-pub const CF_ADJ_OUT: &str = "adj_out";
-pub const CF_ADJ_IN: &str = "adj_in";
-/// Reverse index for schema-declared indexed properties. Keys are
-/// `{graph_id}\x00{node_type}\x00{prop_name}\x00{prop_value}\x00{node_id}`
-/// with empty values; the payload is the node_id suffix. Populated on
-/// create/update and cleaned up on delete, driven by `Schema::indexed_properties`.
-pub const CF_NODE_IDX: &str = "node_idx";
-/// Sidecar embedding store. Keys are the same `{graph_id}\x00{node_type}\x00{node_id}`
-/// shape as `CF_NODES` (1-to-1 with nodes); values are raw f32
-/// little-endian bytes (no length prefix — the value's byte length /
-/// 4 *is* the dimension). Embeddings are managed through dedicated
-/// API methods (`set_embedding` / `get_embedding` / `delete_embedding`)
-/// rather than riding on `properties`, since `PropertyType` has no
-/// vector-of-floats variant. `delete_node` cascades to drop the
-/// associated embedding so we don't accumulate orphans.
-pub const CF_EMBEDDINGS: &str = "embeddings";
-
-const ALL_CFS: &[&str] = &[
-    CF_NODES,
-    CF_EDGES,
-    CF_ADJ_OUT,
-    CF_ADJ_IN,
-    CF_NODE_IDX,
-    CF_EMBEDDINGS,
-];
 
 /// A node stored in the graph.
 #[derive(Debug, Clone)]
@@ -57,224 +30,18 @@ pub struct StoredEdge {
     pub properties: HashMap<String, Value>,
 }
 
-/// Backend storage — either in-memory HashMap or RocksDB on disk.
-// `Memory` carries six HashMaps; `Rocks` is a single `DB`. Each
-// `StorageEngine` (and thus each `Backend`) is held once per graph
-// behind a registry `Arc<RwLock<_>>`, never cloned, never moved on a
-// hot path — the size variance is irrelevant. Boxing `Memory` would
-// add a deref to every read/write path of the in-memory test backend
-// for no real gain.
-#[allow(clippy::large_enum_variant)]
-enum Backend {
-    Memory {
-        nodes: HashMap<Vec<u8>, Vec<u8>>,
-        edges: HashMap<Vec<u8>, Vec<u8>>,
-        adj_out: HashMap<Vec<u8>, Vec<u8>>,
-        adj_in: HashMap<Vec<u8>, Vec<u8>>,
-        node_idx: HashMap<Vec<u8>, Vec<u8>>,
-        embeddings: HashMap<Vec<u8>, Vec<u8>>,
-    },
-    Rocks {
-        db: DB,
-    },
-}
-
-impl Backend {
-    /// Pick the in-memory store for `cf`. Errors when called against a
-    /// `Rocks` backend or an unknown CF. Used by every Memory-path
-    /// op (get / put / delete / prefix_scan / prefix_delete) so the
-    /// five-way `match cf` shape isn't repeated.
-    fn memory_store_mut(&mut self, cf: &str) -> Result<&mut HashMap<Vec<u8>, Vec<u8>>, DynoError> {
-        match self {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-                embeddings,
-            } => match cf {
-                CF_NODES => Ok(nodes),
-                CF_EDGES => Ok(edges),
-                CF_ADJ_OUT => Ok(adj_out),
-                CF_ADJ_IN => Ok(adj_in),
-                CF_NODE_IDX => Ok(node_idx),
-                CF_EMBEDDINGS => Ok(embeddings),
-                _ => Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-            },
-            Backend::Rocks { .. } => Err(DynoError::Storage(
-                "memory_store_mut called on Rocks backend".to_string(),
-            )),
-        }
-    }
-
-    fn memory_store(&self, cf: &str) -> Result<&HashMap<Vec<u8>, Vec<u8>>, DynoError> {
-        match self {
-            Backend::Memory {
-                nodes,
-                edges,
-                adj_out,
-                adj_in,
-                node_idx,
-                embeddings,
-            } => match cf {
-                CF_NODES => Ok(nodes),
-                CF_EDGES => Ok(edges),
-                CF_ADJ_OUT => Ok(adj_out),
-                CF_ADJ_IN => Ok(adj_in),
-                CF_NODE_IDX => Ok(node_idx),
-                CF_EMBEDDINGS => Ok(embeddings),
-                _ => Err(DynoError::Storage(format!("Unknown CF: {}", cf))),
-            },
-            Backend::Rocks { .. } => Err(DynoError::Storage(
-                "memory_store called on Rocks backend".to_string(),
-            )),
-        }
-    }
-}
-
-/// Per-column-family RocksDB options tuned for access patterns.
-fn cf_options(cf_name: &str) -> Options {
-    let mut opts = Options::default();
-    match cf_name {
-        CF_NODES | CF_EDGES => {
-            // Point lookups — bloom filter reduces unnecessary disk reads
-            let mut block_opts = BlockBasedOptions::default();
-            block_opts.set_bloom_filter(10.0, false);
-            opts.set_block_based_table_factory(&block_opts);
-        }
-        CF_ADJ_OUT | CF_ADJ_IN => {
-            // No fixed-prefix extractor: keys are
-            // `{graph_id}\x00{node_id}\x00{edge_type}\x00{peer_id}` and
-            // graph_id/node_id are user-supplied with no length bound.
-            // The previous `fixed_prefix(48)` assumed UUID-shaped graph
-            // ids and bled into the edge_type field on shorter ones
-            // (e.g. graph_id="g1"), which is incorrect — RocksDB would
-            // group keys by a prefix that crosses key boundaries.
-            // Without an extractor, prefix scans use plain seek + range
-            // iteration, which is correct on any key shape; SST block
-            // ordering still keeps a node's adjacency keys close on
-            // disk so seek-and-iterate cost is bounded.
-        }
-        CF_NODE_IDX => {
-            // Prefix scans on `{graph_id}\x00{node_type}\x00{prop_name}\x00{value}\x00`.
-            // Variable-length — no fixed prefix extractor. Seek-to-prefix still benefits
-            // from SST block ordering.
-        }
-        CF_EMBEDDINGS => {
-            // Mixed: point lookups by (graph_id, node_type, node_id) for
-            // GET/DELETE; prefix scans by (graph_id, node_type) for the
-            // future `scan_embeddings_by_type` path slice 8b will use to
-            // rebuild HNSW state on rehydrate.
-            let mut block_opts = BlockBasedOptions::default();
-            block_opts.set_bloom_filter(10.0, false);
-            opts.set_block_based_table_factory(&block_opts);
-        }
-        _ => {}
-    }
-    opts
-}
-
-/// Column family identifier — avoids String allocations in the write buffer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CfId {
-    Nodes,
-    Edges,
-    AdjOut,
-    AdjIn,
-    NodeIdx,
-    Embeddings,
-}
-
-impl CfId {
-    fn from_str(s: &str) -> Option<Self> {
-        match s {
-            CF_NODES => Some(Self::Nodes),
-            CF_EDGES => Some(Self::Edges),
-            CF_ADJ_OUT => Some(Self::AdjOut),
-            CF_ADJ_IN => Some(Self::AdjIn),
-            CF_NODE_IDX => Some(Self::NodeIdx),
-            CF_EMBEDDINGS => Some(Self::Embeddings),
-            _ => None,
-        }
-    }
-    fn as_str(&self) -> &'static str {
-        match self {
-            Self::Nodes => CF_NODES,
-            Self::Edges => CF_EDGES,
-            Self::AdjOut => CF_ADJ_OUT,
-            Self::AdjIn => CF_ADJ_IN,
-            Self::NodeIdx => CF_NODE_IDX,
-            Self::Embeddings => CF_EMBEDDINGS,
-        }
-    }
-}
-
-/// One operation queued in a batch. Applied in insertion order at
-/// `commit_batch` time, with `PrefixDelete` shadowing any earlier
-/// `Put` whose key matches the prefix. (Memory: in-order loop. Rocks:
-/// `delete_range_cf` adds a range tombstone that supersedes earlier
-/// puts in the same `WriteBatch` by sequence number.)
-enum BufferedOp {
-    Put {
-        cf: CfId,
-        key: Vec<u8>,
-        value: Vec<u8>,
-    },
-    Delete {
-        cf: CfId,
-        key: Vec<u8>,
-    },
-    PrefixDelete {
-        cf: CfId,
-        prefix: Vec<u8>,
-    },
-}
-
-/// Result of asking a buffered op "do you affect this `(cf, key)`?".
-/// `Put(value)` = key has this value buffered; `Tombstoned` = key is
-/// shadowed by a buffered `Delete` or covering `PrefixDelete`; the
-/// outer `None` (returned by `BufferedOp::affecting`) = this op doesn't
-/// match.
-enum BufferedEffect<'a> {
-    Put(&'a [u8]),
-    Tombstoned,
-}
-
-impl BufferedOp {
-    fn cf(&self) -> CfId {
-        match self {
-            Self::Put { cf, .. } | Self::Delete { cf, .. } | Self::PrefixDelete { cf, .. } => *cf,
-        }
-    }
-
-    /// Returns `Some` if this op affects `(cf_id, key)`. Used by both
-    /// `get` (reverse-walk: first match wins) and `overlay_buffer_on_scan`
-    /// (forward-walk: each match overwrites the prior overlay state).
-    fn affecting(&self, cf_id: CfId, key: &[u8]) -> Option<BufferedEffect<'_>> {
-        if self.cf() != cf_id {
-            return None;
-        }
-        match self {
-            Self::Put { key: k, value, .. } if k.as_slice() == key => {
-                Some(BufferedEffect::Put(value.as_slice()))
-            }
-            Self::Delete { key: k, .. } if k.as_slice() == key => Some(BufferedEffect::Tombstoned),
-            Self::PrefixDelete { prefix, .. } if key.starts_with(prefix) => {
-                Some(BufferedEffect::Tombstoned)
-            }
-            _ => None,
-        }
-    }
-}
-
 /// The storage engine — schema-validated graph storage.
 pub struct StorageEngine {
     /// `Arc<Schema>` so the schema can be reference-shared without a
     /// deep `Schema::clone`. Public `schema()` derefs through the arc;
     /// constructors and `replace_schema` take `Schema` and wrap.
     schema: Arc<Schema>,
-    backend: Backend,
+    /// The byte-level store. `Box<dyn KvBackend>` keeps `StorageEngine` a
+    /// single concrete type regardless of which backend is in use, so both
+    /// constructors return the same type and the registry holds them
+    /// uniformly. The vtable hop is negligible next to the actual KV work,
+    /// and every read goes through the cache / write-buffer overlay first.
+    backend: Box<dyn KvBackend>,
     /// LRU read cache for node lookups and adjacency scans.
     /// Mutex allows cache updates through &self (get path is immutable at API level).
     read_cache: Mutex<ReadCache>,
@@ -304,14 +71,7 @@ impl StorageEngine {
         });
         Self {
             schema: Arc::new(schema),
-            backend: Backend::Memory {
-                nodes: HashMap::new(),
-                edges: HashMap::new(),
-                adj_out: HashMap::new(),
-                adj_in: HashMap::new(),
-                node_idx: HashMap::new(),
-                embeddings: HashMap::new(),
-            },
+            backend: Box::new(MemoryBackend::new()),
             read_cache: Mutex::new(ReadCache::new(CacheConfig::default())),
             write_buffer: None,
             #[cfg(feature = "fulltext")]
@@ -321,24 +81,13 @@ impl StorageEngine {
 
     /// Create a RocksDB-backed storage engine (for production).
     pub fn new_rocksdb(schema: Schema, path: &str) -> Result<Self, DynoError> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.create_missing_column_families(true);
-
-        let cf_descriptors: Vec<ColumnFamilyDescriptor> = ALL_CFS
-            .iter()
-            .map(|name| ColumnFamilyDescriptor::new(*name, cf_options(name)))
-            .collect();
-
-        let db = DB::open_cf_descriptors(&opts, Path::new(path), cf_descriptors).map_err(|e| {
-            DynoError::Storage(format!("Failed to open RocksDB at {}: {}", path, e))
-        })?;
+        let backend = RocksBackend::open(path)?;
 
         // The full-text index lives in a sibling subdir of the RocksDB store, so
         // it travels with the data dir. Built only when the schema uses it.
         #[cfg(feature = "fulltext")]
         let text_index = if schema.has_any_fulltext_properties() {
-            let ft_dir = Path::new(path).join("fulltext");
+            let ft_dir = std::path::Path::new(path).join("fulltext");
             Some(
                 dynograph_text::TextIndex::open(&ft_dir)
                     .map_err(|e| DynoError::Storage(format!("full-text index open failed: {e}")))?,
@@ -349,7 +98,7 @@ impl StorageEngine {
 
         Ok(Self {
             schema: Arc::new(schema),
-            backend: Backend::Rocks { db },
+            backend: Box::new(backend),
             read_cache: Mutex::new(ReadCache::new(CacheConfig::default())),
             write_buffer: None,
             #[cfg(feature = "fulltext")]
@@ -714,19 +463,7 @@ impl StorageEngine {
             .expect("read_cache lock poisoned")
             .invalidate(&key);
 
-        match &mut self.backend {
-            Backend::Memory { .. } => {
-                self.backend.memory_store_mut(cf)?.insert(key, value);
-                Ok(())
-            }
-            Backend::Rocks { db } => {
-                let cf_handle = db
-                    .cf_handle(cf)
-                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                db.put_cf(&cf_handle, &key, &value)
-                    .map_err(|e| DynoError::Storage(e.to_string()))
-            }
-        }
+        self.backend.put(cf, key, value)
     }
 
     fn get(&self, cf: &str, key: &[u8]) -> Result<Option<Arc<[u8]>>, DynoError> {
@@ -766,21 +503,7 @@ impl StorageEngine {
     }
 
     fn backend_get(&self, cf: &str, key: &[u8]) -> Result<Option<Arc<[u8]>>, DynoError> {
-        match &self.backend {
-            Backend::Memory { .. } => Ok(self
-                .backend
-                .memory_store(cf)?
-                .get(key)
-                .map(|v| Arc::<[u8]>::from(v.as_slice()))),
-            Backend::Rocks { db } => {
-                let cf_handle = db
-                    .cf_handle(cf)
-                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                db.get_cf(&cf_handle, key)
-                    .map(|opt| opt.map(Arc::<[u8]>::from))
-                    .map_err(|e| DynoError::Storage(e.to_string()))
-            }
-        }
+        self.backend.get(cf, key)
     }
 
     /// Delete a key. Idempotent — deleting a missing key is a no-op,
@@ -802,19 +525,7 @@ impl StorageEngine {
             .lock()
             .expect("read_cache lock poisoned")
             .invalidate(key);
-        match &mut self.backend {
-            Backend::Memory { .. } => {
-                self.backend.memory_store_mut(cf)?.remove(key);
-                Ok(())
-            }
-            Backend::Rocks { db } => {
-                let cf_handle = db
-                    .cf_handle(cf)
-                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                db.delete_cf(&cf_handle, key)
-                    .map_err(|e| DynoError::Storage(e.to_string()))
-            }
-        }
+        self.backend.delete(cf, key)
     }
 
     /// Scan all keys with a given prefix in a column family.
@@ -823,33 +534,7 @@ impl StorageEngine {
         reason = "raw KV pairs straight out of RocksDB; an alias would only obscure"
     )]
     fn prefix_scan(&self, cf: &str, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, DynoError> {
-        let backend_results: Vec<(Vec<u8>, Vec<u8>)> = match &self.backend {
-            Backend::Memory { .. } => self
-                .backend
-                .memory_store(cf)?
-                .iter()
-                .filter(|(k, _)| k.starts_with(prefix))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
-            Backend::Rocks { db } => {
-                let cf_handle = db
-                    .cf_handle(cf)
-                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                let iter = db.iterator_cf(
-                    &cf_handle,
-                    IteratorMode::From(prefix, rocksdb::Direction::Forward),
-                );
-                let mut results = Vec::new();
-                for item in iter {
-                    let (key, value) = item.map_err(|e| DynoError::Storage(e.to_string()))?;
-                    if !key.starts_with(prefix) {
-                        break; // Past our prefix
-                    }
-                    results.push((key.to_vec(), value.to_vec()));
-                }
-                results
-            }
-        };
+        let backend_results = self.backend.prefix_scan(cf, prefix)?;
 
         // Buffer wins over backend on scans. Skip the overlay alloc
         // entirely if no batch is active or no buffered op touches this
@@ -950,43 +635,7 @@ impl StorageEngine {
             .lock()
             .expect("read_cache lock poisoned")
             .invalidate_prefix(prefix);
-        match &mut self.backend {
-            Backend::Memory { .. } => {
-                self.backend
-                    .memory_store_mut(cf)?
-                    .retain(|k, _| !k.starts_with(prefix));
-                Ok(())
-            }
-            Backend::Rocks { db } => {
-                let cf_handle = db
-                    .cf_handle(cf)
-                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf)))?;
-                // Single range tombstone via `delete_range_cf` when an
-                // exclusive upper bound exists (almost always — the only
-                // miss is an all-`0xFF` prefix). Fall back to per-key
-                // deletes otherwise. NOTE: do not call while a snapshot
-                // taken before this point is held — RocksDB's range
-                // tombstones interact badly with older snapshots.
-                if let Some(end) = crate::keys::next_prefix(prefix) {
-                    db.delete_range_cf(&cf_handle, prefix, &end)
-                        .map_err(|e| DynoError::Storage(e.to_string()))?;
-                } else {
-                    let keys: Vec<Vec<u8>> = db
-                        .iterator_cf(
-                            &cf_handle,
-                            IteratorMode::From(prefix, rocksdb::Direction::Forward),
-                        )
-                        .take_while(|item| item.as_ref().is_ok_and(|(k, _)| k.starts_with(prefix)))
-                        .filter_map(|item| item.ok().map(|(k, _)| k.to_vec()))
-                        .collect();
-                    for key in keys {
-                        db.delete_cf(&cf_handle, &key)
-                            .map_err(|e| DynoError::Storage(e.to_string()))?;
-                    }
-                }
-                Ok(())
-            }
-        }
+        self.backend.prefix_delete(cf, prefix)
     }
 
     // =========================================================================
@@ -1673,98 +1322,11 @@ impl StorageEngine {
             }
         }
 
-        match &mut self.backend {
-            Backend::Memory { .. } => {
-                for op in buffer {
-                    // memory_store_mut errors only on Rocks/unknown-cf;
-                    // CfId::as_str produces only known CFs, so unwrap is
-                    // unreachable in practice.
-                    let store = self
-                        .backend
-                        .memory_store_mut(op.cf().as_str())
-                        .expect("CfId is always a known CF");
-                    match op {
-                        BufferedOp::Put { key, value, .. } => {
-                            store.insert(key, value);
-                        }
-                        BufferedOp::Delete { key, .. } => {
-                            store.remove(&key);
-                        }
-                        BufferedOp::PrefixDelete { prefix, .. } => {
-                            store.retain(|k, _| !k.starts_with(&prefix));
-                        }
-                    }
-                }
-            }
-            Backend::Rocks { db } => {
-                // Resolve every cf_handle once up front so the per-op
-                // loop doesn't re-do the string-keyed lookup against the
-                // same names — N redundant HashMap lookups under an
-                // internal lock for an N-op batch. `handle_for` then
-                // dispatches with an exhaustive match over `CfId` rather
-                // than indexing a fixed-size array by `cf as usize`: the
-                // array form desynced from the enum and panicked out of
-                // bounds on `CfId::Embeddings` (index 5 into 5 entries).
-                // The match makes adding a column family a compile error
-                // here instead.
-                let nodes = db.cf_handle(CfId::Nodes.as_str());
-                let edges = db.cf_handle(CfId::Edges.as_str());
-                let adj_out = db.cf_handle(CfId::AdjOut.as_str());
-                let adj_in = db.cf_handle(CfId::AdjIn.as_str());
-                let node_idx = db.cf_handle(CfId::NodeIdx.as_str());
-                let embeddings = db.cf_handle(CfId::Embeddings.as_str());
-                let handle_for = |cf: CfId| -> Result<_, DynoError> {
-                    // `cf_handle` returns `Option<&ColumnFamily>` (Copy),
-                    // so the arms copy the handle out by value — no clone.
-                    match cf {
-                        CfId::Nodes => nodes,
-                        CfId::Edges => edges,
-                        CfId::AdjOut => adj_out,
-                        CfId::AdjIn => adj_in,
-                        CfId::NodeIdx => node_idx,
-                        CfId::Embeddings => embeddings,
-                    }
-                    .ok_or_else(|| DynoError::Storage(format!("CF not found: {}", cf.as_str())))
-                };
-
-                let mut batch = WriteBatch::default();
-                for op in &buffer {
-                    let cf_handle = handle_for(op.cf())?;
-                    match op {
-                        BufferedOp::Put { key, value, .. } => {
-                            batch.put_cf(&cf_handle, key, value);
-                        }
-                        BufferedOp::Delete { key, .. } => {
-                            batch.delete_cf(&cf_handle, key);
-                        }
-                        BufferedOp::PrefixDelete { prefix, .. } => {
-                            // One range tombstone instead of N
-                            // per-key deletes; falls back to iterate-
-                            // and-delete only for the all-`0xFF` prefix
-                            // corner case where no exclusive upper
-                            // bound exists.
-                            if let Some(end) = crate::keys::next_prefix(prefix) {
-                                batch.delete_range_cf(&cf_handle, prefix, &end);
-                            } else {
-                                for item in db.iterator_cf(
-                                    &cf_handle,
-                                    IteratorMode::From(prefix, rocksdb::Direction::Forward),
-                                ) {
-                                    let (key, _) =
-                                        item.map_err(|e| DynoError::Storage(e.to_string()))?;
-                                    if !key.starts_with(prefix) {
-                                        break;
-                                    }
-                                    batch.delete_cf(&cf_handle, &key);
-                                }
-                            }
-                        }
-                    }
-                }
-                db.write(batch)
-                    .map_err(|e| DynoError::Storage(format!("Batch write failed: {}", e)))?;
-            }
-        }
+        // Apply the buffered ops atomically. The backend owns the
+        // all-or-nothing semantics (RocksDB `WriteBatch`; the in-memory
+        // backend an in-order loop) and the `PrefixDelete`-supersedes-
+        // earlier-puts ordering.
+        self.backend.commit_batch(buffer)?;
 
         // Make this batch's buffered full-text writes visible now that the
         // authoritative backend write has landed. Reached only when count > 0

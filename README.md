@@ -20,6 +20,16 @@ crates or as the `dynograph` binary.
 
 No crates are published to crates.io; consume by git tag (below).
 
+### Pluggable storage backends
+
+`dynograph-storage` keeps all the schema-aware logic (validation, indexing,
+caching, batching, full-text mirroring) *above* a narrow `KvBackend` trait —
+a handful of byte-level operations over named column families. RocksDB is the
+production backend and an in-memory map is the test backend, but the engine
+itself is backend-agnostic. If you'd rather run on something else — PostgreSQL,
+SQLite, sled — it's a matter of implementing that one trait; nothing in the
+graph engine has to change.
+
 ## Schema-driven configuration
 
 The pitch in one line: **one generic engine, configured by a schema, becomes a
