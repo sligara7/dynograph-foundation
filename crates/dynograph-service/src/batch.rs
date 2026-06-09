@@ -160,15 +160,27 @@ pub(crate) struct BatchOpResult {
 }
 
 /// Response for a `dry_run` batch: a per-op pass/fail report plus an overall
-/// flag. Unlike the commit path (which stops at the first failure for
-/// atomicity), the dry run evaluates **every** op against the buffer — a failed
-/// op simply has no effect on it — so one round-trip surfaces all problems.
+/// flag. Like the real commit, evaluation **stops at the first failing op** (a
+/// commit aborts there, so reporting failures past it would describe a sequence
+/// that can never run). `results` therefore covers the ops up to and including
+/// the first failure; when `valid` is true it covers all of them.
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct BatchValidation {
-    /// True iff every op would apply; when false, `results` pinpoints which
-    /// op(s) failed and why.
+    /// True iff every op would apply; when false, the last entry in `results`
+    /// is the first op that failed and why.
     pub valid: bool,
     pub results: Vec<BatchOpResult>,
+}
+
+/// The `200 OK` body of `POST /batch`: a commit summary on the normal path, or
+/// a per-op validation report for a `dry_run`. Untagged so the serialized bytes
+/// are exactly the inner struct (no added discriminant — the commit response is
+/// byte-for-byte unchanged) while utoipa still emits an accurate `oneOf`.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(untagged)]
+pub(crate) enum BatchOk {
+    Commit(BatchResponse),
+    DryRun(BatchValidation),
 }
 
 /// Apply one op against `engine` with batching active. The "missing
@@ -276,34 +288,47 @@ pub(crate) fn run_ops(
     Ok((response, deleted_nodes))
 }
 
-/// Run every op against `engine` (which must already have `begin_batch()`
-/// active) for a `dry_run`, recording each op's pass/fail. Unlike [`run_ops`]
-/// this does **not** stop at the first failure: a failed `apply_op` leaves the
-/// buffer untouched (the engine validates before writing), so evaluation
-/// continues and the report covers all ops. The caller must `discard_batch()`
-/// afterwards — a dry run never commits.
+/// Run ops against `engine` (which must already have `begin_batch()` active)
+/// for a `dry_run`, recording each op's pass/fail, and **stop at the first
+/// failure** — exactly where a real commit would abort. Stopping there is both
+/// faithful (a commit never reaches ops past the first failure) and necessary
+/// for correctness: a node write can buffer its RocksDB put *before* a fallible
+/// full-text mirror step (`StorageEngine` documents this authoritative-then-
+/// mirror order), so a failed op may leave a partial buffer entry; not
+/// evaluating later ops against it avoids mislabeling them. The caller must
+/// `discard_batch()` afterwards — a dry run never commits, so the partial entry
+/// of a failed op is thrown away with the rest.
 pub(crate) fn dry_run_ops(
     engine: &mut StorageEngine,
     graph_id: &str,
     ops: Vec<BatchOp>,
 ) -> BatchValidation {
     let mut results = Vec::with_capacity(ops.len());
-    let mut valid = true;
     for (index, op) in ops.into_iter().enumerate() {
         let op_type = op.kind();
-        let (ok, error) = match apply_op(engine, graph_id, op) {
-            Ok(_) => (true, None),
+        match apply_op(engine, graph_id, op) {
+            Ok(_) => results.push(BatchOpResult {
+                index,
+                op: op_type,
+                ok: true,
+                error: None,
+            }),
             Err(e) => {
-                valid = false;
-                (false, Some(e))
+                results.push(BatchOpResult {
+                    index,
+                    op: op_type,
+                    ok: false,
+                    error: Some(e),
+                });
+                return BatchValidation {
+                    valid: false,
+                    results,
+                };
             }
-        };
-        results.push(BatchOpResult {
-            index,
-            op: op_type,
-            ok,
-            error,
-        });
+        }
     }
-    BatchValidation { valid, results }
+    BatchValidation {
+        valid: true,
+        results,
+    }
 }

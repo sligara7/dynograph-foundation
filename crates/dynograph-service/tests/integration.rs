@@ -2564,28 +2564,30 @@ async fn batch_dry_run_reports_failing_op_and_commits_nothing() {
 }
 
 #[tokio::test]
-async fn batch_dry_run_evaluates_every_op_not_just_the_first_failure() {
-    // The key difference from the commit path: dry_run reports ALL failures in
-    // one round-trip rather than stopping at the first.
+async fn batch_dry_run_stops_at_the_first_failure() {
+    // dry_run reports the partition up to and INCLUDING the first failing op,
+    // then stops — mirroring the commit path, which aborts there (so later ops
+    // would never run). Op 1 is valid but comes after the op-0 failure, so it
+    // is never evaluated.
     let app = build_app_with_item_graph().await;
     let ops = json!({
         "dry_run": true,
         "ops": [
             {"op": "replace_node", "node_type": "Item", "node_id": "nope1", "properties": {}},
             {"op": "create_node", "node_type": "Item", "node_id": "ok", "properties": {"name": "ok"}},
-            {"op": "delete_edge", "edge_type": "Likes", "from_id": "nope2", "to_id": "nope3"},
         ]
     });
     let (status, resp) = post_batch(&app, ops.clone()).await;
     assert_eq!(status, StatusCode::OK, "body: {resp}");
     assert_eq!(resp["valid"], false);
     let results = resp["results"].as_array().unwrap();
-    assert_eq!(results[0]["ok"], false, "first failure reported");
-    assert_eq!(results[1]["ok"], true, "valid op in the middle still ok");
-    assert_eq!(results[2]["ok"], false, "second failure ALSO reported");
+    assert_eq!(results.len(), 1, "stops at the first failure: {resp}");
+    assert_eq!(results[0]["ok"], false);
+    assert_eq!(results[0]["index"], 0);
+    assert_eq!(results[0]["op"], "replace_node");
 
-    // And the commit path (dry_run:false) still stops at the first failure with
-    // the unchanged per-op error shape, committing nothing.
+    // The commit path (dry_run:false) stops at the same first failure with the
+    // unchanged per-op error shape, committing nothing.
     let commit = json!({"ops": ops["ops"].clone()});
     let (status, resp) = post_batch(&app, commit).await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "body: {resp}");

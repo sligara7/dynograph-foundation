@@ -31,8 +31,8 @@ use crate::{
     },
     auth::{AuthProvider, NoAuth},
     batch::{
-        BatchOp, BatchOpError, BatchOpResult, BatchRequest, BatchResponse, BatchValidation,
-        MAX_BATCH_OPS, dry_run_ops, run_ops,
+        BatchOk, BatchOp, BatchOpError, BatchOpResult, BatchRequest, BatchResponse,
+        BatchValidation, MAX_BATCH_OPS, dry_run_ops, run_ops,
     },
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     config::ServerLimits,
@@ -223,6 +223,7 @@ use crate::{
         BatchOpError,
         BatchOpResult,
         BatchValidation,
+        BatchOk,
         // resolve-or-create
         ResolveOrCreateRequest,
         ScopeFilter,
@@ -1463,8 +1464,8 @@ async fn delete_edge(
     params(("id" = String, Path, description = "graph id")),
     request_body = BatchRequest,
     responses(
-        (status = 200, description = "all ops applied (commit) or per-op report (dry_run)", body = BatchResponse),
-        (status = 400, description = "validation error or per-op failure", body = BatchOpError),
+        (status = 200, description = "commit summary, or a dry_run per-op report (incl. dry_run failures)", body = BatchOk),
+        (status = 400, description = "request-shape error, or a commit-path per-op failure (dry_run failures are reported via 200)", body = BatchOpError),
         (status = 404, description = "graph not found"),
     ),
     tag = "primitives",
@@ -1488,8 +1489,8 @@ async fn batch(
         )));
     }
 
-    // Validate-only: run every op against the buffer, then discard. Always 200
-    // — the dry run itself succeeded; `valid` reports whether the ops would.
+    // Validate-only: run ops against the buffer, then discard. Always 200 —
+    // the dry run itself succeeded; `valid` reports whether the ops would.
     if req.dry_run {
         let validation = entry
             .with_state_write(move |engine, _indexes| {
@@ -1499,7 +1500,7 @@ async fn batch(
                 validation
             })
             .await;
-        return Ok(Json(validation).into_response());
+        return Ok(Json(BatchOk::DryRun(validation)).into_response());
     }
 
     enum Outcome {
@@ -1535,7 +1536,7 @@ async fn batch(
         .await;
 
     match outcome {
-        Outcome::Success(resp) => Ok(Json(resp).into_response()),
+        Outcome::Success(resp) => Ok(Json(BatchOk::Commit(resp)).into_response()),
         Outcome::OpFailed(err) => Ok((StatusCode::BAD_REQUEST, Json(err)).into_response()),
         Outcome::CommitFailed(e) => Err(RegistryError::Storage(e)),
     }

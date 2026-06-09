@@ -1117,17 +1117,17 @@
         },
         "responses": {
           "200": {
-            "description": "all ops applied (commit) or per-op report (dry_run)",
+            "description": "commit summary, or a dry_run per-op report (incl. dry_run failures)",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BatchResponse"
+                  "$ref": "#/components/schemas/BatchOk"
                 }
               }
             }
           },
           "400": {
-            "description": "validation error or per-op failure",
+            "description": "request-shape error, or a commit-path per-op failure (dry_run failures are reported via 200)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3624,6 +3624,17 @@
           }
         }
       },
+      "BatchOk": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/BatchResponse"
+          },
+          {
+            "$ref": "#/components/schemas/BatchValidation"
+          }
+        ],
+        "description": "The `200 OK` body of `POST /batch`: a commit summary on the normal path, or\na per-op validation report for a `dry_run`. Untagged so the serialized bytes\nare exactly the inner struct (no added discriminant — the commit response is\nbyte-for-byte unchanged) while utoipa still emits an accurate `oneOf`."
+      },
       "BatchOp": {
         "oneOf": [
           {
@@ -3904,7 +3915,7 @@
       },
       "BatchValidation": {
         "type": "object",
-        "description": "Response for a `dry_run` batch: a per-op pass/fail report plus an overall\nflag. Unlike the commit path (which stops at the first failure for\natomicity), the dry run evaluates **every** op against the buffer — a failed\nop simply has no effect on it — so one round-trip surfaces all problems.",
+        "description": "Response for a `dry_run` batch: a per-op pass/fail report plus an overall\nflag. Like the real commit, evaluation **stops at the first failing op** (a\ncommit aborts there, so reporting failures past it would describe a sequence\nthat can never run). `results` therefore covers the ops up to and including\nthe first failure; when `valid` is true it covers all of them.",
         "required": [
           "valid",
           "results"
@@ -3918,7 +3929,7 @@
           },
           "valid": {
             "type": "boolean",
-            "description": "True iff every op would apply; when false, `results` pinpoints which\nop(s) failed and why."
+            "description": "True iff every op would apply; when false, the last entry in `results`\nis the first op that failed and why."
           }
         }
       },
