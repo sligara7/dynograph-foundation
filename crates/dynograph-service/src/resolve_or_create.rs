@@ -55,14 +55,25 @@
 //! Same contract the single-call create_node + set_embedding pair
 //! has had since v0.3.0.
 //!
-//! ## Aliases
+//! ## Aliases (both directions)
 //!
-//! The audit memo's wire-shape sketch included an `aliases: [String]`
-//! field; foundation's underlying resolver doesn't natively support
-//! multi-name queries. Implementing aliases by orchestrating multiple
-//! `resolve()` calls would re-implement the threshold logic at the
-//! HTTP layer, which is a smell. Out of scope for v1 — extend the
-//! resolver crate if a real workload needs them.
+//! - **Incoming**: `incoming_aliases: [String]` (wire alias: `aliases`)
+//!   are alternate names for the query entity. The primary name is
+//!   resolved first; if it would create, each alias is resolved in turn
+//!   and the first merge wins (`EntityResolver::resolve_with_aliases` —
+//!   the threshold logic stays in the resolver crate, per the original
+//!   design note). Catches a query like "Neo" arriving with alias
+//!   "Thomas Anderson" matching an existing "Thomas Anderson" node.
+//! - **Stored**: each candidate node's `aliases` property contributes
+//!   additional `(id, alias)` pairs to the candidate list, so an
+//!   incoming primary name can merge into a node it only matches via a
+//!   stored alias. Both a `List` of strings and a JSON-array-encoded
+//!   string (clients that serialize list-valued properties to JSON
+//!   strings) are accepted.
+//!
+//! Before v0.9.x neither direction existed over HTTP: an
+//! `incoming_aliases` field in the request was silently dropped by
+//! serde, and stored aliases were not part of the candidate list.
 
 use std::collections::HashMap;
 
@@ -88,6 +99,12 @@ pub(crate) struct ResolveOrCreateRequest {
     pub embedding: Option<Vec<f32>>,
     #[serde(default)]
     pub scope: Option<ScopeFilter>,
+    /// Alternate names for the query entity, tried (in order) when the
+    /// primary `properties.name` doesn't merge. `aliases` is accepted as
+    /// a wire alias for this field; sending BOTH spellings in one request
+    /// is rejected as a duplicate field.
+    #[serde(default, alias = "aliases")]
+    pub incoming_aliases: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -115,6 +132,29 @@ pub(crate) struct ResolveOrCreateResponse {
     pub id: String,
     pub was_created: bool,
     pub match_kind: MatchKind,
+}
+
+/// Extract a node's stored aliases for the candidate list. Accepts a
+/// `List` of strings or a JSON-array-encoded string (for clients that
+/// serialize list-valued properties to JSON strings); anything else
+/// yields no aliases. Non-string elements and empty strings are
+/// dropped — in BOTH forms, so one malformed element (a stray null
+/// from an extraction pipeline) can't silently void a node's entire
+/// alias set.
+fn stored_aliases(value: Option<&Value>) -> Vec<String> {
+    let aliases: Vec<String> = match value {
+        Some(Value::List(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        Some(Value::String(s)) => serde_json::from_str::<Vec<serde_json::Value>>(s)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    };
+    aliases.into_iter().filter(|a| !a.is_empty()).collect()
 }
 
 /// Pre-flight checks + resolution + (optional) create. Caller must
@@ -203,29 +243,46 @@ pub(crate) fn run(
     // fail the whole call when one node in the corpus is malformed,
     // which is hostile. A schema where `name` is required + string
     // (the only sane setup for name-based resolution) makes this
-    // unreachable in practice.
-    let pairs: Vec<(&str, &str)> = candidates
+    // unreachable in practice. Each candidate's stored `aliases` add
+    // further (id, alias) pairs so an incoming name can merge into a
+    // node it only matches via an alias.
+    //
+    // ALL primary-name pairs precede ALL alias pairs: the resolver's
+    // sort is stable, so on a fuzzy-score tie an entity's primary name
+    // beats another entity's alias — a node storing an alias equal to
+    // some other node's primary name must not hijack that node's
+    // exact-name merges.
+    let mut owned_pairs: Vec<(String, String)> = Vec::new();
+    let mut alias_pairs: Vec<(String, String)> = Vec::new();
+    for n in &candidates {
+        match n.properties.get("name").and_then(|v| v.as_str()) {
+            Some(name) => owned_pairs.push((n.node_id.clone(), name.to_string())),
+            None => {
+                tracing::debug!(
+                    node_type = %req.node_type,
+                    node_id = %n.node_id,
+                    "skipping resolution candidate: no string `name` property"
+                );
+                continue;
+            }
+        }
+        for alias in stored_aliases(n.properties.get("aliases")) {
+            alias_pairs.push((n.node_id.clone(), alias));
+        }
+    }
+    owned_pairs.append(&mut alias_pairs);
+    let pairs: Vec<(&str, &str)> = owned_pairs
         .iter()
-        .filter_map(
-            |n| match n.properties.get("name").and_then(|v| v.as_str()) {
-                Some(name) => Some((n.node_id.as_str(), name)),
-                None => {
-                    tracing::debug!(
-                        node_type = %req.node_type,
-                        node_id = %n.node_id,
-                        "skipping resolution candidate: no string `name` property"
-                    );
-                    None
-                }
-            },
-        )
+        .map(|(id, name)| (id.as_str(), name.as_str()))
         .collect();
 
     // ---- Resolve ----
 
+    let alias_refs: Vec<&str> = req.incoming_aliases.iter().map(String::as_str).collect();
     let resolver = EntityResolver::from_config(&resolution_config);
-    let (result, _candidates) = resolver.resolve(
+    let (result, _candidates) = resolver.resolve_with_aliases(
         &query_name,
+        &alias_refs,
         &pairs,
         req.embedding.as_deref(),
         indexes.get(&req.node_type),
@@ -272,5 +329,51 @@ pub(crate) fn run(
                 match_kind: MatchKind::CreatedNew,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_aliases_accepts_list_of_strings() {
+        let v = Value::List(vec![
+            Value::String("The Cartographer".into()),
+            Value::String("".into()), // empty dropped
+            Value::Int(7),            // non-string dropped
+        ]);
+        assert_eq!(
+            stored_aliases(Some(&v)),
+            vec!["The Cartographer".to_string()]
+        );
+    }
+
+    #[test]
+    fn stored_aliases_accepts_json_encoded_string() {
+        let v = Value::String(r#"["The Cartographer", "M. Sandgrove", ""]"#.into());
+        assert_eq!(
+            stored_aliases(Some(&v)),
+            vec!["The Cartographer".to_string(), "M. Sandgrove".to_string()]
+        );
+    }
+
+    #[test]
+    fn stored_aliases_json_string_tolerates_non_string_elements() {
+        // One malformed element must not void the whole alias set —
+        // same element-level tolerance as the List form.
+        let v = Value::String(r#"["The Cartographer", null, 7]"#.into());
+        assert_eq!(
+            stored_aliases(Some(&v)),
+            vec!["The Cartographer".to_string()]
+        );
+    }
+
+    #[test]
+    fn stored_aliases_ignores_garbage() {
+        assert!(stored_aliases(None).is_empty());
+        assert!(stored_aliases(Some(&Value::String("not json".into()))).is_empty());
+        assert!(stored_aliases(Some(&Value::Int(3))).is_empty());
+        assert!(stored_aliases(Some(&Value::Map(Default::default()))).is_empty());
     }
 }

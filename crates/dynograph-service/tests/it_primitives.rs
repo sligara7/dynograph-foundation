@@ -1802,3 +1802,176 @@ async fn welford_unknown_graph_returns_404() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn resolve_or_create_incoming_alias_merges() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Thomas Anderson", "story-A").await;
+
+    // Primary name is nothing like the existing node; the alias carries the
+    // existing node's exact name — the alias path must merge.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Neo", "story_id": "story-A"},
+            "incoming_aliases": ["Thomas Anderson"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["id"], "char-1", "body: {resp}");
+    assert_eq!(resp["was_created"], false);
+    assert_eq!(resp["match_kind"], "auto_merge");
+}
+
+#[tokio::test]
+async fn resolve_or_create_accepts_aliases_as_wire_alias() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Thomas Anderson", "story-A").await;
+
+    // Same as above through the `aliases` spelling of the field.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Neo", "story_id": "story-A"},
+            "aliases": ["Thomas Anderson"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["id"], "char-1", "body: {resp}");
+    assert_eq!(resp["was_created"], false);
+}
+
+#[tokio::test]
+async fn resolve_or_create_matches_stored_alias() {
+    let app = build_app_with_character_graph().await;
+    // Node whose stored aliases (JSON-array-encoded string) include the
+    // incoming primary name.
+    let body = json!({
+        "node_type": "Character",
+        "node_id": "char-1",
+        "properties": {
+            "name": "The Cartographer",
+            "story_id": "story-A",
+            "aliases": "[\"Mira Sandgrove\"]"
+        }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Sandgrove", "story_id": "story-A"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(
+        resp["id"], "char-1",
+        "incoming primary should merge via the stored alias: {resp}"
+    );
+    assert_eq!(resp["was_created"], false);
+}
+
+#[tokio::test]
+async fn resolve_or_create_alias_miss_still_creates_new() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Mira Sandgrove", "story-A").await;
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Quartermaster Greaves", "story_id": "story-A"},
+            "incoming_aliases": ["Brother Aldous", ""]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["was_created"], true, "body: {resp}");
+    assert_eq!(resp["match_kind"], "created_new");
+}
+
+#[tokio::test]
+async fn resolve_or_create_primary_name_beats_other_nodes_alias_on_tie() {
+    let app = build_app_with_character_graph().await;
+    // char-1 (created first → earlier in scan order) stores an alias equal
+    // to char-2's PRIMARY name. An exact-name query for char-2 must merge
+    // into char-2 — another node's alias must not hijack exact-name merges.
+    let body = json!({
+        "node_type": "Character",
+        "node_id": "char-1",
+        "properties": {
+            "name": "The Cartographer",
+            "story_id": "story-A",
+            "aliases": "[\"Mira Sandgrove\"]"
+        }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    create_character(&app, "char-2", "Mira Sandgrove", "story-A").await;
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Sandgrove", "story_id": "story-A"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(
+        resp["id"], "char-2",
+        "exact primary-name match must beat another node's alias: {resp}"
+    );
+}
+
+#[tokio::test]
+async fn resolve_or_create_alias_does_not_cross_scope() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Thomas Anderson", "story-A").await;
+
+    // The alias matches a node in a DIFFERENT scope — must create new.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Neo", "story_id": "story-B"},
+            "incoming_aliases": ["Thomas Anderson"],
+            "scope": {"prop": "story_id", "value": "story-B"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(
+        resp["was_created"], true,
+        "alias must not match across scopes: {resp}"
+    );
+}
