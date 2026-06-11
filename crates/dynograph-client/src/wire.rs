@@ -99,6 +99,16 @@ pub struct ResolveOrCreateResponse {
     pub id: String,
     pub was_created: bool,
     pub match_kind: String,
+    /// Provenance of the winning match pair (v0.9.3): `name_to_name`,
+    /// `name_to_stored_alias`, `incoming_alias_to_name`, or
+    /// `incoming_alias_to_stored_alias`. `None` on `created_new` (and
+    /// when talking to a pre-0.9.3 server).
+    #[serde(default)]
+    pub match_source: Option<String>,
+    /// Incoming aliases excluded as non-identifying — they matched two
+    /// or more distinct in-scope candidates (v0.9.3).
+    #[serde(default)]
+    pub ambiguous_aliases: Vec<String>,
 }
 
 /// One entry in `POST /v1/graphs/{id}/nodes:exists`. `id` is `None`

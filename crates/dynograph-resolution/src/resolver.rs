@@ -26,6 +26,45 @@ pub enum ResolutionResult {
     CreateNew,
 }
 
+/// Provenance of the winning match pair: which field of the query matched
+/// which field of the candidate. Anything other than `NameToName` is
+/// "alias-sourced" and is never allowed to auto-merge on fuzzy score
+/// alone — two distinct entities can legitimately share a descriptor
+/// ("the captain"), so alias evidence requires vector corroboration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchSource {
+    /// Query primary name matched a candidate's primary name.
+    NameToName,
+    /// Query primary name matched one of a candidate's stored aliases.
+    NameToStoredAlias,
+    /// An incoming alias matched a candidate's primary name.
+    IncomingAliasToName,
+    /// An incoming alias matched one of a candidate's stored aliases.
+    IncomingAliasToStoredAlias,
+}
+
+impl MatchSource {
+    /// True when either side of the winning pair is an alias.
+    pub fn is_alias_sourced(&self) -> bool {
+        !matches!(self, MatchSource::NameToName)
+    }
+}
+
+/// Result of a source-aware resolution (`EntityResolver::resolve_sourced`).
+#[derive(Debug, Clone)]
+pub struct ResolutionOutcome {
+    pub result: ResolutionResult,
+    /// Provenance of the winning pair. `None` when `result` is `CreateNew`.
+    pub match_source: Option<MatchSource>,
+    /// Incoming aliases excluded from merge justification because they
+    /// matched two or more distinct in-scope candidates above the fuzzy
+    /// threshold — by construction non-identifying in this scope.
+    pub ambiguous_aliases: Vec<String>,
+    /// Candidates considered by the query that produced the decision
+    /// (the primary name's candidates when nothing merged), best-first.
+    pub candidates: Vec<Candidate>,
+}
+
 /// Entity resolver that implements the three-tier resolution strategy.
 pub struct EntityResolver {
     auto_merge_threshold: u32,
@@ -155,6 +194,13 @@ impl EntityResolver {
     ///
     /// Returns the winning decision plus the candidate list from the query
     /// that produced it (primary's candidates when nothing merged).
+    #[deprecated(
+        since = "0.9.3",
+        note = "flattens match provenance, so alias pairs auto-merge on fuzzy \
+                score alone and two distinct entities sharing a generic alias \
+                silently merge. Use `resolve_sourced`, which keeps name and \
+                stored-alias candidates apart and vector-gates alias evidence."
+    )]
     pub fn resolve_with_aliases(
         &self,
         query_name: &str,
@@ -182,9 +228,203 @@ impl EntityResolver {
 
         (primary, primary_candidates)
     }
+
+    /// Source-aware three-tier resolution (v0.9.3).
+    ///
+    /// Same tiers as `resolve`, with match provenance threaded through the
+    /// decision instead of flattened away:
+    ///
+    /// - **Tier 1 (auto-merge)** considers ONLY name↔name pairs. A
+    ///   stored-alias pair can no longer outscore-and-hijack an auto-merge,
+    ///   and an incoming alias never auto-merges on fuzzy score alone.
+    /// - **Tier 2 (vector tiebreak)** considers every pair at or above
+    ///   `fuzzy_threshold`. Name↔name pairs reach it in the classic
+    ///   `[fuzzy, auto_merge)` zone; alias-sourced pairs reach it at ANY
+    ///   score — including an exact 100 — because alias evidence always
+    ///   requires vector corroboration (≥ `vector_threshold`). Without a
+    ///   query embedding, a vector index, or a stored vector for the
+    ///   candidate, an alias-sourced match falls through to `CreateNew`.
+    /// - **Ambiguity (O2):** an incoming alias matching ≥2 distinct
+    ///   candidates above `fuzzy_threshold` is by construction
+    ///   non-identifying in this scope; it is excluded from merge
+    ///   justification entirely and reported in `ambiguous_aliases`.
+    ///
+    /// `primary` and `stored_aliases` are both `(id, text)` pairs; the same
+    /// id may appear once in `primary` and many times in `stored_aliases`.
+    pub fn resolve_sourced(
+        &self,
+        query_name: &str,
+        incoming_aliases: &[&str],
+        primary: &[(&str, &str)],
+        stored_aliases: &[(&str, &str)],
+        query_embedding: Option<&[f32]>,
+        vector_index: Option<&HnswIndex>,
+    ) -> ResolutionOutcome {
+        if primary.is_empty() && stored_aliases.is_empty() {
+            return ResolutionOutcome {
+                result: ResolutionResult::CreateNew,
+                match_source: None,
+                ambiguous_aliases: Vec::new(),
+                candidates: Vec::new(),
+            };
+        }
+
+        // Primary name first.
+        let (decision, primary_scored) = self.decide_one_query(
+            query_name,
+            false,
+            primary,
+            stored_aliases,
+            query_embedding,
+            vector_index,
+        );
+        if let Some((result, source)) = decision {
+            return ResolutionOutcome {
+                result,
+                match_source: Some(source),
+                ambiguous_aliases: Vec::new(),
+                candidates: primary_scored,
+            };
+        }
+
+        // Incoming aliases, first merge wins; ambiguous aliases are
+        // excluded from merge justification (O2).
+        let query_lower = query_name.to_lowercase();
+        let mut ambiguous_aliases: Vec<String> = Vec::new();
+        for alias in incoming_aliases {
+            if alias.is_empty() || alias.to_lowercase() == query_lower {
+                continue;
+            }
+            let (decision, scored) = self.decide_one_query(
+                alias,
+                true,
+                primary,
+                stored_aliases,
+                query_embedding,
+                vector_index,
+            );
+            let distinct_hits = {
+                let mut ids: Vec<&str> = scored
+                    .iter()
+                    .filter(|c| c.fuzzy_score >= self.fuzzy_threshold)
+                    .map(|c| c.id.as_str())
+                    .collect();
+                ids.sort_unstable();
+                ids.dedup();
+                ids.len()
+            };
+            if distinct_hits >= 2 {
+                ambiguous_aliases.push((*alias).to_string());
+                continue;
+            }
+            if let Some((result, source)) = decision {
+                return ResolutionOutcome {
+                    result,
+                    match_source: Some(source),
+                    ambiguous_aliases,
+                    candidates: scored,
+                };
+            }
+        }
+
+        ResolutionOutcome {
+            result: ResolutionResult::CreateNew,
+            match_source: None,
+            ambiguous_aliases,
+            candidates: primary_scored,
+        }
+    }
+
+    /// Score one query string against every (primary + stored-alias) pair
+    /// and apply the source-aware tiers. Returns the decision (None = this
+    /// query justifies no merge) and the scored candidate list, best-first.
+    /// Primary pairs are scored before alias pairs so the stable sort keeps
+    /// a name ahead of an equal-scoring alias.
+    fn decide_one_query(
+        &self,
+        query: &str,
+        query_is_alias: bool,
+        primary: &[(&str, &str)],
+        stored_aliases: &[(&str, &str)],
+        query_embedding: Option<&[f32]>,
+        vector_index: Option<&HnswIndex>,
+    ) -> (Option<(ResolutionResult, MatchSource)>, Vec<Candidate>) {
+        let query_prepared = fuzzy::PreparedName::new(query);
+        // (candidate, is_stored_alias) — Candidate.name carries the text
+        // that was scored (the alias text for alias pairs), matching what
+        // the flattened `resolve` path reported for those entries.
+        let mut scored: Vec<(Candidate, bool)> = primary
+            .iter()
+            .map(|(id, text)| (*id, *text, false))
+            .chain(stored_aliases.iter().map(|(id, text)| (*id, *text, true)))
+            .map(|(id, text, is_alias)| {
+                (
+                    Candidate {
+                        id: id.to_string(),
+                        name: text.to_string(),
+                        fuzzy_score: query_prepared.score(&fuzzy::PreparedName::new(text)),
+                        vector_score: None,
+                    },
+                    is_alias,
+                )
+            })
+            .collect();
+        scored.sort_by_key(|(c, _)| std::cmp::Reverse(c.fuzzy_score));
+
+        // Tier 1: auto-merge on the best NAME↔NAME pair only.
+        if !query_is_alias
+            && let Some((best_name, _)) = scored.iter().find(|(_, is_alias)| !is_alias)
+            && best_name.fuzzy_score >= self.auto_merge_threshold
+        {
+            let result = ResolutionResult::AutoMerge {
+                candidate: best_name.id.clone(),
+            };
+            let candidates = scored.into_iter().map(|(c, _)| c).collect();
+            return (Some((result, MatchSource::NameToName)), candidates);
+        }
+
+        // Tier 2: vector tiebreak over every pair in the zone. Name↔name
+        // pairs at/above auto_merge were handled above (or, for an alias
+        // query, are alias-sourced by definition and belong here).
+        if let (Some(embedding), Some(index)) = (query_embedding, vector_index) {
+            for (c, _) in scored.iter_mut() {
+                if c.fuzzy_score < self.fuzzy_threshold {
+                    break; // sorted — below the zone, stop.
+                }
+                if let Some(vec) = index.get_vector(&c.id) {
+                    c.vector_score = Some(cosine_similarity(embedding, vec));
+                }
+            }
+            let best_vector = scored
+                .iter()
+                .filter(|(c, _)| c.fuzzy_score >= self.fuzzy_threshold)
+                .filter_map(|(c, is_alias)| c.vector_score.map(|v| (c, *is_alias, v)))
+                .max_by(|a, b| a.2.total_cmp(&b.2));
+            if let Some((best_c, is_stored_alias, vscore)) = best_vector
+                && vscore >= self.vector_threshold
+            {
+                let source = match (query_is_alias, is_stored_alias) {
+                    (false, false) => MatchSource::NameToName,
+                    (false, true) => MatchSource::NameToStoredAlias,
+                    (true, false) => MatchSource::IncomingAliasToName,
+                    (true, true) => MatchSource::IncomingAliasToStoredAlias,
+                };
+                let result = ResolutionResult::VectorMerge {
+                    candidate: best_c.id.clone(),
+                };
+                let candidates = scored.iter().map(|(c, _)| c.clone()).collect();
+                return (Some((result, source)), candidates);
+            }
+        }
+
+        (None, scored.into_iter().map(|(c, _)| c).collect())
+    }
 }
 
 #[cfg(test)]
+// The legacy `resolve_with_aliases` tests deliberately keep pinning the
+// deprecated flattened path until it is removed.
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use dynograph_vector::HnswConfig;
@@ -403,5 +643,269 @@ mod tests {
             "Expected AutoMerge for reordered name, got {:?}",
             result
         );
+    }
+
+    // ---- resolve_sourced (v0.9.3): O1 match-source gating + O2 ambiguity ----
+
+    /// THE D2 over-merge pin: two DISTINCT characters sharing a generic
+    /// alias must NOT merge on alias evidence alone. v0.9.2 auto-merged
+    /// this at score 100 (alias↔stored-alias exact match).
+    #[test]
+    fn distinct_characters_shared_alias_without_vector_creates_new() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Aldous Vane")];
+        let stored = [("id1", "the captain")];
+        let outcome =
+            resolver.resolve_sourced("Mira Chen", &["the captain"], &primary, &stored, None, None);
+        assert_eq!(
+            outcome.result,
+            ResolutionResult::CreateNew,
+            "alias-only exact match without vector support must CreateNew"
+        );
+        assert_eq!(outcome.match_source, None);
+    }
+
+    /// Same shape WITH strong vector corroboration: the same character
+    /// described twice IS cosine-similar, so the merge proceeds — as a
+    /// VectorMerge, never an AutoMerge — and provenance is reported.
+    #[test]
+    fn alias_match_with_strong_vector_merges_as_vector_merge() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Aldous Vane")];
+        let stored = [("id1", "the captain")];
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[0.9, 0.1, 0.0]);
+        let embedding = [0.85, 0.15, 0.0];
+        let outcome = resolver.resolve_sourced(
+            "Mira Chen",
+            &["the captain"],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert!(
+            matches!(&outcome.result, ResolutionResult::VectorMerge { candidate } if candidate == "id1"),
+            "expected VectorMerge, got {:?}",
+            outcome.result
+        );
+        assert_eq!(
+            outcome.match_source,
+            Some(MatchSource::IncomingAliasToStoredAlias)
+        );
+    }
+
+    /// Weak vector evidence on an alias-exact match still creates new —
+    /// distinct profiles sharing a descriptor are not cosine-similar.
+    #[test]
+    fn alias_match_with_weak_vector_creates_new() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Aldous Vane")];
+        let stored = [("id1", "the captain")];
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[1.0, 0.0, 0.0]);
+        let embedding = [0.0, 1.0, 0.0]; // orthogonal
+        let outcome = resolver.resolve_sourced(
+            "Mira Chen",
+            &["the captain"],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert_eq!(outcome.result, ResolutionResult::CreateNew);
+    }
+
+    /// The #130 keep-the-win direction under the new rules: an incoming
+    /// alias matching an existing primary name merges WITH vector
+    /// corroboration (IncomingAliasToName), and — the documented v0.9.3
+    /// trade-off — creates new WITHOUT it.
+    #[test]
+    fn incoming_alias_to_name_is_vector_gated() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Thomas Anderson")];
+        let stored: [(&str, &str); 0] = [];
+
+        let without =
+            resolver.resolve_sourced("Neo", &["Thomas Anderson"], &primary, &stored, None, None);
+        assert_eq!(
+            without.result,
+            ResolutionResult::CreateNew,
+            "no embedding ⇒ alias evidence is insufficient"
+        );
+
+        // NB: "Neo" itself token-sort-scores 73 vs "Thomas Anderson" —
+        // inside the fuzzy zone — so with an embedding the PRIMARY round
+        // would legitimately vector-merge as name_to_name before the alias
+        // is tried. "Trinity" (53) stays below the zone, isolating the
+        // incoming-alias path.
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[0.9, 0.1, 0.0]);
+        let embedding = [0.85, 0.15, 0.0];
+        let with = resolver.resolve_sourced(
+            "Trinity",
+            &["Thomas Anderson"],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert!(
+            matches!(&with.result, ResolutionResult::VectorMerge { candidate } if candidate == "id1"),
+            "expected VectorMerge, got {:?}",
+            with.result
+        );
+        assert_eq!(with.match_source, Some(MatchSource::IncomingAliasToName));
+    }
+
+    /// name↔name behavior is unchanged: exact primary-name match still
+    /// auto-merges with no vector evidence at all.
+    #[test]
+    fn name_to_name_auto_merge_unchanged() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Alice")];
+        let stored: [(&str, &str); 0] = [];
+        let outcome = resolver.resolve_sourced("Alice", &[], &primary, &stored, None, None);
+        assert!(
+            matches!(&outcome.result, ResolutionResult::AutoMerge { candidate } if candidate == "id1")
+        );
+        assert_eq!(outcome.match_source, Some(MatchSource::NameToName));
+    }
+
+    /// A node storing an alias equal to another node's primary name must
+    /// not hijack that node's exact-name auto-merge: tier 1 considers
+    /// name↔name pairs only.
+    #[test]
+    fn stored_alias_cannot_hijack_name_auto_merge() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Alice")];
+        let stored = [("id2", "Alice")]; // id2 stores "Alice" as an alias
+        let outcome = resolver.resolve_sourced("Alice", &[], &primary, &stored, None, None);
+        assert!(
+            matches!(&outcome.result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"),
+            "the primary-name owner must win, got {:?}",
+            outcome.result
+        );
+        assert_eq!(outcome.match_source, Some(MatchSource::NameToName));
+    }
+
+    /// Query primary name hitting only a stored alias is alias-sourced:
+    /// vector-gated like every other alias pair.
+    #[test]
+    fn name_to_stored_alias_is_vector_gated() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Aldous Vane")];
+        let stored = [("id1", "The Captain")];
+
+        let without = resolver.resolve_sourced("the captain", &[], &primary, &stored, None, None);
+        assert_eq!(without.result, ResolutionResult::CreateNew);
+
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[0.9, 0.1, 0.0]);
+        let embedding = [0.85, 0.15, 0.0];
+        let with = resolver.resolve_sourced(
+            "the captain",
+            &[],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert!(
+            matches!(&with.result, ResolutionResult::VectorMerge { candidate } if candidate == "id1")
+        );
+        assert_eq!(with.match_source, Some(MatchSource::NameToStoredAlias));
+    }
+
+    /// O2: an incoming alias matching two DISTINCT candidates above the
+    /// fuzzy threshold is non-identifying — excluded from merge
+    /// justification even when vector evidence would have cleared it,
+    /// and reported in `ambiguous_aliases`.
+    #[test]
+    fn ambiguous_incoming_alias_is_excluded_and_reported() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Aldous Vane"), ("id2", "Carla Reyes")];
+        let stored = [("id1", "the captain"), ("id2", "the captain")];
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[0.9, 0.1, 0.0]);
+        index.insert("id2", &[0.0, 0.0, 1.0]);
+        let embedding = [0.85, 0.15, 0.0]; // strongly similar to id1
+        let outcome = resolver.resolve_sourced(
+            "Mira Chen",
+            &["the captain"],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert_eq!(
+            outcome.result,
+            ResolutionResult::CreateNew,
+            "ambiguous alias must not justify a merge, got {:?}",
+            outcome.result
+        );
+        assert_eq!(outcome.ambiguous_aliases, vec!["the captain".to_string()]);
+    }
+
+    /// O2 counts DISTINCT candidates: one node matched via both its name
+    /// and its stored alias is one candidate, not an ambiguity.
+    #[test]
+    fn same_node_matched_twice_is_not_ambiguous() {
+        let resolver = default_resolver();
+        let primary = [("id1", "The Captain")];
+        let stored = [("id1", "the captain")];
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[0.9, 0.1, 0.0]);
+        let embedding = [0.85, 0.15, 0.0];
+        let outcome = resolver.resolve_sourced(
+            "Mira Chen",
+            &["the captain"],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert!(
+            matches!(&outcome.result, ResolutionResult::VectorMerge { candidate } if candidate == "id1"),
+            "single-candidate alias with vector support should merge, got {:?}",
+            outcome.result
+        );
+        assert!(outcome.ambiguous_aliases.is_empty());
+    }
+
+    /// The classic name↔name tiebreaker zone still works through the
+    /// sourced path: fuzzy zone hit + strong vector ⇒ VectorMerge with
+    /// NameToName provenance.
+    #[test]
+    fn sourced_name_tiebreaker_zone_with_vector_merges() {
+        let resolver = default_resolver();
+        let primary = [("id1", "Professor Edwin Whitfield")];
+        let stored: [(&str, &str); 0] = [];
+        let mut index = HnswIndex::new(HnswConfig::new(3));
+        index.insert("id1", &[0.9, 0.1, 0.0]);
+        let embedding = [0.85, 0.15, 0.0];
+        let outcome = resolver.resolve_sourced(
+            "Edwin Whitfield",
+            &[],
+            &primary,
+            &stored,
+            Some(&embedding),
+            Some(&index),
+        );
+        assert!(
+            matches!(outcome.result, ResolutionResult::VectorMerge { .. }),
+            "expected VectorMerge, got {:?}",
+            outcome.result
+        );
+        assert_eq!(outcome.match_source, Some(MatchSource::NameToName));
+    }
+
+    #[test]
+    fn sourced_empty_candidates_creates_new() {
+        let resolver = default_resolver();
+        let outcome = resolver.resolve_sourced("Alice", &["Al"], &[], &[], None, None);
+        assert_eq!(outcome.result, ResolutionResult::CreateNew);
+        assert!(outcome.candidates.is_empty());
+        assert!(outcome.ambiguous_aliases.is_empty());
     }
 }

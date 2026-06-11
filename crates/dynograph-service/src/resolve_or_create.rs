@@ -60,7 +60,7 @@
 //! - **Incoming**: `incoming_aliases: [String]` (wire alias: `aliases`)
 //!   are alternate names for the query entity. The primary name is
 //!   resolved first; if it would create, each alias is resolved in turn
-//!   and the first merge wins (`EntityResolver::resolve_with_aliases` —
+//!   and the first merge wins (`EntityResolver::resolve_sourced` —
 //!   the threshold logic stays in the resolver crate, per the original
 //!   design note). Catches a query like "Neo" arriving with alias
 //!   "Thomas Anderson" matching an existing "Thomas Anderson" node.
@@ -74,6 +74,21 @@
 //! Before v0.9.x neither direction existed over HTTP: an
 //! `incoming_aliases` field in the request was silently dropped by
 //! serde, and stored aliases were not part of the candidate list.
+//!
+//! ## Alias evidence is vector-gated (v0.9.3)
+//!
+//! v0.9.2 scored alias pairs identically to primary-name pairs, so two
+//! DISTINCT entities sharing a generic alias ("the captain") exact-matched
+//! at 100 and silently auto-merged — the incoming entity's profile was
+//! discarded. Since v0.9.3 resolution is source-aware
+//! (`EntityResolver::resolve_sourced`): only name↔name evidence can
+//! auto-merge; any alias-sourced match requires vector corroboration
+//! (cosine ≥ `vector_threshold`) no matter how high the fuzzy score, and
+//! falls back to `created_new` when the caller supplies no embedding.
+//! An incoming alias matching ≥2 distinct candidates is excluded as
+//! non-identifying and reported in `ambiguous_aliases`. The response
+//! carries `match_source` so callers can observe which field justified a
+//! merge.
 
 use std::collections::HashMap;
 
@@ -82,7 +97,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use dynograph_core::{ResolutionConfig, Value};
-use dynograph_resolution::{EntityResolver, ResolutionResult};
+use dynograph_resolution::{EntityResolver, MatchSource, ResolutionResult};
 use dynograph_storage::StorageEngine;
 use dynograph_vector::HnswIndex;
 
@@ -132,6 +147,16 @@ pub(crate) struct ResolveOrCreateResponse {
     pub id: String,
     pub was_created: bool,
     pub match_kind: MatchKind,
+    /// Provenance of the winning match pair (v0.9.3): `name_to_name`,
+    /// `name_to_stored_alias`, `incoming_alias_to_name`, or
+    /// `incoming_alias_to_stored_alias`. `null` on `created_new`.
+    /// Alias-sourced merges are always vector-corroborated — they can
+    /// only appear with `match_kind: vector_merge`.
+    pub match_source: Option<String>,
+    /// Incoming aliases excluded from merge justification because they
+    /// matched two or more distinct in-scope candidates above the fuzzy
+    /// threshold — by construction non-identifying in this scope (v0.9.3).
+    pub ambiguous_aliases: Vec<String>,
 }
 
 /// Extract a node's stored aliases for the candidate list. Accepts a
@@ -270,36 +295,62 @@ pub(crate) fn run(
             alias_pairs.push((n.node_id.clone(), alias));
         }
     }
-    owned_pairs.append(&mut alias_pairs);
-    let pairs: Vec<(&str, &str)> = owned_pairs
+    let primary_pairs: Vec<(&str, &str)> = owned_pairs
         .iter()
         .map(|(id, name)| (id.as_str(), name.as_str()))
         .collect();
+    let stored_alias_pairs: Vec<(&str, &str)> = alias_pairs
+        .iter()
+        .map(|(id, alias)| (id.as_str(), alias.as_str()))
+        .collect();
 
-    // ---- Resolve ----
+    // ---- Resolve (source-aware since v0.9.3) ----
 
     let alias_refs: Vec<&str> = req.incoming_aliases.iter().map(String::as_str).collect();
     let resolver = EntityResolver::from_config(&resolution_config);
-    let (result, _candidates) = resolver.resolve_with_aliases(
+    let outcome = resolver.resolve_sourced(
         &query_name,
         &alias_refs,
-        &pairs,
+        &primary_pairs,
+        &stored_alias_pairs,
         req.embedding.as_deref(),
         indexes.get(&req.node_type),
     );
+    if !outcome.ambiguous_aliases.is_empty() {
+        tracing::info!(
+            node_type = %req.node_type,
+            graph_id = %graph_id,
+            aliases = ?outcome.ambiguous_aliases,
+            "incoming aliases excluded as non-identifying (matched >=2 in-scope candidates)"
+        );
+    }
+    let match_source = outcome.match_source.map(|s| {
+        match s {
+            MatchSource::NameToName => "name_to_name",
+            MatchSource::NameToStoredAlias => "name_to_stored_alias",
+            MatchSource::IncomingAliasToName => "incoming_alias_to_name",
+            MatchSource::IncomingAliasToStoredAlias => "incoming_alias_to_stored_alias",
+        }
+        .to_string()
+    });
+    let ambiguous_aliases = outcome.ambiguous_aliases;
 
     // ---- Dispatch ----
 
-    match result {
+    match outcome.result {
         ResolutionResult::AutoMerge { candidate } => Ok(ResolveOrCreateResponse {
             id: candidate,
             was_created: false,
             match_kind: MatchKind::AutoMerge,
+            match_source,
+            ambiguous_aliases,
         }),
         ResolutionResult::VectorMerge { candidate } => Ok(ResolveOrCreateResponse {
             id: candidate,
             was_created: false,
             match_kind: MatchKind::VectorMerge,
+            match_source,
+            ambiguous_aliases,
         }),
         ResolutionResult::CreateNew => {
             // Sequential: create_node, then set_embedding (if any),
@@ -327,6 +378,8 @@ pub(crate) fn run(
                 id: node_id,
                 was_created: true,
                 match_kind: MatchKind::CreatedNew,
+                match_source,
+                ambiguous_aliases,
             })
         }
     }
