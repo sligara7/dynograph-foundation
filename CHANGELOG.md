@@ -4,6 +4,31 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.9.2 — 2026-06-10
+
+Alias-aware entity resolution — additive; default behavior for requests
+without aliases (and corpora without stored aliases) is unchanged.
+
+### Added
+
+- `EntityResolver::resolve_with_aliases`: resolves the primary name first;
+  if it would create, each incoming alias is resolved in turn against the
+  same candidates and the first merge wins. Empty aliases and
+  case-insensitive duplicates of the primary are skipped.
+- `/resolve-or-create` accepts `incoming_aliases: [String]` (wire alias:
+  `aliases`) and feeds each candidate node's stored `aliases` property —
+  a `List` of strings or a JSON-array-encoded string — into the candidate
+  list, so an incoming name can merge into a node it only matches via a
+  stored alias. Previously an `incoming_aliases` request field was
+  silently dropped by serde and stored aliases were invisible to
+  resolution over HTTP.
+
+### Fixed (within the new surface)
+
+- Tie precedence: all primary-name candidates precede all alias
+  candidates, so on an equal fuzzy score an entity's primary name beats
+  another entity's stored alias — an alias can't hijack exact-name merges.
+
 ## v0.9.1 — 2026-06-09
 
 Internal refactor only — no behavior, API, or wire-contract change
