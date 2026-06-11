@@ -420,7 +420,10 @@ pub fn character_schema_body() -> Value {
                 "Character": {
                     "properties": {
                         "name":     {"type": "string", "required": true},
-                        "story_id": {"type": "string", "indexed": true}
+                        "story_id": {"type": "string", "indexed": true},
+                        // JSON-array-encoded alternate names — exercises the
+                        // stored-alias side of resolve-or-create.
+                        "aliases":  {"type": "string"}
                     },
                     "resolution": {
                         "strategy": "fuzzy_then_vector",

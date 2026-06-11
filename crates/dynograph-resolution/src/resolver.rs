@@ -143,6 +143,46 @@ impl EntityResolver {
         // Tier 3: No match — create new
         (ResolutionResult::CreateNew, candidates)
     }
+
+    /// Resolve a primary name plus alternate names (incoming aliases).
+    ///
+    /// The primary name is tried first; if it would create a new entity,
+    /// each alias is resolved in turn against the same candidate list and
+    /// the first merge wins. This catches cases like an incoming "Neo"
+    /// carrying the alias "Thomas Anderson" matching an existing
+    /// "Thomas Anderson" entity. Aliases that are empty or equal to the
+    /// primary name (case-insensitively) are skipped.
+    ///
+    /// Returns the winning decision plus the candidate list from the query
+    /// that produced it (primary's candidates when nothing merged).
+    pub fn resolve_with_aliases(
+        &self,
+        query_name: &str,
+        incoming_aliases: &[&str],
+        existing: &[(&str, &str)],
+        query_embedding: Option<&[f32]>,
+        vector_index: Option<&HnswIndex>,
+    ) -> (ResolutionResult, Vec<Candidate>) {
+        let (primary, primary_candidates) =
+            self.resolve(query_name, existing, query_embedding, vector_index);
+        if !matches!(primary, ResolutionResult::CreateNew) {
+            return (primary, primary_candidates);
+        }
+
+        let query_lower = query_name.to_lowercase();
+        for alias in incoming_aliases {
+            if alias.is_empty() || alias.to_lowercase() == query_lower {
+                continue;
+            }
+            let (result, candidates) =
+                self.resolve(alias, existing, query_embedding, vector_index);
+            if !matches!(result, ResolutionResult::CreateNew) {
+                return (result, candidates);
+            }
+        }
+
+        (primary, primary_candidates)
+    }
 }
 
 #[cfg(test)]
@@ -300,6 +340,72 @@ mod tests {
         let existing = [("id1", "Alice")];
         let (result, _) = resolver.resolve("Alice", &existing, None, None);
         assert!(matches!(result, ResolutionResult::AutoMerge { .. }));
+    }
+
+    #[test]
+    fn alias_merges_when_primary_misses() {
+        let resolver = default_resolver();
+        let existing = [("id1", "Thomas Anderson")];
+        let (result, _) = resolver.resolve_with_aliases(
+            "Neo",
+            &["Thomas Anderson"],
+            &existing,
+            None,
+            None,
+        );
+        assert!(
+            matches!(&result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"),
+            "alias should auto-merge, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn primary_match_wins_before_aliases_are_tried() {
+        let resolver = default_resolver();
+        let existing = [("id1", "Alice"), ("id2", "Beatrix")];
+        // Primary matches id1; the alias would match id2 — primary wins.
+        let (result, _) = resolver.resolve_with_aliases(
+            "Alice",
+            &["Beatrix"],
+            &existing,
+            None,
+            None,
+        );
+        assert!(
+            matches!(&result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"),
+            "primary match must take precedence, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn empty_and_primary_equal_aliases_are_skipped() {
+        let resolver = default_resolver();
+        let existing = [("id1", "Completely Unrelated")];
+        // "" and a case-variant of the primary must be skipped, not resolved.
+        let (result, _) = resolver.resolve_with_aliases(
+            "Xylophone",
+            &["", "XYLOPHONE"],
+            &existing,
+            None,
+            None,
+        );
+        assert_eq!(result, ResolutionResult::CreateNew);
+    }
+
+    #[test]
+    fn all_aliases_missing_returns_primary_create_new() {
+        let resolver = default_resolver();
+        let existing = [("id1", "Alice")];
+        let (result, candidates) = resolver.resolve_with_aliases(
+            "Xylophone",
+            &["Quagmire", "Zeppelin"],
+            &existing,
+            None,
+            None,
+        );
+        assert_eq!(result, ResolutionResult::CreateNew);
+        // Candidate list is the PRIMARY query's, not the last alias's.
+        assert_eq!(candidates[0].name, "Alice");
     }
 
     #[test]

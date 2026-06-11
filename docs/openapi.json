@@ -5679,6 +5679,13 @@
               "format": "float"
             }
           },
+          "incoming_aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Alternate names for the query entity, tried (in order) when the\nprimary `properties.name` doesn't merge. `aliases` is accepted as\na wire alias for this field; sending BOTH spellings in one request\nis rejected as a duplicate field."
+          },
           "node_type": {
             "type": "string"
           },
