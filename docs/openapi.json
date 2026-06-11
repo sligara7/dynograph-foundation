@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "version": "0.9.2"
+    "version": "0.9.3"
   },
   "paths": {
     "/buildinfo": {
@@ -5709,14 +5709,29 @@
         "required": [
           "id",
           "was_created",
-          "match_kind"
+          "match_kind",
+          "ambiguous_aliases"
         ],
         "properties": {
+          "ambiguous_aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Incoming aliases excluded from merge justification because they\nmatched two or more distinct in-scope candidates above the fuzzy\nthreshold — by construction non-identifying in this scope (v0.9.3)."
+          },
           "id": {
             "type": "string"
           },
           "match_kind": {
             "$ref": "#/components/schemas/MatchKind"
+          },
+          "match_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Provenance of the winning match pair (v0.9.3): `name_to_name`,\n`name_to_stored_alias`, `incoming_alias_to_name`, or\n`incoming_alias_to_stored_alias`. `null` on `created_new`.\nAlias-sourced merges are always vector-corroborated — they can\nonly appear with `match_kind: vector_merge`."
           },
           "was_created": {
             "type": "boolean"

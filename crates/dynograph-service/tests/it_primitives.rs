@@ -1804,12 +1804,44 @@ async fn welford_unknown_graph_returns_404() {
 }
 
 #[tokio::test]
-async fn resolve_or_create_incoming_alias_merges() {
+async fn resolve_or_create_incoming_alias_merges_with_vector() {
+    let app = build_app_with_character_graph().await;
+    create_character(&app, "char-1", "Thomas Anderson", "story-A").await;
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
+
+    // Primary name is below the fuzzy zone vs the existing node ("Trinity"
+    // scores 53; "Neo" would score 73 and merge name-to-name); the alias
+    // carries the existing node's exact name. Since v0.9.3 alias evidence
+    // is vector-gated: with a near-identical embedding the merge proceeds
+    // as a vector_merge (never auto_merge) and provenance is reported.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Trinity", "story_id": "story-A"},
+            "incoming_aliases": ["Thomas Anderson"],
+            "embedding": [1.0, 0.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["id"], "char-1", "body: {resp}");
+    assert_eq!(resp["was_created"], false);
+    assert_eq!(resp["match_kind"], "vector_merge");
+    assert_eq!(resp["match_source"], "incoming_alias_to_name");
+}
+
+#[tokio::test]
+async fn resolve_or_create_incoming_alias_without_vector_creates_new() {
     let app = build_app_with_character_graph().await;
     create_character(&app, "char-1", "Thomas Anderson", "story-A").await;
 
-    // Primary name is nothing like the existing node; the alias carries the
-    // existing node's exact name — the alias path must merge.
+    // The documented v0.9.3 trade-off: without vector corroboration an
+    // alias-only match is insufficient evidence — create new rather than
+    // risk merging two distinct characters who share a descriptor.
     let (status, resp) = post_resolve(
         &app,
         json!({
@@ -1820,29 +1852,36 @@ async fn resolve_or_create_incoming_alias_merges() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {resp}");
-    assert_eq!(resp["id"], "char-1", "body: {resp}");
-    assert_eq!(resp["was_created"], false);
-    assert_eq!(resp["match_kind"], "auto_merge");
+    assert_eq!(resp["was_created"], true, "body: {resp}");
+    assert_eq!(resp["match_kind"], "created_new");
+    assert_eq!(resp["match_source"], Value::Null);
 }
 
 #[tokio::test]
 async fn resolve_or_create_accepts_aliases_as_wire_alias() {
     let app = build_app_with_character_graph().await;
     create_character(&app, "char-1", "Thomas Anderson", "story-A").await;
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
 
-    // Same as above through the `aliases` spelling of the field.
+    // Same as the with-vector case through the `aliases` spelling of the
+    // field — the alias-sourced provenance proves the field was parsed.
     let (status, resp) = post_resolve(
         &app,
         json!({
             "node_type": "Character",
-            "properties": {"name": "Neo", "story_id": "story-A"},
-            "aliases": ["Thomas Anderson"]
+            "properties": {"name": "Trinity", "story_id": "story-A"},
+            "aliases": ["Thomas Anderson"],
+            "embedding": [1.0, 0.0, 0.0]
         }),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {resp}");
     assert_eq!(resp["id"], "char-1", "body: {resp}");
     assert_eq!(resp["was_created"], false);
+    assert_eq!(resp["match_source"], "incoming_alias_to_name");
 }
 
 #[tokio::test]
@@ -1873,11 +1912,17 @@ async fn resolve_or_create_matches_stored_alias() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::CREATED);
 
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
+
     let (status, resp) = post_resolve(
         &app,
         json!({
             "node_type": "Character",
-            "properties": {"name": "Mira Sandgrove", "story_id": "story-A"}
+            "properties": {"name": "Mira Sandgrove", "story_id": "story-A"},
+            "embedding": [1.0, 0.0, 0.0]
         }),
     )
     .await;
@@ -1887,6 +1932,128 @@ async fn resolve_or_create_matches_stored_alias() {
         "incoming primary should merge via the stored alias: {resp}"
     );
     assert_eq!(resp["was_created"], false);
+    assert_eq!(resp["match_kind"], "vector_merge");
+    assert_eq!(resp["match_source"], "name_to_stored_alias");
+}
+
+/// THE D2 over-merge pin (delta-review finding, 2026-06-11): two DISTINCT
+/// characters sharing a generic alias must not merge — v0.9.2 auto-merged
+/// them at score 100 via alias↔stored-alias and silently discarded the
+/// incoming character's whole profile.
+#[tokio::test]
+async fn resolve_or_create_distinct_characters_shared_alias_does_not_merge() {
+    let app = build_app_with_character_graph().await;
+    let body = json!({
+        "node_type": "Character",
+        "node_id": "char-1",
+        "properties": {
+            "name": "Aldous Vane",
+            "story_id": "story-A",
+            "aliases": "[\"the captain\"]"
+        }
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/graphs/g1/nodes")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
+
+    // Distinct character, distinct profile (orthogonal embedding), same
+    // generic alias. No embedding at all must also create new.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Chen", "story_id": "story-A"},
+            "incoming_aliases": ["the captain"],
+            "embedding": [0.0, 1.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(
+        resp["was_created"], true,
+        "distinct character must NOT merge via the shared alias: {resp}"
+    );
+    assert_ne!(resp["id"], "char-1");
+
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Rolf Tanner", "story_id": "story-A"},
+            "incoming_aliases": ["the captain"]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(
+        resp["was_created"], true,
+        "alias-only match without vector support must create new: {resp}"
+    );
+}
+
+/// O2: an incoming alias matching two distinct in-scope candidates is
+/// non-identifying — excluded from merge justification and reported.
+#[tokio::test]
+async fn resolve_or_create_reports_ambiguous_aliases() {
+    let app = build_app_with_character_graph().await;
+    for (id, name) in [("char-1", "Aldous Vane"), ("char-2", "Carla Reyes")] {
+        let body = json!({
+            "node_type": "Character",
+            "node_id": id,
+            "properties": {
+                "name": name,
+                "story_id": "story-A",
+                "aliases": "[\"the captain\"]"
+            }
+        });
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/graphs/g1/nodes")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+    assert_eq!(
+        put_embedding(&app, "Character", "char-1", &[1.0, 0.0, 0.0]).await,
+        StatusCode::OK
+    );
+
+    // Even with an embedding near-identical to char-1's, the shared alias
+    // is non-identifying in this story and must not justify the merge.
+    let (status, resp) = post_resolve(
+        &app,
+        json!({
+            "node_type": "Character",
+            "properties": {"name": "Mira Chen", "story_id": "story-A"},
+            "incoming_aliases": ["the captain"],
+            "embedding": [1.0, 0.0, 0.0]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["was_created"], true, "body: {resp}");
+    assert_eq!(resp["ambiguous_aliases"], json!(["the captain"]));
 }
 
 #[tokio::test]
