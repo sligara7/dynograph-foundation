@@ -343,7 +343,10 @@ mod tests {
             Value::String("".into()), // empty dropped
             Value::Int(7),            // non-string dropped
         ]);
-        assert_eq!(stored_aliases(Some(&v)), vec!["The Cartographer".to_string()]);
+        assert_eq!(
+            stored_aliases(Some(&v)),
+            vec!["The Cartographer".to_string()]
+        );
     }
 
     #[test]
@@ -360,7 +363,10 @@ mod tests {
         // One malformed element must not void the whole alias set —
         // same element-level tolerance as the List form.
         let v = Value::String(r#"["The Cartographer", null, 7]"#.into());
-        assert_eq!(stored_aliases(Some(&v)), vec!["The Cartographer".to_string()]);
+        assert_eq!(
+            stored_aliases(Some(&v)),
+            vec!["The Cartographer".to_string()]
+        );
     }
 
     #[test]

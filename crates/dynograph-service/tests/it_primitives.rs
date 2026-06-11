@@ -1882,7 +1882,10 @@ async fn resolve_or_create_matches_stored_alias() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {resp}");
-    assert_eq!(resp["id"], "char-1", "incoming primary should merge via the stored alias: {resp}");
+    assert_eq!(
+        resp["id"], "char-1",
+        "incoming primary should merge via the stored alias: {resp}"
+    );
     assert_eq!(resp["was_created"], false);
 }
 
@@ -1967,5 +1970,8 @@ async fn resolve_or_create_alias_does_not_cross_scope() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "body: {resp}");
-    assert_eq!(resp["was_created"], true, "alias must not match across scopes: {resp}");
+    assert_eq!(
+        resp["was_created"], true,
+        "alias must not match across scopes: {resp}"
+    );
 }

@@ -174,8 +174,7 @@ impl EntityResolver {
             if alias.is_empty() || alias.to_lowercase() == query_lower {
                 continue;
             }
-            let (result, candidates) =
-                self.resolve(alias, existing, query_embedding, vector_index);
+            let (result, candidates) = self.resolve(alias, existing, query_embedding, vector_index);
             if !matches!(result, ResolutionResult::CreateNew) {
                 return (result, candidates);
             }
@@ -346,13 +345,8 @@ mod tests {
     fn alias_merges_when_primary_misses() {
         let resolver = default_resolver();
         let existing = [("id1", "Thomas Anderson")];
-        let (result, _) = resolver.resolve_with_aliases(
-            "Neo",
-            &["Thomas Anderson"],
-            &existing,
-            None,
-            None,
-        );
+        let (result, _) =
+            resolver.resolve_with_aliases("Neo", &["Thomas Anderson"], &existing, None, None);
         assert!(
             matches!(&result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"),
             "alias should auto-merge, got {result:?}"
@@ -364,13 +358,8 @@ mod tests {
         let resolver = default_resolver();
         let existing = [("id1", "Alice"), ("id2", "Beatrix")];
         // Primary matches id1; the alias would match id2 — primary wins.
-        let (result, _) = resolver.resolve_with_aliases(
-            "Alice",
-            &["Beatrix"],
-            &existing,
-            None,
-            None,
-        );
+        let (result, _) =
+            resolver.resolve_with_aliases("Alice", &["Beatrix"], &existing, None, None);
         assert!(
             matches!(&result, ResolutionResult::AutoMerge { candidate } if candidate == "id1"),
             "primary match must take precedence, got {result:?}"
@@ -382,13 +371,8 @@ mod tests {
         let resolver = default_resolver();
         let existing = [("id1", "Completely Unrelated")];
         // "" and a case-variant of the primary must be skipped, not resolved.
-        let (result, _) = resolver.resolve_with_aliases(
-            "Xylophone",
-            &["", "XYLOPHONE"],
-            &existing,
-            None,
-            None,
-        );
+        let (result, _) =
+            resolver.resolve_with_aliases("Xylophone", &["", "XYLOPHONE"], &existing, None, None);
         assert_eq!(result, ResolutionResult::CreateNew);
     }
 
