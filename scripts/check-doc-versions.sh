@@ -11,6 +11,8 @@
 #   - `"wire_version":  "X.Y.Z"`            (JSON example bodies)
 #   - `latest tag (`vX.Y.Z`)`               (prose phrasing in README)
 #   - `version (e.g. "X.Y.Z")`              (api.md's wire-stability section)
+#   - `tagged per release (`:X.Y.Z`)`       (image-tag prose in README — the
+#                                            v0.9.1→v0.9.3 slip this class missed)
 #
 # CHANGELOG.md is intentionally excluded — historical version
 # references there are correct.
@@ -65,6 +67,7 @@ for f in "${FILES[@]}"; do
     check_pattern "$f" 'latest tag.*\(`v[0-9]+\.[0-9]+\.[0-9]+`\)'       "latest-tag prose"
     check_pattern "$f" 'version \(e\.g\.[[:space:]]*`"[0-9]+\.[0-9]+\.[0-9]+"`\)' "wire-version stability example"
     check_pattern "$f" 'ghcr\.io/sligara7/dynograph-foundation:[0-9]+\.[0-9]+\.[0-9]+' "docker image tag"
+    check_pattern "$f" 'tagged per release \(`:[0-9]+\.[0-9]+\.[0-9]+`\)' "image-tag prose"
 done
 
 if [ "$EXIT" -eq 0 ]; then

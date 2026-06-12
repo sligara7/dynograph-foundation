@@ -156,7 +156,7 @@ the contract without the committed spec being regenerated
 spec's `info.version` tracks the crate version, so regenerate it as part
 of a release bump.
 
-Published images are tagged per release (`:0.9.1`) plus `:latest`.
+Published images are tagged per release (`:0.9.3`) plus `:latest`.
 The publish workflow (`.github/workflows/release.yml`) runs on every
 `v*` git tag push.
 
