@@ -4,6 +4,51 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.9.3 — 2026-06-12
+
+Source-aware entity resolution — fixes the alias over-merge class
+shipped in v0.9.2: two distinct same-scope entities sharing a generic
+alias ("the captain") exact-matched at score 100 and silently
+auto-merged, discarding the incoming entity's profile.
+
+### Added
+
+- `EntityResolver::resolve_sourced`: resolution with match provenance.
+  Tier-1 auto-merge considers name↔name pairs only; any alias-sourced
+  pair (incoming or stored, either direction) requires vector
+  corroboration (cosine ≥ `vector_threshold`) at ANY fuzzy score —
+  including an exact 100 — and falls back to `CreateNew` when the
+  caller supplies no embedding.
+- Alias-ambiguity exclusion: an incoming alias matching ≥2 distinct
+  in-scope candidates above the fuzzy threshold is non-identifying by
+  construction — excluded from merge justification and reported.
+- `/resolve-or-create` response gains `match_source`
+  (`name_to_name` / `name_to_stored_alias` / `incoming_alias_to_name` /
+  `incoming_alias_to_stored_alias`; `null` on `created_new`) and
+  `ambiguous_aliases: [String]`. Both additive.
+- `MatchSource` / `ResolutionOutcome` exported from
+  `dynograph-resolution`; client wire struct carries the new response
+  fields with serde defaults (compatible with pre-0.9.3 servers).
+
+### Changed
+
+- A stored alias equal to another entity's primary name can no longer
+  outscore-and-hijack that entity's exact-name auto-merge (tier-1 is
+  name-pairs-only; previously only a sort-stability tiebreak protected
+  the equal-score case).
+
+### Deprecated
+
+- `EntityResolver::resolve_with_aliases` — flattens match provenance,
+  so alias pairs auto-merge on fuzzy score alone. Use `resolve_sourced`.
+
+### Known consumer note
+
+- Callers that send no embeddings get `created_new` for every
+  alias-sourced match — the fail-safe direction (recoverable
+  duplication instead of silent merge corruption). Alias dedup re-arms
+  once the caller supplies embeddings on the resolve call.
+
 ## v0.9.2 — 2026-06-10
 
 Alias-aware entity resolution — additive; default behavior for requests

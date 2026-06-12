@@ -78,3 +78,41 @@ jobs:
           # source has changed.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # A GHCR image without a Releases entry is how v0.9.2/v0.9.3 went
+  # missing from the Releases page (found 2026-06-12, backfilled by
+  # hand). Automation over memory: every tag push now also creates the
+  # GitHub Release, with notes lifted from the tag's CHANGELOG section.
+  # Runs in parallel with the image build — a Release whose image is
+  # still building for a few minutes beats no Release at all, and a
+  # rare image-build failure is visible right next to it in Actions.
+  github-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Extract this tag's CHANGELOG section
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # From "## <tag> " up to (not including) the next "## v" heading.
+          awk -v tag="$TAG" '
+            $0 ~ "^## " tag " " { hit = 1; next }
+            hit && /^## v/      { exit }
+            hit                 { print }
+          ' CHANGELOG.md > /tmp/notes.md
+          if [ ! -s /tmp/notes.md ]; then
+            echo "::warning::no CHANGELOG section found for $TAG — releasing with auto-generated notes"
+            echo "_No CHANGELOG section for $TAG; see commit history._" > /tmp/notes.md
+          fi
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file /tmp/notes.md \
+            --verify-tag
