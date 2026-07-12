@@ -1364,7 +1364,7 @@ impl Pending {
 /// value like `Sir Testwell` must reach the server as `Sir%20Testwell`
 /// on BOTH transports rather than panicking on one of them.
 fn encode_uri_path(path: &str) -> String {
-    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
     // Everything RFC 3986 forbids in a path byte-wise, minus `/` (the
     // separator) and `%` (assume existing escapes are intentional).
     const INVALID_PATH: &AsciiSet = &CONTROLS
