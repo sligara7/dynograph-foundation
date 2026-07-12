@@ -4,6 +4,21 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.9.4 — 2026-07-11
+
+### Fixed
+- **UDS transport: request paths with invalid URI characters no longer panic.**
+  A path segment containing a space or other RFC 3986-invalid character
+  (e.g. a node name like `Sir Testwell` interpolated into
+  `/v1/graphs/{g}/nodes/{name}`) hit `hyperlocal`'s internal `Uri` unwrap and
+  panicked the in-flight request, dropping the connection (consumers saw a
+  gateway 502 with no server error). The client now percent-encodes invalid
+  path characters at the transport seam — matching the TCP arm, where
+  reqwest's URL parser already did this — and pre-validates the assembled
+  path into a typed `ClientError::Unix` so any still-invalid path is an
+  error, never a panic. Regression tests pin both the encoding and the
+  no-panic invariant at the exact former panic site.
+
 ## v0.9.3 — 2026-06-12
 
 Source-aware entity resolution — fixes the alias over-merge class

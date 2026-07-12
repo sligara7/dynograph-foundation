@@ -14,6 +14,7 @@ dynograph-core = { path = "../dynograph-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_urlencoded = "0.7"
+percent-encoding = "2.3"
 thiserror = { workspace = true }
 # TCP transport (default). Unchanged behavior — base-URL clients keep
 # using reqwest end to end.

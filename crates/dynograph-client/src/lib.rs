@@ -187,8 +187,17 @@ impl DynographClient {
                 Ok((status, bytes))
             }
             Transport::Unix { client, socket } => {
-                let uri: hyper::Uri =
-                    hyperlocal::Uri::new(socket.as_ref(), &path_and_query(&path, &query)).into();
+                // Percent-encode invalid path chars BEFORE the URI build: the
+                // TCP arm gets this for free (reqwest's URL parser encodes a
+                // raw space etc.), but `hyperlocal::Uri::new` unwraps on an
+                // invalid char — a node name with a space panicked the whole
+                // request. Encode for parity, then pre-validate so a still-
+                // invalid path surfaces as a typed error, never a panic.
+                let pq = path_and_query(&encode_uri_path(&path), &query);
+                let pq: hyper::http::uri::PathAndQuery = pq
+                    .parse()
+                    .map_err(|e| ClientError::Unix(format!("invalid request path {pq:?}: {e}")))?;
+                let uri: hyper::Uri = hyperlocal::Uri::new(socket.as_ref(), pq.as_str()).into();
                 let mut builder = hyper::Request::builder().method(method).uri(uri);
                 if body.is_some() {
                     builder = builder.header(hyper::header::CONTENT_TYPE, "application/json");
@@ -1347,6 +1356,31 @@ impl Pending {
 /// the wire form matches across transports. String key/value pairs always
 /// encode, so the `expect` is an invariant check, not a runtime failure
 /// mode.
+/// Percent-encode characters that are invalid inside a URI *path* while
+/// preserving `/` separators and any existing percent-escapes. This gives
+/// the UDS transport the same leniency the TCP transport inherits from
+/// reqwest's URL parser (which encodes a raw space in a path segment
+/// instead of failing): callers interpolate ids/names into paths, and a
+/// value like `Sir Testwell` must reach the server as `Sir%20Testwell`
+/// on BOTH transports rather than panicking on one of them.
+fn encode_uri_path(path: &str) -> String {
+    use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
+    // Everything RFC 3986 forbids in a path byte-wise, minus `/` (the
+    // separator) and `%` (assume existing escapes are intentional).
+    const INVALID_PATH: &AsciiSet = &CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'^')
+        .add(b'{')
+        .add(b'}')
+        .add(b'|')
+        .add(b'\\');
+    utf8_percent_encode(path, INVALID_PATH).to_string()
+}
+
 fn path_and_query(path: &str, query: &[(String, String)]) -> String {
     if query.is_empty() {
         return path.to_string();
@@ -1395,6 +1429,34 @@ mod tests {
     fn connect_unix_reports_socket_path_as_endpoint() {
         let c = DynographClient::connect_unix("/run/dynograph/dynograph.sock");
         assert_eq!(c.base_url(), "/run/dynograph/dynograph.sock");
+    }
+
+    #[test]
+    fn encode_uri_path_escapes_invalid_chars_preserving_separators() {
+        assert_eq!(
+            encode_uri_path("/v1/graphs/g/nodes/Sir Testwell"),
+            "/v1/graphs/g/nodes/Sir%20Testwell"
+        );
+        // Separators, existing escapes, and valid chars pass through.
+        assert_eq!(encode_uri_path("/v1/a-b_c.d~e/%20"), "/v1/a-b_c.d~e/%20");
+        assert_eq!(encode_uri_path("/plain"), "/plain");
+        // Non-ASCII bytes are ALWAYS percent-encoded by utf8_percent_encode
+        // (independent of the AsciiSet), so unicode names get TCP parity
+        // too rather than falling through to the typed-error path.
+        assert_eq!(
+            encode_uri_path("/v1/nodes/Chlo\u{e9}"),
+            "/v1/nodes/Chlo%C3%A9"
+        );
+    }
+
+    #[test]
+    fn unix_uri_build_with_spaced_segment_does_not_panic() {
+        // Replicates the apply-fixes panic site: hyperlocal's Uri::new
+        // unwraps internally, so it must only ever see the encoded +
+        // pre-validated form.
+        let pq = path_and_query(&encode_uri_path("/v1/graphs/g/nodes/Sir Testwell"), &[]);
+        let parsed: hyper::http::uri::PathAndQuery = pq.parse().expect("encoded path parses");
+        let _uri: hyper::Uri = hyperlocal::Uri::new("/tmp/x.sock", parsed.as_str()).into();
     }
 
     #[test]
