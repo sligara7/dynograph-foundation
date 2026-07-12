@@ -1440,6 +1440,13 @@ mod tests {
         // Separators, existing escapes, and valid chars pass through.
         assert_eq!(encode_uri_path("/v1/a-b_c.d~e/%20"), "/v1/a-b_c.d~e/%20");
         assert_eq!(encode_uri_path("/plain"), "/plain");
+        // Non-ASCII bytes are ALWAYS percent-encoded by utf8_percent_encode
+        // (independent of the AsciiSet), so unicode names get TCP parity
+        // too rather than falling through to the typed-error path.
+        assert_eq!(
+            encode_uri_path("/v1/nodes/Chlo\u{e9}"),
+            "/v1/nodes/Chlo%C3%A9"
+        );
     }
 
     #[test]
