@@ -4,7 +4,7 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
-## Unreleased
+## v0.10.0 — 2026-07-17
 
 ### Changed
 - **Community detection now uses Leiden instead of Louvain.** `POST
