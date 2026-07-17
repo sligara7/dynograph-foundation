@@ -16,7 +16,7 @@
 //! `util/*` pure-math endpoints rather than under `algo/*`.
 //!
 //! Scope is **DBSCAN** (density-based, finds arbitrarily-shaped clusters and
-//! flags noise) — distinct from `dynograph-graph`'s Louvain (community
+//! flags noise) — distinct from `dynograph-graph`'s Leiden (community
 //! detection on graph edges) and clustering-coefficient. Other clustering
 //! families (k-means, hierarchical/agglomerative) are out of scope until a
 //! consumer demand-pulls them.

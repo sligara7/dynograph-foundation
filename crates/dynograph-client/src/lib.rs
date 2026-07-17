@@ -827,7 +827,7 @@ impl DynographClient {
             .await
     }
 
-    /// `algo/communities` — Louvain community detection (undirected). Body:
+    /// `algo/communities` — Leiden community detection (undirected). Body:
     /// `{scope?, weight?, direction?, resolution?}`. Returns the partition plus
     /// modularity.
     pub async fn algo_communities(

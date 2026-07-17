@@ -6,7 +6,7 @@
 //! N entity types × M nodes × K edge types via per-node
 //! `outgoing_edges` — hundreds of round-trips per call today; one
 //! HTTP call after migration. Used by 13+ knowledge-graph routes
-//! plus the projection step in pagerank/louvain/shortest-path.
+//! plus the projection step in pagerank/leiden/shortest-path.
 //!
 //! ## Wire shape
 //!
@@ -49,7 +49,7 @@
 //!
 //! Iteration order is unspecified — depends on HashMap iter order
 //! across types and storage scan order within each type. Algorithm
-//! consumers (pagerank/louvain) don't care about order; "show me a
+//! consumers (pagerank/leiden) don't care about order; "show me a
 //! few sample edges" callers shouldn't either with a `limit` cap.
 //!
 //! ## `resolve_target` and to_type discovery

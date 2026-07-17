@@ -10,7 +10,7 @@ use dynograph_graph::{
     Communities, Components, DegreeMode, EigenvectorConfig, Graph, GraphBuilder, GraphError,
     LinkPredictionMethod, PageRankConfig, betweenness_centrality, closeness_centrality, clustering,
     connected_components, cut_structure, degree_centrality, eigenvector_centrality, find_cycle,
-    link_prediction_all, link_prediction_from, louvain, max_flow_min_cut, pagerank,
+    leiden, link_prediction_all, link_prediction_from, max_flow_min_cut, pagerank,
     personalized_pagerank, shortest_path, strongly_connected_components, topological_sort,
 };
 use dynograph_storage::{StorageEngine, StoredEdge};
@@ -253,7 +253,7 @@ pub(crate) fn run_clustering(
     })
 }
 
-/// `algo/communities` — Louvain community detection over the scoped
+/// `algo/communities` — Leiden community detection over the scoped
 /// undirected graph (weights = strengths).
 pub(crate) fn run_communities(
     engine: &StorageEngine,
@@ -280,11 +280,11 @@ pub(crate) fn run_communities(
         req.weight.as_ref(),
         false,
     )?;
-    let result = louvain(&graph, resolution).map_err(map_graph_err)?;
+    let result = leiden(&graph, resolution).map_err(map_graph_err)?;
     Ok(communities_response(&graph, result))
 }
 
-/// Map a Louvain partition to the wire response. Invert the per-node labels
+/// Map a Leiden partition to the wire response. Invert the per-node labels
 /// into index groups, then share the sort/id-mapping with components.
 fn communities_response(graph: &Graph, c: Communities) -> CommunitiesResponse {
     let mut groups: Vec<Vec<usize>> = vec![Vec::new(); c.num_communities];

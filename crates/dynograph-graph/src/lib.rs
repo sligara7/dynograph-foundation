@@ -19,8 +19,8 @@
 //!   [`eigenvector_centrality`], [`closeness_centrality`], [`betweenness_centrality`]
 //! - Structure: articulation points & bridges ([`cut_structure`]), directed
 //!   cycle detection ([`find_cycle`]), [`topological_sort`], clustering
-//!   coefficient & transitivity ([`clustering`]), Louvain community detection
-//!   ([`louvain`])
+//!   coefficient & transitivity ([`clustering`]), Leiden community detection
+//!   ([`leiden`])
 //! - Paths & prediction: single-pair [`shortest_path`], neighborhood-overlap
 //!   link prediction ([`link_prediction_from`] / [`link_prediction_all`]),
 //!   max-flow / min-cut ([`max_flow_min_cut`])
@@ -58,7 +58,7 @@ pub use betweenness::betweenness_centrality;
 pub use centrality::{DegreeMode, degree_centrality};
 pub use closeness::closeness_centrality;
 pub use clustering::{Clustering, clustering};
-pub use communities::{Communities, louvain};
+pub use communities::{Communities, leiden};
 pub use components::{Components, connected_components};
 pub use cuts::{Cuts, cut_structure};
 pub use cycles::find_cycle;

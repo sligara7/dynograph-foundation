@@ -460,7 +460,7 @@ shown.
 
 Adjacency entries omit `from_id` (it's the key) and `from_type`
 (uniform across a source-typed scan). Use this format for client-
-side projections (pagerank/louvain/shortest-path).
+side projections (pagerank/leiden/shortest-path).
 
 `truncated` is `true` when the scan stopped early because `limit`
 was reached. Iteration order is unspecified — depends on schema

@@ -370,7 +370,7 @@ pub struct MaxFlowResponse {
     pub cut_edges: Vec<FlowEdge>,
 }
 
-/// Returned by `algo/communities` (Louvain): the partition plus its modularity.
+/// Returned by `algo/communities` (Leiden): the partition plus its modularity.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CommunitiesResponse {
     pub count: usize,
