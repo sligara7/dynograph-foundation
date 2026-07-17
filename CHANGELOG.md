@@ -4,6 +4,23 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## Unreleased
+
+### Changed
+- **Community detection now uses Leiden instead of Louvain.** `POST
+  /v1/graphs/{id}/algo/communities` keeps the same request/response contract
+  (`{scope?, weight?, direction?, resolution?}` → `{count, communities,
+  modularity}`), but the partition is now computed by the Leiden method (Traag,
+  Waltman & van Eck, 2019), the successor to Louvain. Leiden adds a refinement
+  phase that repairs Louvain's one real defect — communities that come out
+  badly connected or even internally disconnected — so **every returned
+  community is now guaranteed to be internally connected**. We run the
+  deterministic greedy variant (no randomized refinement move), preserving the
+  suite's reproducibility invariant; the connectivity guarantee comes from the
+  refinement structure, not the randomness. Partitions for a given graph may
+  differ from the old Louvain output (results are read-only and not persisted).
+  Guarded by a new connectivity test on planted-community graphs.
+
 ## v0.9.4 — 2026-07-11
 
 ### Fixed

@@ -1251,7 +1251,7 @@ pub async fn post_algo(app: &axum::Router, path: &str, body: Value) -> (StatusCo
     (status, parsed)
 }
 
-// algo/communities (#24) — Louvain. Build a connected two-faction graph (two
+// algo/communities (#24) — Leiden. Build a connected two-faction graph (two
 // Character triangles joined by a single bridge MENTIONS edge) so the split is
 // a genuine within-component community partition, not just two components.
 #[cfg(feature = "graph")]

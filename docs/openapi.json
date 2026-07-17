@@ -389,7 +389,7 @@
         "tags": [
           "algo"
         ],
-        "summary": "Louvain community detection over the scoped undirected subgraph: returns the\npartition (communities as id lists) plus its modularity. Read-only; one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
+        "summary": "Leiden community detection over the scoped undirected subgraph: returns the\npartition (communities as id lists) plus its modularity. Read-only; one\n`with_engine_read` lock. Requires the `graph` build feature; otherwise 501.",
         "operationId": "algo_communities",
         "parameters": [
           {
@@ -4245,7 +4245,7 @@
       },
       "CommunitiesRequest": {
         "type": "object",
-        "description": "Request for `POST /v1/graphs/{id}/algo/communities`. Edge weights are\n**strengths** (tighter tie); omit `weight` for an unweighted run.\n\nCommunity detection (Louvain) is defined on the **undirected** graph, so\n`direction` accepts only `undirected` (the default); `directed` is rejected\nwith a 400, the same posture as `/algo/eigenvector`.",
+        "description": "Request for `POST /v1/graphs/{id}/algo/communities`. Edge weights are\n**strengths** (tighter tie); omit `weight` for an unweighted run.\n\nCommunity detection (Leiden) is defined on the **undirected** graph, so\n`direction` accepts only `undirected` (the default); `directed` is rejected\nwith a 400, the same posture as `/algo/eigenvector`.",
         "properties": {
           "direction": {
             "oneOf": [
@@ -4290,7 +4290,7 @@
       },
       "CommunitiesResponse": {
         "type": "object",
-        "description": "Response for `POST /v1/graphs/{id}/algo/communities`. The Louvain partition\nplus its modularity under the requested resolution.",
+        "description": "Response for `POST /v1/graphs/{id}/algo/communities`. The Leiden partition\nplus its modularity under the requested resolution.",
         "required": [
           "count",
           "communities",

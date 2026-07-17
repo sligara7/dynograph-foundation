@@ -366,7 +366,7 @@ pub(crate) async fn algo_clustering(
     Ok(Json(response).into_response())
 }
 
-/// Louvain community detection over the scoped undirected subgraph: returns the
+/// Leiden community detection over the scoped undirected subgraph: returns the
 /// partition (communities as id lists) plus its modularity. Read-only; one
 /// `with_engine_read` lock. Requires the `graph` build feature; otherwise 501.
 #[utoipa::path(

@@ -224,7 +224,7 @@ These families, all under the published OpenAPI spec (`GET /openapi.json`):
   clustering of a precomputed N×N distance matrix → a label per point, `-1` =
   noise). These live under `util/` (not `algo/`) and need no `graph` feature —
   they take the matrix in the request, not the graph's topology. `dbscan` is
-  distinct from the graph suite's Louvain: density-on-points vs community-on-edges.
+  distinct from the graph suite's Leiden: density-on-points vs community-on-edges.
 
 The smoke test (`scripts/smoke-test.sh`, run in CI after the release build)
 probes `/v1/util/pairwise_cosine` on the booted binary, so a build that fails to

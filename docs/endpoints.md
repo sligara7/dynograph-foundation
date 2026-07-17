@@ -110,7 +110,7 @@ edge-weight projection, and a direction — and gets back a generic result.
 | `POST` | `/graphs/{id}/algo/eigenvector` | Eigenvector centrality (undirected). |
 | `POST` | `/graphs/{id}/algo/closeness` | Closeness centrality (weights = path cost). |
 | `POST` | `/graphs/{id}/algo/betweenness` | Betweenness centrality (weights = path cost). |
-| `POST` | `/graphs/{id}/algo/communities` | Louvain community detection + modularity. |
+| `POST` | `/graphs/{id}/algo/communities` | Leiden community detection + modularity. |
 | `POST` | `/graphs/{id}/algo/clustering` | Local clustering coefficients + global transitivity. |
 | `POST` | `/graphs/{id}/algo/cuts` | Articulation points and bridges. |
 | `POST` | `/graphs/{id}/algo/cycles` | Directed cycle detection (+ a witness cycle). |
@@ -150,4 +150,4 @@ caller-supplied N×N distance matrix (`eps`, `min_points`); returns a label per
 point (`-1` = noise, `1..` = cluster id) and the cluster count. Lives under
 `util/` (matrix in, labels out) rather than `algo/*` because it clusters points
 by their pairwise distances, not the stored graph's topology — distinct from
-the graph suite's Louvain (community-on-edges).
+the graph suite's Leiden (community-on-edges).

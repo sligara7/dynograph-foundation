@@ -18,7 +18,7 @@
 //! the same way `util/pairwise_distance` produces that matrix, so it belongs
 //! beside the other stateless `util/*` math (no graph id, no `graph` feature
 //! gate) rather than under `algo/*` (which operates on a stored graph). DBSCAN
-//! is also distinct from the graph suite's Louvain (community detection on
+//! is also distinct from the graph suite's Leiden (community detection on
 //! edges) — density-on-points vs community-on-graph.
 //!
 //! ## Wire shape

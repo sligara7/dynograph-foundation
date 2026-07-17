@@ -152,7 +152,7 @@ pub(crate) struct EigenvectorRequest {
 /// Request for `POST /v1/graphs/{id}/algo/communities`. Edge weights are
 /// **strengths** (tighter tie); omit `weight` for an unweighted run.
 ///
-/// Community detection (Louvain) is defined on the **undirected** graph, so
+/// Community detection (Leiden) is defined on the **undirected** graph, so
 /// `direction` accepts only `undirected` (the default); `directed` is rejected
 /// with a 400, the same posture as `/algo/eigenvector`.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -231,7 +231,7 @@ pub(crate) struct ComponentsResponse {
     pub components: Vec<Vec<String>>,
 }
 
-/// Response for `POST /v1/graphs/{id}/algo/communities`. The Louvain partition
+/// Response for `POST /v1/graphs/{id}/algo/communities`. The Leiden partition
 /// plus its modularity under the requested resolution.
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct CommunitiesResponse {
