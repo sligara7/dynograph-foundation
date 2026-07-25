@@ -254,16 +254,26 @@ impl TextIndex {
     /// BM25 keyword search within one graph.
     ///
     /// `query` is tokenized with the same analyzer as the indexed text and
-    /// matched as a **ranked disjunction**: a document must contain at least
-    /// one token, and BM25 ranks those matching more (and rarer) tokens above
-    /// those matching fewer, so a document containing every token still sorts
-    /// first. This is what makes a natural-language question usable as a query
-    /// — under the previous conjunctive rule one incidental word the corpus
-    /// never used ("do we already have a requirement for X?") reduced a perfect
-    /// match to zero hits, which reads as "no such thing exists" and is the
-    /// worst possible answer for a caller deciding whether to create a
-    /// duplicate. Narrowing is still available and is now the caller's choice:
-    /// pass fewer, better words, or filter with `node_type`.
+    /// matched as a **ranked disjunction**. Exactly two things are guaranteed:
+    /// a document must contain at least one token to appear at all, and results
+    /// come back in descending BM25 score order.
+    ///
+    /// Matching more tokens raises a document's score, because BM25 sums a
+    /// contribution per matched term — but that is a tendency, **not** an
+    /// ordering guarantee. BM25 also weighs term rarity (IDF) and penalizes
+    /// length, so a short document matching one rare token can outrank a long
+    /// one matching several common tokens. Callers must not treat "matched the
+    /// most terms" as a property they can rely on; rank by the score returned,
+    /// and if a single answer is needed, treat the top hit as the best
+    /// candidate rather than a decision.
+    ///
+    /// This is what makes a natural-language question usable as a query — under
+    /// the previous conjunctive rule one incidental word the corpus never used
+    /// ("do we already have a requirement for X?") reduced a perfect match to
+    /// zero hits, which reads as "no such thing exists" and is the worst
+    /// possible answer for a caller deciding whether to create a duplicate.
+    /// Narrowing is still available and is now the caller's choice: pass fewer,
+    /// better words, or filter with `node_type`.
     ///
     /// The raw string is **not** run through Tantivy's query grammar, so colons,
     /// parentheses, `+`/`-`, and `field:value`-looking input are treated as
@@ -520,12 +530,18 @@ mod tests {
         .unwrap();
         idx.commit().unwrap();
 
-        // Both documents contain at least one token, so both come back — but
-        // the one containing BOTH tokens must rank first. That ordering is the
-        // whole contract: the caller reads the top hit, not the set.
+        // Both documents contain at least one token, so both come back rather
+        // than the partial match being discarded — that inclusion is the change.
+        // These two fixtures are comparable in length, so the one matching both
+        // tokens also scores higher here; that is the summation showing through,
+        // not a promise that a fuller match always leads (see
+        // `more_matching_tokens_ranks_higher` for why it cannot be).
         let both = idx.search("g1", "quick brown", None, 10).unwrap();
         assert_eq!(both.len(), 2, "a partial match is a match, ranked lower");
-        assert_eq!(both[0].node_id, "n1", "the document with both tokens leads");
+        assert_eq!(
+            both[0].node_id, "n1",
+            "both tokens match, and both docs are short"
+        );
         assert!(both[0].score > both[1].score);
         // A single shared term still matches both docs.
         assert_eq!(idx.search("g1", "brown", None, 10).unwrap().len(), 2);
@@ -629,12 +645,21 @@ mod tests {
             .unwrap();
         idx.commit().unwrap();
 
-        // Disjunction must not flatten relevance: matching every token has to
-        // outrank matching one, or "ranked" is a lie and callers cannot trust
-        // the first result.
+        // Disjunction must not flatten relevance: BM25 sums a contribution per
+        // matched term, so an extra matched term raises the score. Note what
+        // this does and does not pin. The two documents here are deliberately
+        // the same length and share the same common token, which isolates the
+        // summation; it is NOT a general law that matching more terms outranks
+        // matching fewer, because BM25 also weighs term rarity and penalizes
+        // length — a short document matching one rare token can beat a long one
+        // matching several common ones. The contract is "ordered by score", and
+        // this test pins that the score responds to term count at all.
         let hits = idx.search("g1", "alpha beta", None, 10).unwrap();
         assert_eq!(hits.len(), 2, "both documents match at least one token");
-        assert_eq!(hits[0].node_id, "both", "the fuller match must sort first");
+        assert_eq!(
+            hits[0].node_id, "both",
+            "with length and shared terms held constant, the extra match scores higher"
+        );
         assert!(hits[0].score > hits[1].score);
     }
 

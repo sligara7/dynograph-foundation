@@ -11,9 +11,12 @@ workspace `version` in `Cargo.toml`.
   `TextIndex::search` keeps the same signature and the same guarantees about
   query grammar (the raw string is still never fed to Tantivy's parser, so
   `field:value` input cannot inject a filter), but tokens are now matched as a
-  **ranked disjunction**: a document must contain at least one token, and BM25
-  sorts documents matching more — and rarer — tokens above those matching fewer.
-  A document containing every token still comes back first.
+  **ranked disjunction**. Two things are guaranteed: a document must contain at
+  least one token to appear, and results come back in descending BM25 score
+  order. Matching more tokens raises a document's score, but that is a tendency
+  rather than an ordering guarantee — BM25 also weighs term rarity and penalizes
+  length, so a short document matching one rare token can outrank a long one
+  matching several common tokens.
 
   Previously every token had to occur. That made a natural-language question
   unusable as a query, because one incidental word the corpus never happened to
@@ -32,8 +35,9 @@ workspace `version` in `Cargo.toml`.
   a narrower result should pass fewer, better words or filter by `node_type`.
 
   **Consumers should expect more hits per query than before, ordered by
-  relevance**, and should read the top result rather than assume the set is
-  already filtered. `multi_term_query_is_conjunctive` was flipped (not deleted)
+  relevance**, and should treat the top result as the best candidate rather than
+  assume the set is already filtered down to correct answers.
+  `multi_term_query_is_conjunctive` was flipped (not deleted)
   to `multi_term_query_ranks_rather_than_excludes` so the contract change is on
   the record; three tests were added covering an unmatched token, rank ordering,
   and the guarantee that a disjunction still cannot return the whole graph or
