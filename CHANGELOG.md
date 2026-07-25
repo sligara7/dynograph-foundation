@@ -4,6 +4,45 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.11.0 — 2026-07-24
+
+### Changed
+- **Full-text search ranks a multi-term query instead of excluding on it.**
+  `TextIndex::search` keeps the same signature and the same guarantees about
+  query grammar (the raw string is still never fed to Tantivy's parser, so
+  `field:value` input cannot inject a filter), but tokens are now matched as a
+  **ranked disjunction**. Two things are guaranteed: a document must contain at
+  least one token to appear, and results come back in descending BM25 score
+  order. Matching more tokens raises a document's score, but that is a tendency
+  rather than an ordering guarantee — BM25 also weighs term rarity and penalizes
+  length, so a short document matching one rare token can outrank a long one
+  matching several common tokens.
+
+  Previously every token had to occur. That made a natural-language question
+  unusable as a query, because one incidental word the corpus never happened to
+  use collapsed a perfect match to zero results:
+
+  ```
+  search("upgrade")              -> 1 hit, score 8.29
+  search("upgrade zzzznotaword") -> 0 hits
+  ```
+
+  Zero hits reads as "no such thing exists", which is the worst available answer
+  for the caller this index primarily serves: consumers search before creating a
+  node and treat an empty result as licence to create. A false negative
+  therefore **manufactured duplicates** — the index degraded the graph it exists
+  to protect. Discrimination has moved from exclusion to ranking; callers wanting
+  a narrower result should pass fewer, better words or filter by `node_type`.
+
+  **Consumers should expect more hits per query than before, ordered by
+  relevance**, and should treat the top result as the best candidate rather than
+  assume the set is already filtered down to correct answers.
+  `multi_term_query_is_conjunctive` was flipped (not deleted)
+  to `multi_term_query_ranks_rather_than_excludes` so the contract change is on
+  the record; three tests were added covering an unmatched token, rank ordering,
+  and the guarantee that a disjunction still cannot return the whole graph or
+  match pure noise.
+
 ## v0.10.0 — 2026-07-17
 
 ### Changed
