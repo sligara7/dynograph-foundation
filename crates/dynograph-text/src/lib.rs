@@ -254,8 +254,18 @@ impl TextIndex {
     /// BM25 keyword search within one graph.
     ///
     /// `query` is tokenized with the same analyzer as the indexed text and
-    /// matched as a conjunction: every token must occur (AND semantics). The
-    /// raw string is **not** run through Tantivy's query grammar, so colons,
+    /// matched as a **ranked disjunction**: a document must contain at least
+    /// one token, and BM25 ranks those matching more (and rarer) tokens above
+    /// those matching fewer, so a document containing every token still sorts
+    /// first. This is what makes a natural-language question usable as a query
+    /// — under the previous conjunctive rule one incidental word the corpus
+    /// never used ("do we already have a requirement for X?") reduced a perfect
+    /// match to zero hits, which reads as "no such thing exists" and is the
+    /// worst possible answer for a caller deciding whether to create a
+    /// duplicate. Narrowing is still available and is now the caller's choice:
+    /// pass fewer, better words, or filter with `node_type`.
+    ///
+    /// The raw string is **not** run through Tantivy's query grammar, so colons,
     /// parentheses, `+`/`-`, and `field:value`-looking input are treated as
     /// plain text — they can neither reference the index's internal fields nor
     /// raise parse errors. A query that yields no usable tokens (empty or all
@@ -275,28 +285,40 @@ impl TextIndex {
         let searcher = self.reader.searcher();
 
         // Tokenize the raw input with the SAME analyzer the `text` field uses,
-        // then AND a TermQuery per token. We deliberately do NOT feed `query`
+        // then OR a TermQuery per token. We deliberately do NOT feed `query`
         // to Tantivy's QueryParser: that would resolve `field:value` tokens
         // against the index's internal fields (graph_id, node_type, uid, ...)
         // and would error or silently change meaning on punctuation. Tokenizing
-        // treats the input as plain keywords and pins AND semantics.
+        // treats the input as plain keywords; BM25 then does the discriminating
+        // by SCORE rather than by exclusion.
         let mut analyzer = self.index.tokenizer_for_field(self.fields.text)?;
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
+        let mut term_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
         {
             let mut stream = analyzer.token_stream(query);
             while stream.advance() {
                 let term = Term::from_field_text(self.fields.text, &stream.token().text);
-                clauses.push((
-                    Occur::Must,
+                term_clauses.push((
+                    Occur::Should,
                     Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs)),
                 ));
             }
         }
         // No usable tokens (empty or all-punctuation query) → match nothing,
         // rather than letting the bare graph-scope clause return every node.
-        if clauses.is_empty() {
+        if term_clauses.is_empty() {
             return Ok(Vec::new());
         }
+
+        // The term disjunction is nested and then required as a single clause.
+        // This is load-bearing: a flat mix of Should terms with the Must scope
+        // clauses would make the terms wholly optional, and every node in the
+        // graph would match on the scope clause alone — the exact failure the
+        // empty-token guard above exists to prevent. Nested, a pure-Should
+        // BooleanQuery demands at least one of its clauses, so "at least one
+        // token, ranked by how many" falls out without depending on a
+        // minimum-should-match setter.
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> =
+            vec![(Occur::Must, Box::new(BooleanQuery::new(term_clauses)))];
 
         // Scope to the graph, and optionally to one node_type.
         clauses.push((
@@ -472,7 +494,15 @@ mod tests {
     }
 
     #[test]
-    fn multi_term_query_is_conjunctive() {
+    fn multi_term_query_ranks_rather_than_excludes() {
+        // FLIPPED DELIBERATELY (was `multi_term_query_is_conjunctive`). The old
+        // contract — every token must occur — was pinned by this test and is
+        // now the defect it guards against: a partial match is the normal shape
+        // of a real question, and answering it with silence is what pushed
+        // callers back to grepping prose files. Discrimination moved from
+        // exclusion to ranking; the assertion below is the same scenario read
+        // the new way, so the behaviour change is on the record rather than
+        // erased by deleting a test.
         let (_d, idx) = open_tmp();
         idx.upsert(
             "g1",
@@ -490,10 +520,13 @@ mod tests {
         .unwrap();
         idx.commit().unwrap();
 
-        // Every token must occur (AND), order-independent: only n1 has both.
+        // Both documents contain at least one token, so both come back — but
+        // the one containing BOTH tokens must rank first. That ordering is the
+        // whole contract: the caller reads the top hit, not the set.
         let both = idx.search("g1", "quick brown", None, 10).unwrap();
-        assert_eq!(both.len(), 1);
-        assert_eq!(both[0].node_id, "n1");
+        assert_eq!(both.len(), 2, "a partial match is a match, ranked lower");
+        assert_eq!(both[0].node_id, "n1", "the document with both tokens leads");
+        assert!(both[0].score > both[1].score);
         // A single shared term still matches both docs.
         assert_eq!(idx.search("g1", "brown", None, 10).unwrap().len(), 2);
     }
@@ -547,6 +580,86 @@ mod tests {
         let docs = idx.search("g1", "common", Some("Note"), 10).unwrap();
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].node_id, "x1");
+    }
+
+    #[test]
+    fn an_unmatched_token_no_longer_annihilates_a_match() {
+        let (_d, idx) = open_tmp();
+        idx.upsert(
+            "g1",
+            "Requirement",
+            "r1",
+            &fields(&[("body", "a design survives a reflow2 upgrade")]),
+        )
+        .unwrap();
+        idx.commit().unwrap();
+
+        // The regression this test exists for: under the old conjunctive rule
+        // one token the corpus never used reduced a perfect match to zero, so
+        // asking a question in natural language answered "no such thing".
+        let exact = idx.search("g1", "upgrade", None, 10).unwrap();
+        assert_eq!(exact.len(), 1, "the bare term must still match");
+
+        let with_noise = idx.search("g1", "upgrade zzzznotaword", None, 10).unwrap();
+        assert_eq!(
+            with_noise.len(),
+            1,
+            "an unmatched extra token must lower the score, never erase the hit"
+        );
+
+        // A whole natural-language question, of which only some words occur.
+        let question = idx
+            .search(
+                "g1",
+                "does an existing design survive an upgrade?",
+                None,
+                10,
+            )
+            .unwrap();
+        assert_eq!(question.len(), 1);
+        assert_eq!(question[0].node_id, "r1");
+    }
+
+    #[test]
+    fn more_matching_tokens_ranks_higher() {
+        let (_d, idx) = open_tmp();
+        idx.upsert("g1", "Doc", "both", &fields(&[("body", "alpha beta")]))
+            .unwrap();
+        idx.upsert("g1", "Doc", "one", &fields(&[("body", "alpha only")]))
+            .unwrap();
+        idx.commit().unwrap();
+
+        // Disjunction must not flatten relevance: matching every token has to
+        // outrank matching one, or "ranked" is a lie and callers cannot trust
+        // the first result.
+        let hits = idx.search("g1", "alpha beta", None, 10).unwrap();
+        assert_eq!(hits.len(), 2, "both documents match at least one token");
+        assert_eq!(hits[0].node_id, "both", "the fuller match must sort first");
+        assert!(hits[0].score > hits[1].score);
+    }
+
+    #[test]
+    fn a_disjunction_still_cannot_return_the_whole_graph() {
+        let (_d, idx) = open_tmp();
+        idx.upsert("g1", "Doc", "hit", &fields(&[("body", "alpha")]))
+            .unwrap();
+        idx.upsert("g1", "Doc", "miss", &fields(&[("body", "unrelated")]))
+            .unwrap();
+        idx.commit().unwrap();
+
+        // The nesting is what stops the graph-scope clause matching on its own.
+        // If the term clauses were flattened in beside it, "miss" would come
+        // back here, and every search would silently return the entire graph.
+        let hits = idx.search("g1", "alpha", None, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].node_id, "hit");
+
+        // And a query of pure noise still matches nothing at all.
+        assert!(
+            idx.search("g1", "zzzznotaword qqqqnope", None, 10)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
