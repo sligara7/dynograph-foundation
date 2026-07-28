@@ -199,7 +199,7 @@ let metadata = client.get_graph("g1").await?;
 
 ## Docs
 
-- [`docs/endpoints.md`](docs/endpoints.md) — **the complete endpoint catalog** (all 79 `/v1` routes)
+- [`docs/endpoints.md`](docs/endpoints.md) — **the complete endpoint catalog** (all 76 `/v1` routes)
 - [`docs/openapi.json`](docs/openapi.json) — machine-readable OpenAPI 3 contract
 - [`docs/api.md`](docs/api.md) — worked request/response examples for the core CRUD + primitives
 - [`docs/service.md`](docs/service.md) — config, deployment, probes
