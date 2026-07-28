@@ -48,3 +48,12 @@ pub use schema_response::{SchemaResponse, WIRE_VERSION, content_hash};
 pub use similar_response::{SimilarHit, SimilarResponse};
 pub use transport::{UdsBindError, bind_uds};
 pub use util::Precision;
+
+// Types owned by other crates that cross this crate's public boundary:
+// `Schema` is a parameter of `GraphRegistry::create_graph`, `DynoError` is
+// carried by `RegistryError::Storage`, and `HnswStats` is returned by
+// `hnsw_stats_snapshot`. Both source crates are required dependencies, so
+// these are re-exports rather than wrappers — same rule as storage and
+// resolution, see `req:boundaries-own-their-types`.
+pub use dynograph_core::{DynoError, Schema, Value};
+pub use dynograph_vector::HnswStats;

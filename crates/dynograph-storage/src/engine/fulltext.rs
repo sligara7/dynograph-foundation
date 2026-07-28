@@ -5,6 +5,45 @@
 
 use super::*;
 
+/// One full-text hit: the matched node's id and type, plus its BM25 score.
+///
+/// Owned by this crate on purpose. `search_fulltext` used to return
+/// `dynograph_text::TextHit` directly, which leaked a type belonging to the
+/// `TextIndex` boundary through the `StorageEngine` boundary: a consumer that
+/// never names `dynograph-text` — and cannot, since it arrives only through an
+/// optional feature — still broke when that type changed, and no published
+/// surface said so. The two boundaries are published separately, so their types
+/// are separate too.
+///
+/// `#[non_exhaustive]`: fields are read, never constructed, outside this crate,
+/// so adding one later must not be a breaking change.
+///
+/// Gated on `fulltext` alongside its only constructor and its only returning
+/// method: without the feature nothing can produce one, and public API that no
+/// build path can reach is a surface promising something it cannot deliver.
+#[cfg(feature = "fulltext")]
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct FulltextHit {
+    /// The matched node's id.
+    pub node_id: String,
+    /// The matched node's type.
+    pub node_type: String,
+    /// BM25 relevance score; higher is a better match.
+    pub score: f32,
+}
+
+#[cfg(feature = "fulltext")]
+impl From<dynograph_text::TextHit> for FulltextHit {
+    fn from(h: dynograph_text::TextHit) -> Self {
+        Self {
+            node_id: h.node_id,
+            node_type: h.node_type,
+            score: h.score,
+        }
+    }
+}
+
 impl StorageEngine {
     /// BM25 keyword search over the full-text index, scoped to `graph_id` and
     /// optionally one `node_type`. Returns up to `limit` hits, highest score
@@ -18,10 +57,11 @@ impl StorageEngine {
         query: &str,
         node_type: Option<&str>,
         limit: usize,
-    ) -> Result<Vec<dynograph_text::TextHit>, DynoError> {
+    ) -> Result<Vec<FulltextHit>, DynoError> {
         if let Some(ti) = &self.text_index {
             return ti
                 .search(graph_id, query, node_type, limit)
+                .map(|hits| hits.into_iter().map(FulltextHit::from).collect())
                 .map_err(|e| DynoError::Storage(format!("full-text search failed: {e}")));
         }
         match self.fulltext_unavailable() {

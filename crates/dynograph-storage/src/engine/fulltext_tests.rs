@@ -258,6 +258,12 @@ fn reindex_rebuilds_and_survives_rocksdb_reopen() {
     );
 }
 
+// Uses `rocks_engine`, which only exists with the `rocksdb` feature. Without
+// this gate the test module fails to COMPILE under
+// `--no-default-features --features fulltext`, so a fulltext-only build could
+// not run its own tests. CI never caught it because CI builds with default
+// features, where `rocksdb` is on.
+#[cfg(feature = "rocksdb")]
 #[test]
 fn scoped_by_graph_and_node_type() {
     let mut engine = rocks_engine(ft_schema());

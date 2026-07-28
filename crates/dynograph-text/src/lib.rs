@@ -56,7 +56,13 @@ fn writer_heap_bytes() -> usize {
 }
 
 /// Errors surfaced by [`TextIndex`].
+///
+/// `#[non_exhaustive]`: a new failure mode is a normal event for an index that
+/// wraps Tantivy, and adding a variant must not break a consumer that matches
+/// on this enum. `ReadOnly` was added after v0.11.0 and would have been exactly
+/// that break for anyone matching exhaustively.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TextError {
     /// Failed to open/create the on-disk index directory.
     #[error("failed to open full-text index at {path}: {source}")]
