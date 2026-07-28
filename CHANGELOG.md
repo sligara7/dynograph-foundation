@@ -4,6 +4,88 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.12.0 — 2026-07-28
+
+Found by a seam-analysis exercise between this repo and `reflow2`, in which the
+provider published its interface surface and the consumer composed against it.
+Two of the three findings below are things neither side could have seen alone.
+
+### Changed (breaking, library consumers)
+- **`StorageEngine::search_fulltext` returns `dynograph_storage::FulltextHit`**
+  instead of `dynograph_text::TextHit`. Same three fields — `node_id`,
+  `node_type`, `score` — so code that reads fields compiles unchanged; only code
+  that *names* the type needs updating, and no known consumer does.
+
+  The old signature leaked a type owned by the `TextIndex` boundary through the
+  `StorageEngine` boundary. A consumer reaching `dynograph-text` only through the
+  optional `fulltext` feature — never naming the crate, never calling
+  `TextIndex` — still broke when that type changed, and no published surface
+  said the two boundaries were connected. Found by the seam exercise with
+  reflow2, whose `search.rs` reads all three fields and consumes nothing else of
+  `dynograph-text`.
+
+  `FulltextHit` is `#[non_exhaustive]` from birth, so adding a field later is
+  not another breaking change.
+
+- **`TextError` is now `#[non_exhaustive]`.** Adding a variant to an index that
+  wraps Tantivy is a normal event and should not break an exhaustive matcher.
+  `ReadOnly` was added after v0.11.0 and would have been exactly that break.
+  This is itself breaking for anyone matching the enum exhaustively today.
+
+### Guaranteed (new, and it is a promise rather than a change)
+- **The `rocksdb` and `fulltext` Cargo feature names are part of the published
+  contract.** Renaming or removing either is a breaking change and will be
+  treated as one. Consumers forward to them *by name* from their own manifests
+  (`fulltext = ["dynograph-storage/fulltext"]`), so a rename is a downstream
+  build break that no public-API diff, OpenAPI document or surface export would
+  mention. Previously nothing on this side committed to the names; a consumer
+  relying on them was relying on an internal, and did not know it.
+
+### Fixed (CI, and each of these is the same defect wearing a different hat)
+- **The semver gate was comparing against a baseline seven minors stale.**
+  `SEMVER_BASELINE_REV` was a hand-maintained literal pinned at `v0.4.0` while
+  the workspace was at `0.11.0`, with a comment asking whoever cut a release to
+  bump it. Below 1.0 Cargo treats the minor as the breaking position, so a 0.4
+  baseline permitted every breaking change 0.11 could contain. The baseline is
+  now **derived** from the most recent release tag at run time, and the job
+  **fails** when no tag is found rather than treating an absent baseline as a
+  pass. This is the check that now enforces the feature-name guarantee above.
+- **`scripts/check-doc-versions.sh` could go blind without saying so.** Each
+  check is anchored on a literal doc phrase, so rewording a doc silently
+  disabled it. Every pattern must now match at least once or the run fails, and
+  documented route counts are checked against `docs/openapi.json` — which they
+  never were. Two stale claims were fixed in the process: the endpoint catalogue
+  advertised v0.9.1, and the README claimed 79 `/v1` routes where there are 76.
+- **`cargo test --no-default-features --features fulltext` did not compile.**
+  One test called a `#[cfg(feature = "rocksdb")]` helper without carrying the
+  gate, so a RocksDB-free build could not run its own tests — while
+  "a build without RocksDB must work" is a stated requirement. CI never saw it
+  because CI builds with default features.
+
+### Added (non-breaking; makes existing signatures usable without guesswork)
+- **Foreign types crossing a published boundary are now re-exported by the
+  crate that exposes them**, so a consumer can name every type in a signature
+  it must satisfy without adding an undeclared dependency at a version nobody
+  stated:
+  - `dynograph-resolution` re-exports `HnswIndex`, `HnswConfig` (from
+    `dynograph-vector`) and `ResolutionConfig`, `ResolutionStrategy` (from
+    `dynograph-core`). The sharp case: `resolve`, `resolve_with_aliases` and
+    `resolve_sourced` take `Option<&HnswIndex>` as a **parameter**, so callers
+    must *construct* a type they previously could not name.
+  - `dynograph-storage` re-exports `Schema`, `Value`, `DynoError`.
+  - `dynograph-service` re-exports `Schema`, `Value`, `DynoError`, `HnswStats`.
+
+  The rule these follow: a required dependency gets a **re-export** (it is
+  always present, and usually shared vocabulary — wrapping would fork it); an
+  **optional** dependency gets an **owned type**, because a consumer cannot
+  depend on a crate that may not be compiled in. That is why `FulltextHit`
+  above is a new type while these are re-exports.
+
+- **`docs/published-surface.json`** — the interface surface as an ICD: 15
+  boundaries, each stating its `medium` (11 library, 3 REST, 1 data), with
+  internal design withheld and counted. Intended for consumers doing seam
+  analysis; it describes the commit it was generated from, not a tag.
+
 ## v0.11.0 — 2026-07-24
 
 ### Changed
