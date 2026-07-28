@@ -1,5 +1,5 @@
 {
-  "content_hash": "sha256:5fb38b39bc3de6107c296053efc4fef04b5d74063ac2f56f17ceb135e81ce58d",
+  "content_hash": "sha256:0070b59fe705b771022ea6d46bf8a5ed31e680960b48242485bf9b2af7358b50",
   "edges": [
     {
       "edge_type": "ALLOCATED_TO",
@@ -228,6 +228,51 @@
       "from_id": "question:bb14251a9c7c8e20",
       "properties": {},
       "to_id": "cap:clustering"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:accept-71554c094a0c1b25",
+      "properties": {
+        "accepted_baseline": true,
+        "action": "modified"
+      },
+      "to_id": "art:readme"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:accept-916f0d6a16927d5d",
+      "properties": {
+        "accepted_baseline": true,
+        "action": "modified"
+      },
+      "to_id": "art:endpoints-doc"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:doc-drift-and-guard-blindspot",
+      "properties": {
+        "accepted_baseline": true,
+        "action": "modified"
+      },
+      "to_id": "art:doc-version-script"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:doc-drift-and-guard-blindspot",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "art:endpoints-doc"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:doc-drift-and-guard-blindspot",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "art:readme"
     },
     {
       "edge_type": "CONSTRAINS",
@@ -2162,7 +2207,7 @@
       "node_type": "Artifact",
       "properties": {
         "artifact_type": "code",
-        "checksum": "sha256:fbbc25073b06a15f829c6175800c441a85ba5045fa36e2a8aa7c9807fdd7258e",
+        "checksum": "sha256:8de1b28755e115a8252df9b21f148d89fa5c217d73e8d832e5835312f105201e",
         "location": "scripts/check-doc-versions.sh",
         "name": "scripts/check-doc-versions.sh",
         "provenance": "inferred",
@@ -2186,7 +2231,7 @@
       "node_type": "Artifact",
       "properties": {
         "artifact_type": "spec",
-        "checksum": "sha256:ad3576f047afcf140e354808ba61105f96515a3824d43dcc539f60dd30342a9f",
+        "checksum": "sha256:042a29bef01323fd9212f66851cf36d0d1639fe0698765b0b705b1ea9efbde42",
         "location": "docs/endpoints.md",
         "name": "docs/endpoints.md",
         "provenance": "inferred",
@@ -2270,7 +2315,7 @@
       "node_type": "Artifact",
       "properties": {
         "artifact_type": "document",
-        "checksum": "sha256:ad210c111bd3cc57e2c72d5da2a4931c59cbb25a25fc5fabaf0fc90e385cac2b",
+        "checksum": "sha256:8fcfaddd1b9614fb042702a6a66e325d22c949e62fc90129d89e5f2b0e7b530b",
         "location": "README.md",
         "name": "README.md",
         "provenance": "inferred",
@@ -2512,7 +2557,7 @@
       "node_id": "cap:doc-version-guard",
       "node_type": "Capability",
       "properties": {
-        "description": "scripts/check-doc-versions.sh, run in CI, asserts that hardcoded version strings in README and docs match the workspace version. Deliberately targeted rather than a generic X.Y.Z scan, so historical references in prose do not false-positive.",
+        "description": "scripts/check-doc-versions.sh, run in CI, asserts that the hardcoded facts in README and docs still match the code: version strings against the workspace version, and documented route counts against docs/openapi.json (itself pinned to the generated spec by a contract-gate test, so it cannot drift from the handlers). Deliberately targeted rather than a generic X.Y.Z scan, so historical references in prose do not false-positive — and because a targeted pattern goes blind when a doc is reworded, every pattern must match at least once repo-wide or the run fails, so a check that has stopped looking cannot pass as a check that found nothing.",
         "is_entry_point": false,
         "is_exit_point": false,
         "name": "Catch a version string the docs forgot to update",
@@ -2779,6 +2824,32 @@
         "provenance": "inferred",
         "status": "realized",
         "tier": "operational"
+      }
+    },
+    {
+      "node_id": "chg:accept-71554c094a0c1b25",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "test_failure_fix",
+        "detected_at": "2026-07-27",
+        "name": "Route count corrected 79 -> 76, counted from docs/openapi.json (operations whose path starts with /v1). No design meaning; the doc was simply wrong."
+      }
+    },
+    {
+      "node_id": "chg:accept-916f0d6a16927d5d",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "test_failure_fix",
+        "detected_at": "2026-07-27",
+        "name": "Stale version header corrected v0.9.1 -> v0.11.0. The design was right and the doc was wrong; no design meaning to the change. The \"80 routes\" claim was checked against docs/openapi.json and is correct (76 /v1 operations + 4 operational probes = 80; GET /openapi.json is the meta route the sentence already excludes). The util/* routes are catalogued by family rather than one row per route, so the catalogue is complete despite listing 51 table rows for 80 operations."
+      }
+    },
+    {
+      "node_id": "chg:doc-drift-and-guard-blindspot",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "resync",
+        "name": "Fix stale doc version/route-count and close the version guard's silent blind spot"
       }
     },
     {
@@ -3320,7 +3391,7 @@
         "detected_at": "2026-07-27",
         "drift_type": "spec_mismatch",
         "name": "The endpoint catalogue advertises the wrong version, and the README the wrong route count",
-        "resolved": false,
+        "resolved": true,
         "severity": "low"
       }
     },
@@ -3916,10 +3987,10 @@
         "concern": "core",
         "kind": "quality",
         "lineage": "original",
-        "name": "Version strings in the docs must match the workspace version",
+        "name": "Published facts in the docs must match the code, and the check must not be able to go quiet",
         "priority": "medium",
         "provenance": "inferred",
-        "statement": "scripts/check-doc-versions.sh, run in CI, catches the class of drift where a release bump lands in Cargo.toml while the docs still advertise the previous tag.",
+        "statement": "scripts/check-doc-versions.sh, run in CI, catches the class of drift where a release bump lands in Cargo.toml while the docs still advertise the previous tag, and where a documented route count no longer matches the published contract (counted from docs/openapi.json, which a contract-gate test pins to the generated spec). Because each check is anchored on a literal doc phrase, a reworded doc would otherwise disable it silently, so a pattern that matches nothing anywhere fails the run: a check that has stopped looking must not be able to report the same clean result as a check that looked and found nothing.",
         "status": "proposed"
       }
     },
@@ -4245,7 +4316,7 @@
       }
     }
   ],
-  "prev_content_hash": "sha256:d90f28f2e8deae702d8da2d658ffb25b4ad38aa6f5e5bb3665d4e464eb9f7549",
+  "prev_content_hash": "sha256:5fb38b39bc3de6107c296053efc4fef04b5d74063ac2f56f17ceb135e81ce58d",
   "stamp": {
     "edge_type_names": [
       "ABOUT_ENTITY",
