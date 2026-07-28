@@ -56,7 +56,13 @@ fn writer_heap_bytes() -> usize {
 }
 
 /// Errors surfaced by [`TextIndex`].
+///
+/// `#[non_exhaustive]`: a new failure mode is a normal event for an index that
+/// wraps Tantivy, and adding a variant must not break a consumer that matches
+/// on this enum. `ReadOnly` was added after v0.11.0 and would have been exactly
+/// that break for anyone matching exhaustively.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum TextError {
     /// Failed to open/create the on-disk index directory.
     #[error("failed to open full-text index at {path}: {source}")]
@@ -64,6 +70,20 @@ pub enum TextError {
         path: String,
         #[source]
         source: tantivy::TantivyError,
+    },
+    /// A write was attempted on an index opened read-only.
+    ///
+    /// Loud on purpose. A read-only index that silently swallowed writes would
+    /// report success while the caller's data went nowhere, which is worse than
+    /// refusing: the caller would only find out by searching for something that
+    /// was never there.
+    #[error(
+        "full-text index at {path} is open READ-ONLY, so `{operation}` cannot be served; \
+         another process holds the writer"
+    )]
+    ReadOnly {
+        path: String,
+        operation: &'static str,
     },
     /// Any other Tantivy-level failure (add/delete/commit/search).
     #[error("full-text index error: {0}")]
@@ -96,8 +116,14 @@ struct Fields {
 pub struct TextIndex {
     index: Index,
     reader: IndexReader,
-    writer: Mutex<IndexWriter>,
+    /// `None` when opened read-only. Optional rather than a second type
+    /// because every read path is identical and duplicating them to model the
+    /// absence of a writer would be a worse trade.
+    writer: Option<Mutex<IndexWriter>>,
     fields: Fields,
+    /// Only for error messages — a refusal that cannot say WHICH index it is
+    /// about is not much of a diagnosis on a host with several graphs.
+    path: String,
 }
 
 impl TextIndex {
@@ -121,7 +147,33 @@ impl TextIndex {
             source: tantivy::TantivyError::from(e),
         })?;
         let index = Index::open_or_create(dir, schema).map_err(map_open)?;
-        Self::finish(index, fields)
+        Self::finish(index, fields, path.display().to_string())
+    }
+
+    /// Open an EXISTING index for reading only, taking no writer lock — so this
+    /// succeeds while another process holds the writer.
+    ///
+    /// The view is consistent as of this call and does not refresh; seeing later
+    /// writes means reopening. That is deliberate: staleness stays bounded and
+    /// knowable (it is exactly as old as the open), which is what a caller needs
+    /// in order to say how current its answer is.
+    ///
+    /// Unlike [`open`](Self::open) this never CREATES. A read-only open of a
+    /// directory that holds no index is an error, not an empty index: silently
+    /// inventing one would report "no results" for a design that exists and is
+    /// merely somewhere else.
+    pub fn open_read_only(path: &Path) -> Result<Self, TextError> {
+        let (_schema, fields) = Self::build_schema();
+        let map_open = |source: tantivy::TantivyError| TextError::Open {
+            path: path.display().to_string(),
+            source,
+        };
+        let dir = tantivy::directory::MmapDirectory::open(path).map_err(|e| TextError::Open {
+            path: path.display().to_string(),
+            source: tantivy::TantivyError::from(e),
+        })?;
+        let index = Index::open(dir).map_err(map_open)?;
+        Self::finish_read_only(index, fields, path.display().to_string())
     }
 
     /// Open an ephemeral, RAM-backed index. Nothing is persisted — intended for
@@ -130,7 +182,7 @@ impl TextIndex {
     pub fn open_in_ram() -> Result<Self, TextError> {
         let (schema, fields) = Self::build_schema();
         let index = Index::create_in_ram(schema);
-        Self::finish(index, fields)
+        Self::finish(index, fields, "<in-ram>".to_string())
     }
 
     /// Build the fixed document schema and the field handles for it. The field
@@ -156,7 +208,7 @@ impl TextIndex {
     }
 
     /// Build the writer + reader over an opened index.
-    fn finish(index: Index, fields: Fields) -> Result<Self, TextError> {
+    fn finish(index: Index, fields: Fields, path: String) -> Result<Self, TextError> {
         let writer: IndexWriter = index.writer(writer_heap_bytes())?;
         let reader = index
             .reader_builder()
@@ -165,8 +217,39 @@ impl TextIndex {
         Ok(Self {
             index,
             reader,
-            writer: Mutex::new(writer),
+            writer: Some(Mutex::new(writer)),
             fields,
+            path,
+        })
+    }
+
+    /// Build a reader ONLY, taking no writer lock.
+    ///
+    /// This is what makes a second process able to read an index the first is
+    /// writing: Tantivy's `INDEX_WRITER_LOCK` admits exactly one writer, and
+    /// asking for one is the only thing that was ever in the way.
+    fn finish_read_only(index: Index, fields: Fields, path: String) -> Result<Self, TextError> {
+        // Manual reload: a read-only view is a view as of open, and refreshing
+        // it behind the caller's back would make "how old is this?" unanswerable
+        // — the exact property the read-only path was chosen for.
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::Manual)
+            .try_into()?;
+        Ok(Self {
+            index,
+            reader,
+            writer: None,
+            fields,
+            path,
+        })
+    }
+
+    /// The writer, or a loud refusal naming the operation that wanted it.
+    fn writer(&self, operation: &'static str) -> Result<&Mutex<IndexWriter>, TextError> {
+        self.writer.as_ref().ok_or_else(|| TextError::ReadOnly {
+            path: self.path.clone(),
+            operation,
         })
     }
 
@@ -201,7 +284,7 @@ impl TextIndex {
         doc.add_text(self.fields.node_id, node_id);
         doc.add_text(self.fields.text, text);
 
-        let writer = self.writer.lock().unwrap();
+        let writer = self.writer("upsert")?.lock().unwrap();
         // Delete-then-add: the new doc has a higher opstamp than the delete, so
         // it survives — only the prior version (lower opstamp) is removed.
         writer.delete_term(Term::from_field_text(
@@ -215,7 +298,7 @@ impl TextIndex {
     /// Remove a node from the index. Idempotent — deleting an absent node is a
     /// no-op. Buffered until [`commit`](Self::commit).
     pub fn delete(&self, graph_id: &str, node_id: &str) -> Result<(), TextError> {
-        let writer = self.writer.lock().unwrap();
+        let writer = self.writer("delete")?.lock().unwrap();
         writer.delete_term(Term::from_field_text(
             self.fields.uid,
             &Self::uid(graph_id, node_id),
@@ -227,7 +310,7 @@ impl TextIndex {
     /// index when the graph is deleted, and to clear before a full rebuild.
     /// Idempotent. Buffered until [`commit`](Self::commit).
     pub fn delete_graph(&self, graph_id: &str) -> Result<(), TextError> {
-        let writer = self.writer.lock().unwrap();
+        let writer = self.writer("delete_graph")?.lock().unwrap();
         writer.delete_term(Term::from_field_text(self.fields.graph_id, graph_id));
         Ok(())
     }
@@ -235,7 +318,7 @@ impl TextIndex {
     /// Commit buffered writes and make them visible to [`search`](Self::search).
     /// Forces a reader reload so results are consistent immediately on return.
     pub fn commit(&self) -> Result<(), TextError> {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer("commit")?.lock().unwrap();
         writer.commit()?;
         drop(writer);
         self.reader.reload()?;
@@ -246,7 +329,7 @@ impl TextIndex {
     /// Mirrors a storage-layer batch rollback so a discarded batch leaves no
     /// stray full-text entries.
     pub fn rollback(&self) -> Result<(), TextError> {
-        let mut writer = self.writer.lock().unwrap();
+        let mut writer = self.writer("rollback")?.lock().unwrap();
         writer.rollback()?;
         Ok(())
     }

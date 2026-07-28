@@ -67,6 +67,9 @@ mod fulltext;
 mod nodes;
 mod scan;
 
+#[cfg(feature = "fulltext")]
+pub use fulltext::FulltextHit;
+
 impl StorageEngine {
     /// Create an in-memory storage engine (for testing).
     pub fn new_in_memory(schema: Schema) -> Self {

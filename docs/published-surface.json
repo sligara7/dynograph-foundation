@@ -1,0 +1,1101 @@
+{
+  "stamp": {
+    "reflow2_version": "0.16.0",
+    "schema_version": 1,
+    "node_types": 28,
+    "edge_types": 56,
+    "node_type_names": [
+      "Actor",
+      "Anchor",
+      "Artifact",
+      "Capability",
+      "ChangeEvent",
+      "Component",
+      "Constraint",
+      "Contributor",
+      "Decision",
+      "DesignEpoch",
+      "DesignRule",
+      "DimensionAssessment",
+      "DimensionObservation",
+      "DriftEvent",
+      "Environment",
+      "EnvironmentRule",
+      "Flow",
+      "Fragment",
+      "Interface",
+      "Project",
+      "QualityGate",
+      "Question",
+      "Release",
+      "Requirement",
+      "Resource",
+      "Snapshot",
+      "TemporalFact",
+      "Verification"
+    ],
+    "edge_type_names": [
+      "ABOUT_ENTITY",
+      "ALLOCATED_TO",
+      "ANNOTATES",
+      "ANTICIPATES",
+      "ASKS_ABOUT",
+      "ASSESSED_ON",
+      "AT_EPOCH",
+      "AUTHORED_BY",
+      "BLOCKS",
+      "CAUSES",
+      "CHANGED",
+      "CLAIMS",
+      "COMPLIES_WITH",
+      "CONSTRAINS",
+      "CONSUMES",
+      "CONTAINS",
+      "CONTAINS_EPOCH",
+      "CONTRADICTS",
+      "DECOMPOSES",
+      "DEPENDS_ON",
+      "DEPLOYED_TO",
+      "DOCUMENTS",
+      "DUPLICATES",
+      "EVOLVES_INTO",
+      "GOVERNED_BY",
+      "HAS_OBSERVATION",
+      "HAS_SNAPSHOT",
+      "HAS_TEMPORAL_FACT",
+      "IMPOSES",
+      "INCLUDES",
+      "INTERACTS_WITH",
+      "MASKS",
+      "MITIGATES",
+      "OBSERVED_IN",
+      "OBSOLETES",
+      "OCCURS_DURING",
+      "OPERATES_IN",
+      "PART_OF_FLOW",
+      "PERFORMED_IN",
+      "PRECEDES",
+      "PRODUCES",
+      "PROVIDES",
+      "REALIZES",
+      "REQUIRES_RESOURCE",
+      "RISKS",
+      "SATISFIES",
+      "SPECIFIES",
+      "SUPERSEDES",
+      "SUPPLEMENTS",
+      "TRIGGERS",
+      "VALID_FROM",
+      "VALID_TO",
+      "VERIFIES",
+      "VIOLATES",
+      "VIOLATES_RULE",
+      "YIELDED"
+    ]
+  },
+  "content_hash": "sha256:665d306a263000cfc0976e4b07b0eb47cb9b46c401e91784d05b4356e8d79ded",
+  "graph_id": "dynograph-foundation",
+  "nodes": [
+    {
+      "node_type": "Actor",
+      "node_id": "act:consumer-project",
+      "properties": {
+        "actor_type": "external_system",
+        "description": "A downstream Rust project that depends on these crates BY GIT TAG and builds a domain on top of them. The reason domain-neutrality is a requirement rather than a preference.",
+        "name": "Consumer project (reflow2, storyflow)"
+      }
+    },
+    {
+      "node_type": "Actor",
+      "node_id": "act:operator",
+      "properties": {
+        "actor_type": "operator",
+        "description": "Whatever runs the container: reads /health and /ready, scrapes /metrics.",
+        "name": "Operator / orchestrator"
+      }
+    },
+    {
+      "node_type": "Artifact",
+      "node_id": "art:openapi",
+      "properties": {
+        "artifact_type": "spec",
+        "checksum": "sha256:6962bbebc6e99de3918bc3dc2a00f4f65a789cb74e5d6da11ed7773cf32a5d3d",
+        "location": "docs/openapi.json",
+        "name": "docs/openapi.json",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_type": "Artifact",
+      "node_id": "art:service-auth",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:df239d5f2799c803355361ced3ff6e179f56bb48638994ef05201d7cb63dac8d",
+        "location": "crates/dynograph-service/src/auth.rs",
+        "name": "dynograph-service/src/auth.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_type": "Artifact",
+      "node_id": "art:storage-backend",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:96d6af0b9b647407a96e564a69482b44f5166261b60342f1066624e9fa6f2e88",
+        "location": "crates/dynograph-storage/src/backend.rs",
+        "name": "dynograph-storage/src/backend.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:client",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-client",
+        "name": "dynograph-client",
+        "provenance": "inferred",
+        "purpose": "Async reqwest client for /v1, over TCP or a same-host Unix socket. One method per route, transport-agnostic.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:cluster",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-cluster",
+        "name": "dynograph-cluster",
+        "provenance": "inferred",
+        "purpose": "Density-based clustering (DBSCAN) over a PRECOMPUTED distance matrix. Matrix in, labels out — it deliberately does not compute distances, the same way it does not produce vectors.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:core",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-core",
+        "name": "dynograph-core",
+        "provenance": "inferred",
+        "purpose": "The schema model that drives the entire engine: Schema, NodeTypeDef, EdgeTypeDef, Value, DynoError, and YAML/JSON parse plus validation. A schema is a RUNTIME description of what nodes and edges may exist — which is what lets one binary serve any domain.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:game",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-game",
+        "name": "dynograph-game",
+        "provenance": "inferred",
+        "purpose": "Closed-form normal-form game-theory analysis: dominant strategies, pure-strategy Nash equilibria, Pareto optimality, and the prisoner's-dilemma classification.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:graph",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-graph",
+        "name": "dynograph-graph",
+        "provenance": "inferred",
+        "purpose": "Domain-neutral graph-theory algorithms over a densely-indexed in-memory graph: centrality, components, communities, paths and flow. Every algorithm is EXACT — no approximate or streaming variants — because consumer graphs are small.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:resolution",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-resolution",
+        "name": "dynograph-resolution",
+        "provenance": "inferred",
+        "purpose": "Three-tier entity resolution — auto-merge above the high threshold, vector tiebreaker in the middle band, new entity below the low one — with a source-aware path that reserves auto-merge for name-to-name evidence.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:service",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-service",
+        "name": "dynograph-service",
+        "provenance": "inferred",
+        "purpose": "The axum HTTP service and the `dynograph` binary: a multi-graph registry, pluggable auth, the /v1 REST surface, operational probes, Prometheus metrics, and a generated OpenAPI contract. By far the largest crate in the workspace.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:storage",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-storage",
+        "name": "dynograph-storage",
+        "provenance": "inferred",
+        "purpose": "Schema-validated node and edge persistence: column families for nodes, edges, adjacency and the reverse index; MessagePack values; graph isolation so many graphs share one instance; atomic batch writes; iterator scans; a read cache; and the optional full-text mirror.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:text",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-text",
+        "name": "dynograph-text",
+        "provenance": "inferred",
+        "purpose": "Tantivy-backed BM25 keyword index behind a small storage-agnostic API. Knows nothing about schemas or graphs: callers pass already-extracted (graph, node_type, node_id, fields) and get scored node ids back.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Component",
+      "node_id": "cmp:vector",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-vector",
+        "name": "dynograph-vector",
+        "provenance": "inferred",
+        "purpose": "f32/f64 vector and statistics math plus the HNSW approximate-nearest-neighbour index: SIMD cosine similarity, the distance family, element-wise algebra, transforms, and descriptive statistics through to correlation.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:auth-provider",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "AuthProvider trait",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "The pluggable authentication seam for the service. Shipped providers are `noauth` (the default) and `bearer_jwt`. An EXTENSION POINT.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:client-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "DynographClient API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "One async method per /v1 route, returning the corresponding wire type. Transport is chosen at construction (TCP base URL or Unix socket path) and the methods are identical either way.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:cluster-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "DBSCAN clustering API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Precomputed N-by-N distance matrix in, per-point cluster label or noise out.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:core-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Core model types (Schema, Value, DynoError)",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "The vocabulary every other crate and every consumer speaks: the schema types, the dynamic Value, and the error enum. Changing an error variant or a Value case is a breaking change for every consumer, which is why cargo-semver-checks runs in CI.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:game-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Game-theory analysis API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Game::from_cells then analyze; returns dominant strategies, pure Nash equilibria, Pareto-optimal outcomes and the nash_is_pareto_suboptimal classification.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:graph-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Graph algorithms API",
+        "operations": "centrality, connected components, community detection (Leiden), shortest paths, max flow",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Caller builds a Graph via GraphBuilder — interning string ids, supplying finite f64 weights and a directed flag — and results come back keyed by dense node index for the caller to map back. No storage, service or core dependency.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:kv-backend",
+      "properties": {
+        "auth": "none",
+        "designation": "published",
+        "medium": "library",
+        "name": "KvBackend trait (storage seam)",
+        "operations": "six byte-level primitives over six named column families, plus ordered prefix iteration",
+        "paradigm": "synchronous",
+        "payload_format": "binary",
+        "provenance": "inferred",
+        "spec": "The narrow seam underneath StorageEngine. All schema-aware behaviour — validation, the reverse index, the read cache, the write-buffer overlay, the full-text sidecar — sits ABOVE this trait; everything that touches bytes goes through it. Ordered prefix iteration is the one structural assumption every backend must honour, because the adjacency and index scans are built on it. An EXTENSION POINT: implementing it is how a new backend (Postgres, sled) arrives without the engine changing.",
+        "transport_security": "none"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:ops-probes",
+      "properties": {
+        "auth": "none",
+        "designation": "published",
+        "endpoint": "/health, /ready, /metrics, /buildinfo, /openapi.json",
+        "error_model": "HTTP status only",
+        "medium": "REST",
+        "name": "Operational probes and metrics",
+        "operations": "GET only",
+        "paradigm": "synchronous",
+        "payload_format": "json",
+        "provenance": "inferred",
+        "spec": "Public and unauthenticated by design, because an orchestrator's liveness check and a Prometheus scrape cannot hold a credential. /ready is deliberately distinct from /health. /metrics is Prometheus text format; /buildinfo carries version and git SHA.",
+        "transport_security": "none"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:resolution-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "EntityResolver API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "resolve / resolve_sourced. The source-aware path is the recommended entry point: auto-merge is reserved for name-to-name evidence, alias-sourced matches always require vector corroboration, and an incoming alias matching two or more candidates is excluded rather than guessed at.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:rest-v1",
+      "properties": {
+        "auth": "jwt",
+        "designation": "published",
+        "endpoint": "/v1 (default bind 127.0.0.1:8080)",
+        "error_model": "JSON error body; 501 for routes whose build feature is off — the route and its OpenAPI entry always exist, so the contract does not change with the feature set",
+        "medium": "REST",
+        "name": "/v1 REST API",
+        "operations": "80 operations across graph lifecycle, schema, nodes, edges, embeddings, search, primitives, algo/* and util/*",
+        "paradigm": "synchronous",
+        "payload_format": "json",
+        "payload_schema": "docs/openapi.json (OpenAPI 3.1, generated from the handlers)",
+        "provenance": "inferred",
+        "spec": "The complete published HTTP surface. Auth is a bearer JWT when configured for it; the default configuration is `noauth`. TLS is not terminated by the service itself.",
+        "transport_security": "none"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:schema-doc",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "error_model": "DynoError::Validation naming the node type and property",
+        "medium": "data",
+        "name": "Schema document (YAML/JSON)",
+        "operations": "parse, validate; POST /v1/graphs to configure a graph",
+        "paradigm": "batch",
+        "payload_format": "json",
+        "payload_schema": "dynograph_core::Schema — node_types, edge_types, property flags (type/required/range/enum/default, indexed, fulltext), embedding_field, resolution rules",
+        "provenance": "inferred",
+        "spec": "THE central contract of the whole workspace. Each declaration is what TURNS ON a capability: `indexed` enables scans and where-prefilters, `fulltext` enables keyword search, `embedding_field` enables vector similarity, `resolution` enables dedup. The engine has no hardcoded domain types — only the ones a schema names.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:storage-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "StorageEngine Rust API",
+        "operations": "create/read/update/delete nodes and edges, adjacency and index scans, atomic batches, embedding sidecar operations, full-text mirroring",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "The embedded-library entry point: `StorageEngine::new_in_memory(schema)` or a RocksDB path, then typed CRUD validated against the schema. This is the contract reflow2 and storyflow are built on, so its stability matters more than its elegance.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:text-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "TextIndex API",
+        "operations": "upsert, delete, search, commit/reload",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Index a node's full-text fields, remove it, and run tokenized BM25 keyword search. Storage-agnostic: callers pass (graph, node_type, node_id, fields) and get scored node ids back. Since v0.11.0 a multi-term query is a RANKED DISJUNCTION rather than a conjunction — a document must contain at least one token, and results come back in descending BM25 order.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:uds",
+      "properties": {
+        "auth": "jwt",
+        "designation": "published",
+        "endpoint": "a filesystem socket path",
+        "medium": "REST",
+        "name": "Same-host Unix-socket transport",
+        "paradigm": "synchronous",
+        "payload_format": "json",
+        "provenance": "inferred",
+        "spec": "The identical JSON /v1 API over a Unix domain socket, for faster same-host calls. Access to the socket file IS the network boundary, which is why transport security is filesystem permission rather than TLS.",
+        "transport_security": "physical"
+      }
+    },
+    {
+      "node_type": "Interface",
+      "node_id": "ifc:vector-api",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Vector, HNSW and statistics API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "HNSW index plus the distance family, element-wise algebra, transforms and descriptive statistics through to Pearson and Spearman correlation.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_type": "Project",
+      "node_id": "prj:dynograph-foundation",
+      "properties": {
+        "description": "Rust workspace of domain-agnostic foundation crates for graph-based projects: schema-driven graph storage on RocksDB, HNSW vector search, BM25 full-text, entity resolution, pure graph/game/cluster math, and an HTTP service over all of it. Usable as embedded library crates or as the `dynograph` binary. Deliberately domain-neutral — extractors, schemas and servers for a domain live in CONSUMER projects (reflow2, storyflow) and depend on these crates by git tag.",
+        "mode": "flexible",
+        "name": "dynograph-foundation",
+        "status": "active"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:client-api",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:rest-v1",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:schema-doc",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:storage-api",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:text-api",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:operator",
+      "to_id": "ifc:ops-probes",
+      "properties": {
+        "weight_basis": "estimated"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:client",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:client",
+      "to_id": "ifc:rest-v1",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:client",
+      "to_id": "ifc:uds",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:resolution",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:resolution",
+      "to_id": "ifc:vector-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:auth-provider",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:cluster-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:game-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:graph-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:resolution-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:schema-doc",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:storage-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:vector-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "to_id": "ifc:kv-backend",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "to_id": "ifc:schema-doc",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "to_id": "ifc:text-api",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:client",
+      "to_id": "cmp:core",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:resolution",
+      "to_id": "cmp:core",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:resolution",
+      "to_id": "cmp:vector",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:cluster",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:core",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:game",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:graph",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": true,
+        "weight": 0.4,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:resolution",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:storage",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "to_id": "cmp:vector",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:storage",
+      "to_id": "cmp:core",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:storage",
+      "to_id": "cmp:text",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": true,
+        "weight": 0.4,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:openapi",
+      "to_id": "ifc:rest-v1",
+      "properties": {
+        "doc_kind": "design_doc"
+      }
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "interaction": "reads"
+      }
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:rest-v1",
+      "properties": {
+        "interaction": "reads"
+      }
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:storage-api",
+      "properties": {
+        "interaction": "reads"
+      }
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "to_id": "ifc:text-api",
+      "properties": {
+        "interaction": "reads"
+      }
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:operator",
+      "to_id": "ifc:ops-probes",
+      "properties": {
+        "interaction": "reads"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:client",
+      "to_id": "ifc:client-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:cluster",
+      "to_id": "ifc:cluster-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:core",
+      "to_id": "ifc:core-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:core",
+      "to_id": "ifc:schema-doc",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:game",
+      "to_id": "ifc:game-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:graph",
+      "to_id": "ifc:graph-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:resolution",
+      "to_id": "ifc:resolution-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:auth-provider",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:ops-probes",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:rest-v1",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "to_id": "ifc:uds",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:storage",
+      "to_id": "ifc:kv-backend",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:storage",
+      "to_id": "ifc:storage-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:text",
+      "to_id": "ifc:text-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:vector",
+      "to_id": "ifc:vector-api",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      }
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:service-auth",
+      "to_id": "ifc:auth-provider",
+      "properties": {
+        "completeness": "complete"
+      }
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:storage-backend",
+      "to_id": "ifc:kv-backend",
+      "properties": {
+        "completeness": "complete"
+      }
+    },
+    {
+      "edge_type": "SPECIFIES",
+      "from_id": "art:openapi",
+      "to_id": "ifc:rest-v1",
+      "properties": {}
+    }
+  ]
+}

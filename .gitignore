@@ -15,3 +15,12 @@ proptest-regressions/
 # lock file rather than all of .claude/ so intentional project config (e.g. a
 # committed settings.json) can still be added later.
 .claude/scheduled_tasks.lock
+
+# reflow2's local design graph (machine state; the durable record is an export)
+.reflow2/
+# reflow2's MCP configs — they carry an absolute path to YOUR binary
+.mcp.json
+opencode.json
+.vscode/mcp.json
+# reflow2's loop-nudge hook — an absolute path to YOUR kit
+.claude/settings.local.json

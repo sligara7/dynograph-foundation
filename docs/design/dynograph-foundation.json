@@ -1,0 +1,4414 @@
+{
+  "content_hash": "sha256:0070b59fe705b771022ea6d46bf8a5ed31e680960b48242485bf9b2af7358b50",
+  "edges": [
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:atomic-batch",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:clustering",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:cluster"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:containerized-deploy",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:doc-version-guard",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:embedded-use",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:embedding-sidecar",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:entity-resolution",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:resolution"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:fulltext",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:game-analysis",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:game"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:generated-openapi",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:graph-algorithms",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:graph-isolation",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:http-surface",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:hybrid-search",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:indexed-scan",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:observability",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:pluggable-auth",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:pluggable-backend",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:schema-driven-config",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:schema-evolution",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:semver-guard",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:typed-crud",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:uds-transport",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "ALLOCATED_TO",
+      "from_id": "cap:vector-search",
+      "properties": {
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:51d70bc51fe74bbf",
+      "properties": {},
+      "to_id": "cap:observability"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:5a38d2006aeec49c",
+      "properties": {},
+      "to_id": "cap:pluggable-auth"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:62d7da36865ddffa",
+      "properties": {},
+      "to_id": "cap:atomic-batch"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:92cbb36d040f6c15",
+      "properties": {},
+      "to_id": "cap:schema-evolution"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:aa4cff86dedcb70d",
+      "properties": {},
+      "to_id": "cap:game-analysis"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:bb14251a9c7c8e20",
+      "properties": {},
+      "to_id": "cap:clustering"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:accept-71554c094a0c1b25",
+      "properties": {
+        "accepted_baseline": true,
+        "action": "modified"
+      },
+      "to_id": "art:readme"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:accept-916f0d6a16927d5d",
+      "properties": {
+        "accepted_baseline": true,
+        "action": "modified"
+      },
+      "to_id": "art:endpoints-doc"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:doc-drift-and-guard-blindspot",
+      "properties": {
+        "accepted_baseline": true,
+        "action": "modified"
+      },
+      "to_id": "art:doc-version-script"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:doc-drift-and-guard-blindspot",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "art:endpoints-doc"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:doc-drift-and-guard-blindspot",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "art:readme"
+    },
+    {
+      "edge_type": "CONSTRAINS",
+      "from_id": "con:graph-scale",
+      "properties": {
+        "basis": "evidence"
+      },
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "CONSTRAINS",
+      "from_id": "con:image-size",
+      "properties": {
+        "basis": "evidence"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "CONSTRAINS",
+      "from_id": "con:msrv",
+      "properties": {
+        "basis": "estimated"
+      },
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "CONSTRAINS",
+      "from_id": "con:msrv",
+      "properties": {
+        "basis": "estimated"
+      },
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "CONSTRAINS",
+      "from_id": "con:msrv",
+      "properties": {
+        "basis": "estimated"
+      },
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "CONSTRAINS",
+      "from_id": "con:msrv",
+      "properties": {
+        "basis": "evidence"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:client-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:schema-doc"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:storage-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:text-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "act:operator",
+      "properties": {
+        "weight_basis": "estimated"
+      },
+      "to_id": "ifc:ops-probes"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:client",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:client",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:client",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:uds"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:resolution",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:resolution",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:vector-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:auth-provider"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:cluster-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:game-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:graph-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:resolution-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:schema-doc"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:storage-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:vector-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:kv-backend"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:schema-doc"
+    },
+    {
+      "edge_type": "CONSUMES",
+      "from_id": "cmp:storage",
+      "properties": {
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:text-api"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:engine",
+      "properties": {},
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:engine",
+      "properties": {},
+      "to_id": "cmp:resolution"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:engine",
+      "properties": {},
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:engine",
+      "properties": {},
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:primitives",
+      "properties": {},
+      "to_id": "cmp:cluster"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:primitives",
+      "properties": {},
+      "to_id": "cmp:game"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:primitives",
+      "properties": {},
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:primitives",
+      "properties": {},
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:surface",
+      "properties": {},
+      "to_id": "cmp:client"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "cmp:surface",
+      "properties": {},
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "prj:dynograph-foundation",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "prj:dynograph-foundation",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "CONTAINS",
+      "from_id": "prj:dynograph-foundation",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:client",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:resolution",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:resolution",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:cluster"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:game"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": true,
+        "weight": 0.4,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:resolution"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:service",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:storage",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": false,
+        "weight": 0.8,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "cmp:storage",
+      "properties": {
+        "dependency_type": "function_call",
+        "optional": true,
+        "weight": 0.4,
+        "weight_basis": "evidence"
+      },
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "DEPENDS_ON",
+      "from_id": "drift:endpoint-doc-stale",
+      "properties": {
+        "optional": false,
+        "weight_basis": "estimated"
+      },
+      "to_id": "art:endpoints-doc"
+    },
+    {
+      "edge_type": "DEPLOYED_TO",
+      "from_id": "rel:v0110",
+      "properties": {
+        "status": "active"
+      },
+      "to_id": "env:published-image"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:api-doc",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:changelog",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:endpoints-doc",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:example-config",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:fulltext-design-doc",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:migration-doc",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:openapi",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:readme",
+      "properties": {
+        "doc_kind": "readme"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:releasing-doc",
+      "properties": {
+        "doc_kind": "runbook"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:service-doc",
+      "properties": {
+        "doc_kind": "runbook"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "DOCUMENTS",
+      "from_id": "art:workspace-manifest",
+      "properties": {
+        "doc_kind": "design_doc"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cap:entity-resolution",
+      "properties": {},
+      "to_id": "dec:source-aware-resolution"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cap:fulltext",
+      "properties": {},
+      "to_id": "dec:fulltext-derived-view"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cap:fulltext",
+      "properties": {},
+      "to_id": "dec:ranked-disjunction"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cap:generated-openapi",
+      "properties": {},
+      "to_id": "dec:generated-contract"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cap:graph-algorithms",
+      "properties": {},
+      "to_id": "dec:leiden-over-louvain"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cap:pluggable-backend",
+      "properties": {},
+      "to_id": "dec:rocksdb-default-on"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cmp:graph",
+      "properties": {},
+      "to_id": "dec:exact-only"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cmp:service",
+      "properties": {},
+      "to_id": "dec:strip-debuginfo"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cmp:storage",
+      "properties": {},
+      "to_id": "dec:narrow-kv-seam"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "cmp:text",
+      "properties": {},
+      "to_id": "dec:fulltext-derived-view"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "ifc:kv-backend",
+      "properties": {},
+      "to_id": "dec:narrow-kv-seam"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "ifc:text-api",
+      "properties": {},
+      "to_id": "dec:ranked-disjunction"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "prj:dynograph-foundation",
+      "properties": {},
+      "to_id": "dec:no-crates-io"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:client"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:cluster"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:game"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:resolution"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "INCLUDES",
+      "from_id": "rel:v0110",
+      "properties": {},
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "interaction": "reads"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "interaction": "reads"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "interaction": "reads"
+      },
+      "to_id": "ifc:storage-api"
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:consumer-project",
+      "properties": {
+        "interaction": "reads"
+      },
+      "to_id": "ifc:text-api"
+    },
+    {
+      "edge_type": "INTERACTS_WITH",
+      "from_id": "act:operator",
+      "properties": {
+        "interaction": "reads"
+      },
+      "to_id": "ifc:ops-probes"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:client",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:client-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:cluster",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:cluster-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:core",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:core",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:schema-doc"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:game",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:game-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:graph",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:graph-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:resolution",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:resolution-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:auth-provider"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:ops-probes"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:service",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:uds"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:storage",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:kv-backend"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:storage",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:storage-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:text",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:text-api"
+    },
+    {
+      "edge_type": "PROVIDES",
+      "from_id": "cmp:vector",
+      "properties": {
+        "weight": 0.9,
+        "weight_basis": "evidence"
+      },
+      "to_id": "ifc:vector-api"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:ci",
+      "properties": {},
+      "to_id": "cap:semver-guard"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:ci",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "ver:feature-matrix"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:client-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:client"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:cluster-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:cluster"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:compose",
+      "properties": {},
+      "to_id": "cap:containerized-deploy"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:core-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:doc-version-script",
+      "properties": {},
+      "to_id": "cap:doc-version-guard"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:doc-version-script",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "ver:doc-versions"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:dockerfile",
+      "properties": {},
+      "to_id": "cap:containerized-deploy"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:game-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:game"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:graph-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:openapi",
+      "properties": {},
+      "to_id": "cap:generated-openapi"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:release-workflow",
+      "properties": {},
+      "to_id": "cap:containerized-deploy"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:resolution-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:resolution"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:service-auth",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "ifc:auth-provider"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:service-config",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:service-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:service-registry",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cap:graph-isolation"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:smoke-script",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "ver:smoke"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:storage-backend",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "ifc:kv-backend"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:storage-cache",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:storage-keys",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:storage-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:text-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "REALIZES",
+      "from_id": "art:vector-lib",
+      "properties": {
+        "completeness": "complete"
+      },
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "art:workspace-manifest",
+      "properties": {},
+      "to_id": "req:msrv-locked-to-image"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:containerized-deploy",
+      "properties": {},
+      "to_id": "req:image-size"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:containerized-deploy",
+      "properties": {},
+      "to_id": "req:msrv-locked-to-image"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:doc-version-guard",
+      "properties": {},
+      "to_id": "req:docs-match-version"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:embedded-use",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:consume-by-tag"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:embedding-sidecar",
+      "properties": {},
+      "to_id": "req:schema-driven"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:entity-resolution",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:alias-needs-corroboration"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:fulltext",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:fulltext-derived"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:fulltext",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:query-grammar-not-injectable"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:fulltext",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:search-must-not-manufacture-duplicates"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:generated-openapi",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:contract-cannot-drift"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:graph-algorithms",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:communities-connected"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:graph-algorithms",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:deterministic-results"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:graph-algorithms",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:scoped-analytics"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:graph-isolation",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:multi-tenant"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:http-surface",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:feature-off-is-501"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:hybrid-search",
+      "properties": {},
+      "to_id": "req:schema-driven"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:indexed-scan",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:scoped-analytics"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:pluggable-backend",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:backend-swappable"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:pluggable-backend",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:rocksdb-optional"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:schema-driven-config",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:schema-driven"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:semver-guard",
+      "properties": {},
+      "to_id": "req:no-silent-breaking-change"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:typed-crud",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:schema-driven"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:uds-transport",
+      "properties": {
+        "coverage": "full",
+        "evidence": "read from the implementation during adopt"
+      },
+      "to_id": "req:uds-no-panic-on-bad-path"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:vector-search",
+      "properties": {},
+      "to_id": "req:schema-driven"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cmp:graph",
+      "properties": {},
+      "to_id": "req:algorithms-exact"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cmp:primitives",
+      "properties": {},
+      "to_id": "req:domain-neutral"
+    },
+    {
+      "edge_type": "SPECIFIES",
+      "from_id": "art:openapi",
+      "properties": {},
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:client-it",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:client"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:clippy",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:clippy",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:clippy",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:clippy",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:doc-versions",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:doc-versions",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:doc-versions",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:doc-versions",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:feature-matrix",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:feature-matrix",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:feature-matrix",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:feature-matrix",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:fmt",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:fmt",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:fmt",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:fmt",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:openapi-drift",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "ifc:rest-v1"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:release-mode",
+      "properties": {},
+      "to_id": "cmp:engine"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:release-mode",
+      "properties": {},
+      "to_id": "cmp:primitives"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:release-mode",
+      "properties": {},
+      "to_id": "cmp:surface"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:release-mode",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "prj:dynograph-foundation"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:semver",
+      "properties": {},
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:semver",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "ifc:core-api"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:semver",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "ifc:storage-api"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:service-it",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:smoke",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:service"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:text-concurrency",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:cluster"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:core"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:game"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:graph"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:resolution"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:text"
+    },
+    {
+      "edge_type": "VERIFIES",
+      "from_id": "ver:workspace-tests",
+      "properties": {
+        "coverage": "partial"
+      },
+      "to_id": "cmp:vector"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:leiden-over-louvain"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:ranked-disjunction"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:communities-connected"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:deterministic-results"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:query-grammar-not-injectable"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:search-must-not-manufacture-duplicates"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:changelog",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:uds-no-panic-on-bad-path"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:ci",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:no-silent-breaking-change"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:doc-version-check",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:docs-match-version"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:endpoints",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:feature-off-is-501"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:fulltext-design",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:fulltext-derived-view"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:fulltext-design",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:fulltext-derived"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:exact-only"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:generated-contract"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:narrow-kv-seam"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:rocksdb-default-on"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:source-aware-resolution"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:algorithms-exact"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:alias-needs-corroboration"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:backend-swappable"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:contract-cannot-drift"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:multi-tenant"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:rocksdb-optional"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:schema-driven"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:readme",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:scoped-analytics"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:workspace-manifest",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:no-crates-io"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:workspace-manifest",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "dec:strip-debuginfo"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:workspace-manifest",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:consume-by-tag"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:workspace-manifest",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:domain-neutral"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:workspace-manifest",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:image-size"
+    },
+    {
+      "edge_type": "YIELDED",
+      "from_id": "frg:workspace-manifest",
+      "properties": {
+        "action": "created"
+      },
+      "to_id": "req:msrv-locked-to-image"
+    }
+  ],
+  "graph_id": "dynograph-foundation",
+  "nodes": [
+    {
+      "node_id": "act:consumer-project",
+      "node_type": "Actor",
+      "properties": {
+        "actor_type": "external_system",
+        "description": "A downstream Rust project that depends on these crates BY GIT TAG and builds a domain on top of them. The reason domain-neutrality is a requirement rather than a preference.",
+        "name": "Consumer project (reflow2, storyflow)"
+      }
+    },
+    {
+      "node_id": "act:operator",
+      "node_type": "Actor",
+      "properties": {
+        "actor_type": "operator",
+        "description": "Whatever runs the container: reads /health and /ready, scrapes /metrics.",
+        "name": "Operator / orchestrator"
+      }
+    },
+    {
+      "node_id": "art:api-doc",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:8e63560f9ef63a9adc964377fc02c7e4a4c34be333778bac165056904beffb04",
+        "location": "docs/api.md",
+        "name": "docs/api.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:changelog",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:5400b1a06ddae7c70aaaa94fea5b779931eb1485e943ae9746b9244544238ee9",
+        "location": "CHANGELOG.md",
+        "name": "CHANGELOG.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:ci",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "config",
+        "checksum": "sha256:52b595b9c6cece32612d22c4e18c38e45b68fe56eb5282e47462cb34aea270e3",
+        "location": ".github/workflows/ci.yml",
+        "name": ".github/workflows/ci.yml",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:client-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:9807351b8d1c4e9b81296b3b8bb012123e74c8126a560ff15f74897ba20bb2f6",
+        "location": "crates/dynograph-client/src/lib.rs",
+        "name": "dynograph-client/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:cluster-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:d67312b1183e556cdc194c95cb2050c810e7417e8bc166b7e25dbc7d4f2337b1",
+        "location": "crates/dynograph-cluster/src/lib.rs",
+        "name": "dynograph-cluster/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:compose",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "config",
+        "checksum": "sha256:c300cd29b7484ecca02595146ef63e50f949050f6af95fa2dc131effc0327a3c",
+        "location": "docker-compose.yml",
+        "name": "docker-compose.yml",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:core-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:e107d8c1eb9ca7849f6905469b4b75ac1dd32cab1eac8f7f16b86800fc4feefd",
+        "location": "crates/dynograph-core/src/lib.rs",
+        "name": "dynograph-core/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:doc-version-script",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:8de1b28755e115a8252df9b21f148d89fa5c217d73e8d832e5835312f105201e",
+        "location": "scripts/check-doc-versions.sh",
+        "name": "scripts/check-doc-versions.sh",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:dockerfile",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "config",
+        "checksum": "sha256:b8e908458d7eea363ff0fbc8f7847842320bb8bc172f36e7583f5c0eb90114c4",
+        "location": "Dockerfile",
+        "name": "Dockerfile",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:endpoints-doc",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "spec",
+        "checksum": "sha256:042a29bef01323fd9212f66851cf36d0d1639fe0698765b0b705b1ea9efbde42",
+        "location": "docs/endpoints.md",
+        "name": "docs/endpoints.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:example-config",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "config",
+        "checksum": "sha256:17f81879e38f4c21dbb4ddbc6132bdb63176580b3dcfc575b9193774f9904343",
+        "location": "dynograph.example.toml",
+        "name": "dynograph.example.toml",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:fulltext-design-doc",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:9806d4c85fda4d89df67cee7a8b6b6a4e8fdc4a1b0be619b392dbb77dbcc3f55",
+        "location": "docs/design-fulltext-primitive.md",
+        "name": "docs/design-fulltext-primitive.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:game-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:78efb0b43c21c6d01954c9dbb138598a9eeaacae83ba9a412a7a9bccc66cf245",
+        "location": "crates/dynograph-game/src/lib.rs",
+        "name": "dynograph-game/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:graph-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:283a59796d3950a92c21e7478b663014be9859ce49b41da4559b3712acd5c072",
+        "location": "crates/dynograph-graph/src/lib.rs",
+        "name": "dynograph-graph/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:migration-doc",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:7067b3a66c2572072b93e4ea9d25de3998ee4a7563bb13f78a91f5a7796a5f69",
+        "location": "docs/migration.md",
+        "name": "docs/migration.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:openapi",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "spec",
+        "checksum": "sha256:6962bbebc6e99de3918bc3dc2a00f4f65a789cb74e5d6da11ed7773cf32a5d3d",
+        "location": "docs/openapi.json",
+        "name": "docs/openapi.json",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:readme",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:8fcfaddd1b9614fb042702a6a66e325d22c949e62fc90129d89e5f2b0e7b530b",
+        "location": "README.md",
+        "name": "README.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:release-workflow",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "config",
+        "checksum": "sha256:aa07398d5d07c0eea10de953082ef99c2ddf28b337e0b1c81fc46d3ee5f2936d",
+        "location": ".github/workflows/release.yml",
+        "name": ".github/workflows/release.yml",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:releasing-doc",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:39e546549da7208e7efe1bbe8ea9e0e5e14103f1216236b10994053fda36f607",
+        "location": "RELEASING.md",
+        "name": "RELEASING.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:resolution-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:0d099012132f6d114be88d2cd2dbb6f527722b24cdf264b784948433dc5bdcf3",
+        "location": "crates/dynograph-resolution/src/lib.rs",
+        "name": "dynograph-resolution/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:service-auth",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:df239d5f2799c803355361ced3ff6e179f56bb48638994ef05201d7cb63dac8d",
+        "location": "crates/dynograph-service/src/auth.rs",
+        "name": "dynograph-service/src/auth.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:service-config",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:a7be70672d52f824117144b531463304351118b76f19f8c544cb9c8cd4098adc",
+        "location": "crates/dynograph-service/src/config.rs",
+        "name": "dynograph-service/src/config.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:service-doc",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "document",
+        "checksum": "sha256:69b7859b3429e6094b38b5cde979c72d7d1f385a6230cced19f1a8cb5dc00d4c",
+        "location": "docs/service.md",
+        "name": "docs/service.md",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:service-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:56419be3854e3a36cbcb6b4bc1992344eaadbcf039c7bbd2f1d0ed4bc226e11b",
+        "location": "crates/dynograph-service/src/lib.rs",
+        "name": "dynograph-service/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:service-registry",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:46b1ce3dbbdedb90f43fc3d01eccd8de14f547580752be126720c3dd3789f490",
+        "location": "crates/dynograph-service/src/registry.rs",
+        "name": "dynograph-service/src/registry.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:smoke-script",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:fc1cc931296e7a62178ead3ef186bc8718fe4408730a821cc094dad83023753e",
+        "location": "scripts/smoke-test.sh",
+        "name": "scripts/smoke-test.sh",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:storage-backend",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:96d6af0b9b647407a96e564a69482b44f5166261b60342f1066624e9fa6f2e88",
+        "location": "crates/dynograph-storage/src/backend.rs",
+        "name": "dynograph-storage/src/backend.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:storage-cache",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:343283c98123cdc8945da829351aca3525d13cd2bda94c791cfd1b7d17c285b3",
+        "location": "crates/dynograph-storage/src/cache.rs",
+        "name": "dynograph-storage/src/cache.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:storage-keys",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:10cc09eb190942e39b66be50037cb238752558c3e882d525f2b5d9a97553e059",
+        "location": "crates/dynograph-storage/src/keys.rs",
+        "name": "dynograph-storage/src/keys.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:storage-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:13ecf2f8670c6dbd3ee393388895e7c72425205bf5c083d451e43ea2934e9a48",
+        "location": "crates/dynograph-storage/src/lib.rs",
+        "name": "dynograph-storage/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:text-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:460dd4a36579fda49cdd1c230bda4b23e8a16c800cf3d3c3452c07c878f11865",
+        "location": "crates/dynograph-text/src/lib.rs",
+        "name": "dynograph-text/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:vector-lib",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "code",
+        "checksum": "sha256:850463fbca1bb56bfe30c24067e395c74805987e33e7ef031446eec38e4e679f",
+        "location": "crates/dynograph-vector/src/lib.rs",
+        "name": "dynograph-vector/src/lib.rs",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "art:workspace-manifest",
+      "node_type": "Artifact",
+      "properties": {
+        "artifact_type": "config",
+        "checksum": "sha256:2b6d928a820955b51f869cac0e8ab6d188efb65509e6f90c76ad02dfae17941f",
+        "location": "Cargo.toml",
+        "name": "Cargo.toml",
+        "provenance": "inferred",
+        "status": "realized"
+      }
+    },
+    {
+      "node_id": "cap:atomic-batch",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Buffer many node and edge writes and commit them as one unit, so an extraction run either lands or does not.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Atomic batch writes",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:clustering",
+      "node_type": "Capability",
+      "properties": {
+        "description": "DBSCAN labelling, including explicit noise.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Cluster points by density from a distance matrix",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:containerized-deploy",
+      "node_type": "Capability",
+      "properties": {
+        "description": "A Dockerfile and a release workflow that publishes ghcr.io/sligara7/dynograph-foundation on every v* tag, plus a compose file for running the same thing from a checkout. Release builds strip debuginfo while keeping symbols, which is what brings the image toward the ~80 MB target without losing readable backtraces.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Ship as a container image, tagged per release",
+        "provenance": "authored",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:doc-version-guard",
+      "node_type": "Capability",
+      "properties": {
+        "description": "scripts/check-doc-versions.sh, run in CI, asserts that the hardcoded facts in README and docs still match the code: version strings against the workspace version, and documented route counts against docs/openapi.json (itself pinned to the generated spec by a contract-gate test, so it cannot drift from the handlers). Deliberately targeted rather than a generic X.Y.Z scan, so historical references in prose do not false-positive — and because a targeted pattern goes blind when a doc is reworded, every pattern must match at least once repo-wide or the run fails, so a check that has stopped looking cannot pass as a check that found nothing.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Catch a version string the docs forgot to update",
+        "provenance": "authored",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:embedded-use",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Consumers can link StorageEngine directly and skip HTTP entirely — the mode reflow2 and storyflow actually use.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Be used as a library, not only as a service",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:embedding-sidecar",
+      "node_type": "Capability",
+      "properties": {
+        "description": "A sidecar column family one-to-one with nodes, holding raw f32 bytes whose length IS the dimension.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Store embeddings beside nodes",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:entity-resolution",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Three tiers: auto-merge above the high threshold, vector tiebreaker in the middle band, new entity below the low one — with a source-aware path that treats name evidence and alias evidence differently.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Resolve an incoming entity to an existing one, or create it",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:fulltext",
+      "node_type": "Capability",
+      "properties": {
+        "description": "A Tantivy BM25 index over the properties a schema marks `fulltext`, kept as a derived, rebuildable view of the primary store.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Keyword search over declared full-text fields",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:game-analysis",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Dominant strategies, pure Nash equilibria, Pareto optimality, and the rational-play-is-collectively-worse signal.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Classify a normal-form game",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:generated-openapi",
+      "node_type": "Capability",
+      "properties": {
+        "description": "The OpenAPI 3.1 document is GENERATED from the handlers and wire types and served at /openapi.json; the committed copy is the reviewed contract, and CI fails if the code changes the contract without it being regenerated.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Publish a contract that cannot drift from the code",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:graph-algorithms",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Centrality, connected components, Leiden community detection, shortest paths and max flow, scopable to a logical sub-graph by an indexed property.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Run exact graph algorithms over a scoped sub-graph",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:graph-isolation",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Every key is prefixed by graph id, so one deployment is multi-tenant: many graphs, each with its own schema, sharing one process and one store.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Host many independent graphs in one instance",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:http-surface",
+      "node_type": "Capability",
+      "properties": {
+        "description": "80 operations under /v1 covering graph lifecycle, schema, nodes, edges, embeddings, search, composed primitives, algorithms and stateless utility math.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Serve every engine capability over HTTP",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:hybrid-search",
+      "node_type": "Capability",
+      "properties": {
+        "description": "search:hybrid runs the BM25 leg and the vector leg and merges them.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Combine keyword and vector search in one query",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:indexed-scan",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Properties declared `indexed` get a reverse index, which powers nodes:scan, list filters and the where-prefilter that lets an algorithm run over a logical sub-graph inside a shared graph.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Indexed scans and where-filters",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:observability",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Distinct liveness and readiness probes, a Prometheus scrape endpoint, and a /buildinfo carrying version and git SHA.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Be operable: probes, metrics and build identity",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:pluggable-auth",
+      "node_type": "Capability",
+      "properties": {
+        "description": "An AuthProvider trait with noauth and bearer-JWT implementations shipped.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Choose how callers prove who they are",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:pluggable-backend",
+      "node_type": "Capability",
+      "properties": {
+        "description": "All byte-touching goes through the KvBackend trait, so RocksDB (production) and an in-memory map (test) are peers. A --no-default-features build drops RocksDB and its long C++ compile entirely.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Swap the storage backend without touching the engine",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:schema-driven-config",
+      "node_type": "Capability",
+      "properties": {
+        "description": "POST a schema document and the same binary now validates writes, applies defaults, builds indexes, answers vector and keyword searches, dedups entities and runs algorithms over YOUR node and edge types. No code, no migration, no redeploy. This is the capability the whole workspace exists to deliver.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Configure a typed graph from a schema, with no code",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:schema-evolution",
+      "node_type": "Capability",
+      "properties": {
+        "description": "A schema-evolution path so a configured graph is not frozen at creation.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Change a live graph's schema",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:semver-guard",
+      "node_type": "Capability",
+      "properties": {
+        "description": "cargo-semver-checks runs in CI against a baseline revision across the workspace. It matters more here than in a published crate: consumers pin by git tag and link these crates directly, so an unnoticed breaking change lands in their build rather than in a registry's version resolution.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Catch a breaking API change before it reaches a consumer",
+        "provenance": "authored",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:typed-crud",
+      "node_type": "Capability",
+      "properties": {
+        "description": "Create, read, update and delete nodes and edges, validated against the schema at write time: types, required properties, ranges, enums and defaults.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Typed CRUD with write-time validation",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:uds-transport",
+      "node_type": "Capability",
+      "properties": {
+        "description": "The identical /v1 API over a filesystem socket, faster than TCP for same-host callers.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Talk over a Unix socket on the same host",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cap:vector-search",
+      "node_type": "Capability",
+      "properties": {
+        "description": "An HNSW index with SIMD cosine similarity, serving `similar` and the vector leg of hybrid search.",
+        "is_entry_point": false,
+        "is_exit_point": false,
+        "name": "Approximate nearest-neighbour search over embeddings",
+        "provenance": "inferred",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "chg:accept-71554c094a0c1b25",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "test_failure_fix",
+        "detected_at": "2026-07-27",
+        "name": "Route count corrected 79 -> 76, counted from docs/openapi.json (operations whose path starts with /v1). No design meaning; the doc was simply wrong."
+      }
+    },
+    {
+      "node_id": "chg:accept-916f0d6a16927d5d",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "test_failure_fix",
+        "detected_at": "2026-07-27",
+        "name": "Stale version header corrected v0.9.1 -> v0.11.0. The design was right and the doc was wrong; no design meaning to the change. The \"80 routes\" claim was checked against docs/openapi.json and is correct (76 /v1 operations + 4 operational probes = 80; GET /openapi.json is the meta route the sentence already excludes). The util/* routes are catalogued by family rather than one row per route, so the catalogue is complete despite listing 51 table rows for 80 operations."
+      }
+    },
+    {
+      "node_id": "chg:doc-drift-and-guard-blindspot",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "resync",
+        "name": "Fix stale doc version/route-count and close the version guard's silent blind spot"
+      }
+    },
+    {
+      "node_id": "cmp:client",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-client",
+        "name": "dynograph-client",
+        "provenance": "inferred",
+        "purpose": "Async reqwest client for /v1, over TCP or a same-host Unix socket. One method per route, transport-agnostic.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:cluster",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-cluster",
+        "name": "dynograph-cluster",
+        "provenance": "inferred",
+        "purpose": "Density-based clustering (DBSCAN) over a PRECOMPUTED distance matrix. Matrix in, labels out — it deliberately does not compute distances, the same way it does not produce vectors.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:core",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-core",
+        "name": "dynograph-core",
+        "provenance": "inferred",
+        "purpose": "The schema model that drives the entire engine: Schema, NodeTypeDef, EdgeTypeDef, Value, DynoError, and YAML/JSON parse plus validation. A schema is a RUNTIME description of what nodes and edges may exist — which is what lets one binary serve any domain.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:engine",
+      "node_type": "Component",
+      "properties": {
+        "kind": "layer",
+        "level": "subsystem",
+        "name": "Schema-driven engine",
+        "provenance": "inferred",
+        "purpose": "The graph engine proper: the schema model everything is driven by, the storage engine that validates and indexes against it, the derived full-text view, and entity resolution.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:game",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-game",
+        "name": "dynograph-game",
+        "provenance": "inferred",
+        "purpose": "Closed-form normal-form game-theory analysis: dominant strategies, pure-strategy Nash equilibria, Pareto optimality, and the prisoner's-dilemma classification.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:graph",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-graph",
+        "name": "dynograph-graph",
+        "provenance": "inferred",
+        "purpose": "Domain-neutral graph-theory algorithms over a densely-indexed in-memory graph: centrality, components, communities, paths and flow. Every algorithm is EXACT — no approximate or streaming variants — because consumer graphs are small.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:primitives",
+      "node_type": "Component",
+      "properties": {
+        "kind": "layer",
+        "level": "subsystem",
+        "name": "Pure primitives",
+        "provenance": "inferred",
+        "purpose": "Dependency-free math crates: no storage, no service, no dependency even on dynograph-core. Matrix/vectors/graphs in, results out. This is the layer that makes the workspace reusable outside its own service.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:resolution",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-resolution",
+        "name": "dynograph-resolution",
+        "provenance": "inferred",
+        "purpose": "Three-tier entity resolution — auto-merge above the high threshold, vector tiebreaker in the middle band, new entity below the low one — with a source-aware path that reserves auto-merge for name-to-name evidence.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:service",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-service",
+        "name": "dynograph-service",
+        "provenance": "inferred",
+        "purpose": "The axum HTTP service and the `dynograph` binary: a multi-graph registry, pluggable auth, the /v1 REST surface, operational probes, Prometheus metrics, and a generated OpenAPI contract. By far the largest crate in the workspace.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:storage",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-storage",
+        "name": "dynograph-storage",
+        "provenance": "inferred",
+        "purpose": "Schema-validated node and edge persistence: column families for nodes, edges, adjacency and the reverse index; MessagePack values; graph isolation so many graphs share one instance; atomic batch writes; iterator scans; a read cache; and the optional full-text mirror.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:surface",
+      "node_type": "Component",
+      "properties": {
+        "kind": "layer",
+        "level": "subsystem",
+        "name": "Network surface",
+        "provenance": "inferred",
+        "purpose": "The HTTP service that hosts many independent graphs over the engine, and the async client for it.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:text",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-text",
+        "name": "dynograph-text",
+        "provenance": "inferred",
+        "purpose": "Tantivy-backed BM25 keyword index behind a small storage-agnostic API. Knows nothing about schemas or graphs: callers pass already-extracted (graph, node_type, node_id, fields) and get scored node ids back.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "cmp:vector",
+      "node_type": "Component",
+      "properties": {
+        "kind": "module",
+        "level": "component",
+        "location": "crates/dynograph-vector",
+        "name": "dynograph-vector",
+        "provenance": "inferred",
+        "purpose": "f32/f64 vector and statistics math plus the HNSW approximate-nearest-neighbour index: SIMD cosine similarity, the distance family, element-wise algebra, transforms, and descriptive statistics through to correlation.",
+        "status": "realized",
+        "tier": "operational"
+      }
+    },
+    {
+      "node_id": "con:graph-scale",
+      "node_type": "Constraint",
+      "properties": {
+        "category": "technical",
+        "concern": "core",
+        "direction": "maximum",
+        "limit": 1000.0,
+        "name": "Consumer graphs are 10^2-10^3 nodes",
+        "priority": "medium",
+        "quantity": "nodes",
+        "statement": "The stated scale assumption behind choosing exact algorithms over approximate or streaming ones. Worth surfacing because it is the assumption that would have to be revisited first if a consumer graph grew by orders of magnitude — and reflow2's own design graph is already ~790 nodes."
+      }
+    },
+    {
+      "node_id": "con:image-size",
+      "node_type": "Constraint",
+      "properties": {
+        "category": "technical",
+        "concern": "core",
+        "direction": "maximum",
+        "limit": 80.0,
+        "name": "Container image ~80 MB",
+        "priority": "low",
+        "quantity": "megabytes",
+        "statement": "The canonical target for the published image; strip=debuginfo exists to reach it from 99.8 MB while keeping symbols for backtraces."
+      }
+    },
+    {
+      "node_id": "con:msrv",
+      "node_type": "Constraint",
+      "properties": {
+        "category": "technical",
+        "concern": "core",
+        "direction": "minimum",
+        "limit": 1.94,
+        "name": "MSRV 1.94",
+        "priority": "medium",
+        "quantity": "rust_version",
+        "statement": "The workspace requires Rust 1.94 or newer, because is_multiple_of (used in the storage engine's embedding decode) stabilized there. Pinned in lockstep with the Dockerfile toolchain so a local build fails with a clear MSRV error rather than a missing-method error."
+      }
+    },
+    {
+      "node_id": "dec:exact-only",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Every algorithm in dynograph-graph is exact; no approximate or streaming variants are offered.",
+        "name": "Choose exact algorithms over approximate ones",
+        "rationale": "Consumer graphs are small — 10^2 to 10^3 nodes — so the usual reason to approximate does not apply, and an exact answer removes a whole class of 'is this real or is this the approximation?' questions from the consumer's side.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:fulltext-derived-view",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "The Tantivy index is a derived, rebuildable view; the caller's primary store is the source of truth. Writes are buffered against Tantivy's own commit lifecycle.",
+        "name": "Make the full-text index derived rather than transactional",
+        "rationale": "Tantivy cannot join RocksDB's atomic write batch, so a transactional guarantee across both is not available at any price. Rather than pretend, the design names the index as derived and rebuildable — which makes an inconsistency a rebuild rather than a corruption.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:generated-contract",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "The spec is generated from handlers and wire types, served at /openapi.json, and the generated document is committed and checked in CI.",
+        "name": "Generate the OpenAPI contract from the code, and commit the result",
+        "rationale": "A hand-maintained spec drifts from the code silently, and consumers generate their clients from it. Generating it makes drift impossible in one direction; committing it and failing CI on a difference makes an unreviewed contract change impossible in the other.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:leiden-over-louvain",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Community detection uses the deterministic greedy Leiden variant; the request and response contract is unchanged.",
+        "name": "Replace Louvain with Leiden for community detection",
+        "rationale": "Leiden's refinement phase repairs Louvain's one real defect — communities that come out badly connected or even internally disconnected — so every returned community is now guaranteed internally connected. The deterministic variant was chosen to preserve the suite's reproducibility invariant, so the guarantee comes from the refinement structure rather than from randomness.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:narrow-kv-seam",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "The KvBackend trait stays at the raw-KV level: column families addressed by name, opaque byte keys and values, and ordered prefix iteration as the one structural assumption.",
+        "name": "Put the backend seam at raw bytes, not at the graph level",
+        "rationale": "Keeping the seam narrow is what makes 'implement one trait' a true claim. Everything schema-aware — validation, the reverse index, the read cache, the write-buffer overlay, the full-text sidecar — stays above it, so a new backend inherits all of that rather than reimplementing it. The cost is that every backend must honour ordered prefix iteration, because adjacency and index scans are built on it.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:no-crates-io",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "publish=false at the workspace level; the documented consumption form is a git tag.",
+        "name": "Do not publish to crates.io; consume by git tag",
+        "rationale": "Stated in the manifest as a considered position, not an oversight: it makes cargo-deny's allow-wildcard-paths apply to internal path deps and prevents an accidental publish of a crate not yet audited for crates.io readiness (internal deps carry no explicit versions). The comment records exactly what flipping it would require.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:ranked-disjunction",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "As of v0.11.0 TextIndex::search matches tokens as a ranked disjunction: a document needs at least one token, and results come back in descending BM25 order. Previously every token had to occur.",
+        "name": "Rank a multi-term query instead of excluding on it",
+        "rationale": "The conjunctive form made a natural-language question unusable — one incidental word the corpus never used collapsed a perfect match to zero results. And zero hits reads as 'no such thing exists' to a caller who searches before creating a node, so the false negative manufactured duplicates: the index was degrading the graph it exists to protect. The conjunctive test was FLIPPED rather than deleted, so the contract change is on the record.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:rocksdb-default-on",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "The rocksdb cargo feature is enabled by default, so the shipped binary and library behave as they always have; --no-default-features drops it.",
+        "name": "Ship RocksDB on by default, behind a feature that can be turned off",
+        "rationale": "Two audiences with opposite needs: production wants durable storage without thinking about it, while CI and consumers who do not need persistence want to skip a ~10-minute C++ compile. Default-on keeps the common path unchanged and makes the fast path opt-in.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:source-aware-resolution",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "resolve_sourced is the recommended entry point: auto-merge is reserved for name-to-name evidence, alias-sourced matches always require vector corroboration, and an incoming alias matching two or more candidates is excluded.",
+        "name": "Let the SOURCE of a match decide what the match may do",
+        "rationale": "An alias is weaker evidence than a name, and treating them alike let a nickname collapse two real entities. Making the evidence source part of the rule keeps the strong action (auto-merge) tied to the strong evidence.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:strip-debuginfo",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "profile.release sets strip = \"debuginfo\".",
+        "name": "Strip debuginfo but keep symbols in release builds",
+        "rationale": "Keeps function names in backtraces while dropping 20-30 MB, bringing the image toward the ~80 MB target. Debug builds are untouched, so RUST_BACKTRACE on a debug build still gives line numbers.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:37ad37e0489f9ef3",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:37ad37e0489f9ef3.",
+        "name": "Reviewed: gap:37ad37e0489f9ef3",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:45e68894cb1df4f4",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:45e68894cb1df4f4.",
+        "name": "Reviewed: gap:45e68894cb1df4f4",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:56c5b8dd8ebd06d8",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:56c5b8dd8ebd06d8.",
+        "name": "Reviewed: gap:56c5b8dd8ebd06d8",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:603e1030a00974a2",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:603e1030a00974a2.",
+        "name": "Reviewed: gap:603e1030a00974a2",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:65b60f734938a297",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:65b60f734938a297.",
+        "name": "Reviewed: gap:65b60f734938a297",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:9588a33a34a3ca84",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:9588a33a34a3ca84.",
+        "name": "Reviewed: gap:9588a33a34a3ca84",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:9b52cf5e7d17c2e6",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:9b52cf5e7d17c2e6.",
+        "name": "Reviewed: gap:9b52cf5e7d17c2e6",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:9bb931f76d5900f5",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:9bb931f76d5900f5.",
+        "name": "Reviewed: gap:9bb931f76d5900f5",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:a5b693258f13f771",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:a5b693258f13f771.",
+        "name": "Reviewed: gap:a5b693258f13f771",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:bd79de6e4c744d46",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the gap gap:bd79de6e4c744d46.",
+        "name": "Reviewed: gap:bd79de6e4c744d46",
+        "rationale": "Component-granularity verification is how this repo actually tests, and it is a reasonable way to test: the suites are per crate (cargo test --workspace) and per service area (13 integration files), not per capability. Recording a Verification per capability would be bookkeeping invented to make a number go green, with no new evidence behind it. The honest state is 'covered by its crate's suite', which is what this reads as. Revisit if a specific capability turns out to have no test touching it — that is a real hole, and a different finding.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:1c253ea65bdd85fb",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:1c253ea65bdd85fb.",
+        "name": "Reviewed: heal:1c253ea65bdd85fb",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:484ac521733a49fa",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:484ac521733a49fa.",
+        "name": "Reviewed: heal:484ac521733a49fa",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:7b5ce34e3ff944ed",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:7b5ce34e3ff944ed.",
+        "name": "Reviewed: heal:7b5ce34e3ff944ed",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:7c37c8cae4d4d363",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:7c37c8cae4d4d363.",
+        "name": "Reviewed: heal:7c37c8cae4d4d363",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:9c82fedb6de8aafc",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:9c82fedb6de8aafc.",
+        "name": "Reviewed: heal:9c82fedb6de8aafc",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:a3214919f9cf80b6",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:a3214919f9cf80b6.",
+        "name": "Reviewed: heal:a3214919f9cf80b6",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:bc172c5106d94cb6",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:bc172c5106d94cb6.",
+        "name": "Reviewed: heal:bc172c5106d94cb6",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:c78a51dc698612fc",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:c78a51dc698612fc.",
+        "name": "Reviewed: heal:c78a51dc698612fc",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:e1ccaf3d6f74eb83",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:e1ccaf3d6f74eb83.",
+        "name": "Reviewed: heal:e1ccaf3d6f74eb83",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:e2fc219fc5040310",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:e2fc219fc5040310.",
+        "name": "Reviewed: heal:e2fc219fc5040310",
+        "rationale": "Documentation artifacts, and they are not orphaned in any sense that matters: every one carries a DOCUMENTS edge to the thing it explains. `orphan_node` counts only REALIZES, so a doc that documents perfectly well still reads as loose. Acknowledged here rather than papered over by inventing a capability for each doc to realize — and RAISED AGAINST REFLOW2 ITSELF, because a detector that cannot see the DOCUMENTS edge will do this in every adopted repo that keeps its documentation properly.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "decision:ack:heal:e533183803d878a4",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Accepted the structural defect heal:e533183803d878a4.",
+        "name": "Reviewed: heal:e533183803d878a4",
+        "rationale": "TRUE, and it is the architecture rather than a fault. dynograph-service is the only crate that depends on the pure-primitive layer (vector, graph, game, cluster), so every path from those to the rest of the workspace goes through it — which is exactly what 'pure, dependency-free primitives' means. The usual remedy for a single point of failure, adding redundancy, is meaningless here: nothing is failing over, and a second path would mean a second consumer of the primitives, which is a reason to build one, not a repair. Worth revisiting only if a primitive crate needs to reach storage or core directly — at which point the layering, not the SPOF, is the thing that changed.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "drift:endpoint-doc-stale",
+      "node_type": "DriftEvent",
+      "properties": {
+        "detail": "docs/endpoints.md opens with 'The complete published surface of dynograph-foundation (v0.9.1): 80 routes' while the workspace is at 0.11.0; README says 'all 79 /v1 routes' while docs/openapi.json carries 80 operations across 70 paths. Neither is caught by scripts/check-doc-versions.sh, and that is BY CONSTRUCTION rather than by accident: the script's own comment says each pattern is anchored on a literal phrase and that rewording a doc silently disables the corresponding check. This is the class of drift the guard was written for, sitting just outside the phrases it matches.",
+        "detected_at": "2026-07-27",
+        "drift_type": "spec_mismatch",
+        "name": "The endpoint catalogue advertises the wrong version, and the README the wrong route count",
+        "resolved": true,
+        "severity": "low"
+      }
+    },
+    {
+      "node_id": "env:published-image",
+      "node_type": "Environment",
+      "properties": {
+        "description": "ghcr.io/sligara7/dynograph-foundation, tagged per release plus :latest, published by the release workflow on every v* tag. Enables both optional features (graph and fulltext). Defaults otherwise: in-memory storage, 127.0.0.1:8080, noauth — so a bare `docker run` without DYNOGRAPH_STORAGE_ROOT persists nothing.",
+        "env_type": "production",
+        "name": "Published container image"
+      }
+    },
+    {
+      "node_id": "frg:api-doc",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Worked request/response examples for core CRUD and the primitives.",
+        "fragment_type": "documentation",
+        "provenance": "inferred",
+        "source_ref": "docs/api.md",
+        "status": "ingested",
+        "title": "docs/api.md"
+      }
+    },
+    {
+      "node_id": "frg:changelog",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Release notes back to early versions. The richest source of RECOVERED RATIONALE in the repo — several entries state not just what changed but why the previous behaviour was wrong, which is exactly what a Decision node is for.",
+        "fragment_type": "documentation",
+        "provenance": "inferred",
+        "source_ref": "CHANGELOG.md",
+        "status": "ingested",
+        "title": "CHANGELOG.md"
+      }
+    },
+    {
+      "node_id": "frg:ci",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "The CI workflow: the real quality gates, including feature-matrix builds, a no-default-features build, release-mode tests, a smoke test and cargo-semver-checks against a baseline revision.",
+        "fragment_type": "config",
+        "provenance": "inferred",
+        "source_ref": ".github/workflows/ci.yml",
+        "status": "ingested",
+        "title": ".github/workflows/ci.yml"
+      }
+    },
+    {
+      "node_id": "frg:doc-version-check",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "A guard against version drift in the docs, with an unusually honest comment about its own brittleness: each pattern is anchored on a literal phrase, and rewording a doc silently disables the corresponding check.",
+        "fragment_type": "config",
+        "provenance": "inferred",
+        "source_ref": "scripts/check-doc-versions.sh",
+        "status": "ingested",
+        "title": "scripts/check-doc-versions.sh"
+      }
+    },
+    {
+      "node_id": "frg:endpoints",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Human-readable catalogue of the published HTTP surface, grouped by area.",
+        "fragment_type": "spec",
+        "provenance": "inferred",
+        "source_ref": "docs/endpoints.md",
+        "status": "ingested",
+        "title": "docs/endpoints.md"
+      }
+    },
+    {
+      "node_id": "frg:fulltext-design",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Design note for the full-text primitive — the consistency model and why the index is a derived, rebuildable view rather than a participant in the atomic batch.",
+        "fragment_type": "design",
+        "provenance": "inferred",
+        "source_ref": "docs/design-fulltext-primitive.md",
+        "status": "ingested",
+        "title": "docs/design-fulltext-primitive.md"
+      }
+    },
+    {
+      "node_id": "frg:migration-doc",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Embedded-library to service migration guide.",
+        "fragment_type": "documentation",
+        "provenance": "inferred",
+        "source_ref": "docs/migration.md",
+        "status": "ingested",
+        "title": "docs/migration.md"
+      }
+    },
+    {
+      "node_id": "frg:openapi-doc",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Machine-readable OpenAPI 3.1 contract, generated from the handlers and wire types and committed as the reviewed contract.",
+        "fragment_type": "spec",
+        "provenance": "inferred",
+        "source_ref": "docs/openapi.json",
+        "status": "ingested",
+        "title": "docs/openapi.json"
+      }
+    },
+    {
+      "node_id": "frg:readme",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "The primary intent source: the one-line pitch, the crate table, the pluggable-backend section, the schema-driven configuration walkthrough, build/run instructions and the git-tag consumption model.",
+        "fragment_type": "documentation",
+        "provenance": "inferred",
+        "source_ref": "README.md",
+        "status": "ingested",
+        "title": "README.md"
+      }
+    },
+    {
+      "node_id": "frg:releasing",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "The release procedure.",
+        "fragment_type": "documentation",
+        "provenance": "inferred",
+        "source_ref": "RELEASING.md",
+        "status": "ingested",
+        "title": "RELEASING.md"
+      }
+    },
+    {
+      "node_id": "frg:service-doc",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "Config, deployment and probes.",
+        "fragment_type": "documentation",
+        "provenance": "inferred",
+        "source_ref": "docs/service.md",
+        "status": "ingested",
+        "title": "docs/service.md"
+      }
+    },
+    {
+      "node_id": "frg:workspace-manifest",
+      "node_type": "Fragment",
+      "properties": {
+        "content": "The workspace manifest, whose COMMENTS carry intent found nowhere else: why the crates are domain-neutral, why publish=false, why the MSRV is pinned in lockstep with the Dockerfile, and why release builds strip debuginfo.",
+        "fragment_type": "config",
+        "provenance": "inferred",
+        "source_ref": "Cargo.toml",
+        "status": "ingested",
+        "title": "Cargo.toml"
+      }
+    },
+    {
+      "node_id": "ifc:auth-provider",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "AuthProvider trait",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "The pluggable authentication seam for the service. Shipped providers are `noauth` (the default) and `bearer_jwt`. An EXTENSION POINT.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:client-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "DynographClient API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "One async method per /v1 route, returning the corresponding wire type. Transport is chosen at construction (TCP base URL or Unix socket path) and the methods are identical either way.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:cluster-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "DBSCAN clustering API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Precomputed N-by-N distance matrix in, per-point cluster label or noise out.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:core-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Core model types (Schema, Value, DynoError)",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "The vocabulary every other crate and every consumer speaks: the schema types, the dynamic Value, and the error enum. Changing an error variant or a Value case is a breaking change for every consumer, which is why cargo-semver-checks runs in CI.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:game-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Game-theory analysis API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Game::from_cells then analyze; returns dominant strategies, pure Nash equilibria, Pareto-optimal outcomes and the nash_is_pareto_suboptimal classification.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:graph-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Graph algorithms API",
+        "operations": "centrality, connected components, community detection (Leiden), shortest paths, max flow",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Caller builds a Graph via GraphBuilder — interning string ids, supplying finite f64 weights and a directed flag — and results come back keyed by dense node index for the caller to map back. No storage, service or core dependency.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:kv-backend",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "none",
+        "designation": "published",
+        "medium": "library",
+        "name": "KvBackend trait (storage seam)",
+        "operations": "six byte-level primitives over six named column families, plus ordered prefix iteration",
+        "paradigm": "synchronous",
+        "payload_format": "binary",
+        "provenance": "inferred",
+        "spec": "The narrow seam underneath StorageEngine. All schema-aware behaviour — validation, the reverse index, the read cache, the write-buffer overlay, the full-text sidecar — sits ABOVE this trait; everything that touches bytes goes through it. Ordered prefix iteration is the one structural assumption every backend must honour, because the adjacency and index scans are built on it. An EXTENSION POINT: implementing it is how a new backend (Postgres, sled) arrives without the engine changing.",
+        "transport_security": "none"
+      }
+    },
+    {
+      "node_id": "ifc:ops-probes",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "none",
+        "designation": "published",
+        "endpoint": "/health, /ready, /metrics, /buildinfo, /openapi.json",
+        "error_model": "HTTP status only",
+        "medium": "REST",
+        "name": "Operational probes and metrics",
+        "operations": "GET only",
+        "paradigm": "synchronous",
+        "payload_format": "json",
+        "provenance": "inferred",
+        "spec": "Public and unauthenticated by design, because an orchestrator's liveness check and a Prometheus scrape cannot hold a credential. /ready is deliberately distinct from /health. /metrics is Prometheus text format; /buildinfo carries version and git SHA.",
+        "transport_security": "none"
+      }
+    },
+    {
+      "node_id": "ifc:resolution-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "EntityResolver API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "resolve / resolve_sourced. The source-aware path is the recommended entry point: auto-merge is reserved for name-to-name evidence, alias-sourced matches always require vector corroboration, and an incoming alias matching two or more candidates is excluded rather than guessed at.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:rest-v1",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "jwt",
+        "designation": "published",
+        "endpoint": "/v1 (default bind 127.0.0.1:8080)",
+        "error_model": "JSON error body; 501 for routes whose build feature is off — the route and its OpenAPI entry always exist, so the contract does not change with the feature set",
+        "medium": "REST",
+        "name": "/v1 REST API",
+        "operations": "80 operations across graph lifecycle, schema, nodes, edges, embeddings, search, primitives, algo/* and util/*",
+        "paradigm": "synchronous",
+        "payload_format": "json",
+        "payload_schema": "docs/openapi.json (OpenAPI 3.1, generated from the handlers)",
+        "provenance": "inferred",
+        "spec": "The complete published HTTP surface. Auth is a bearer JWT when configured for it; the default configuration is `noauth`. TLS is not terminated by the service itself.",
+        "transport_security": "none"
+      }
+    },
+    {
+      "node_id": "ifc:schema-doc",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "error_model": "DynoError::Validation naming the node type and property",
+        "medium": "data",
+        "name": "Schema document (YAML/JSON)",
+        "operations": "parse, validate; POST /v1/graphs to configure a graph",
+        "paradigm": "batch",
+        "payload_format": "json",
+        "payload_schema": "dynograph_core::Schema — node_types, edge_types, property flags (type/required/range/enum/default, indexed, fulltext), embedding_field, resolution rules",
+        "provenance": "inferred",
+        "spec": "THE central contract of the whole workspace. Each declaration is what TURNS ON a capability: `indexed` enables scans and where-prefilters, `fulltext` enables keyword search, `embedding_field` enables vector similarity, `resolution` enables dedup. The engine has no hardcoded domain types — only the ones a schema names.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:storage-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "StorageEngine Rust API",
+        "operations": "create/read/update/delete nodes and edges, adjacency and index scans, atomic batches, embedding sidecar operations, full-text mirroring",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "The embedded-library entry point: `StorageEngine::new_in_memory(schema)` or a RocksDB path, then typed CRUD validated against the schema. This is the contract reflow2 and storyflow are built on, so its stability matters more than its elegance.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:text-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "TextIndex API",
+        "operations": "upsert, delete, search, commit/reload",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "Index a node's full-text fields, remove it, and run tokenized BM25 keyword search. Storage-agnostic: callers pass (graph, node_type, node_id, fields) and get scored node ids back. Since v0.11.0 a multi-term query is a RANKED DISJUNCTION rather than a conjunction — a document must contain at least one token, and results come back in descending BM25 order.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "ifc:uds",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "jwt",
+        "designation": "published",
+        "endpoint": "a filesystem socket path",
+        "medium": "REST",
+        "name": "Same-host Unix-socket transport",
+        "paradigm": "synchronous",
+        "payload_format": "json",
+        "provenance": "inferred",
+        "spec": "The identical JSON /v1 API over a Unix domain socket, for faster same-host calls. Access to the socket file IS the network boundary, which is why transport security is filesystem permission rather than TLS.",
+        "transport_security": "physical"
+      }
+    },
+    {
+      "node_id": "ifc:vector-api",
+      "node_type": "Interface",
+      "properties": {
+        "auth": "unspecified",
+        "designation": "published",
+        "medium": "library",
+        "name": "Vector, HNSW and statistics API",
+        "paradigm": "synchronous",
+        "payload_format": "unspecified",
+        "provenance": "inferred",
+        "spec": "HNSW index plus the distance family, element-wise algebra, transforms and descriptive statistics through to Pearson and Spearman correlation.",
+        "transport_security": "unspecified"
+      }
+    },
+    {
+      "node_id": "prj:dynograph-foundation",
+      "node_type": "Project",
+      "properties": {
+        "description": "Rust workspace of domain-agnostic foundation crates for graph-based projects: schema-driven graph storage on RocksDB, HNSW vector search, BM25 full-text, entity resolution, pure graph/game/cluster math, and an HTTP service over all of it. Usable as embedded library crates or as the `dynograph` binary. Deliberately domain-neutral — extractors, schemas and servers for a domain live in CONSUMER projects (reflow2, storyflow) and depend on these crates by git tag.",
+        "mode": "flexible",
+        "name": "dynograph-foundation",
+        "status": "active"
+      }
+    },
+    {
+      "node_id": "question:51d70bc51fe74bbf",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-27",
+        "context_setter": "Nothing asked for capability “Be operable: probes, metrics and build identity”",
+        "gap_id": "gap:51d70bc51fe74bbf",
+        "question": "Distinct /health and /ready probes, Prometheus metrics, and a /buildinfo with the git SHA — everything a serious deployment needs, and nothing states it as a requirement. Is there an operating standard behind it (a Kubernetes deployment, a scrape config) that should be recorded, or was it built to the obvious shape?",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "question:5a38d2006aeec49c",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-27",
+        "context_setter": "Nothing asked for capability “Choose how callers prove who they are”",
+        "gap_id": "gap:5a38d2006aeec49c",
+        "question": "Auth is pluggable (noauth and bearer-JWT shipped, a trait for more), and the default is noauth. Was pluggability the goal, or is it the shape that fell out of needing one real provider? It matters because a published extension point is a commitment.",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "question:62d7da36865ddffa",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-27",
+        "context_setter": "Nothing asked for capability “Atomic batch writes”",
+        "gap_id": "gap:62d7da36865ddffa",
+        "question": "Batch writes are described in the crate as being 'for extraction integration' — which reads like a specific consumer's need. Whose? If a consumer depends on all-or-nothing writes, that is a stated guarantee rather than an optimisation, and worth recording as one.",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "question:92cbb36d040f6c15",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-27",
+        "context_setter": "Nothing asked for capability “Change a live graph's schema”",
+        "gap_id": "gap:92cbb36d040f6c15",
+        "question": "There is a schema-evolution path so a configured graph is not frozen at creation — but unlike every other capability here, it appears in no document at all, not even the endpoint catalogue's own framing. Is changing a live graph's schema a supported promise, or something that works and nobody wants to advertise yet?",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "question:aa4cff86dedcb70d",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-27",
+        "context_setter": "Nothing asked for capability “Classify a normal-form game”",
+        "gap_id": "gap:aa4cff86dedcb70d",
+        "question": "dynograph-game ships full normal-form game-theory analysis — dominant strategies, Nash equilibria, Pareto optimality — and the service exposes it. No document in the repo says what it is for. Is there a consumer using it, is it groundwork for one, or is it something that landed and stayed?",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "question:bb14251a9c7c8e20",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-27",
+        "context_setter": "Nothing asked for capability “Cluster points by density from a distance matrix”",
+        "gap_id": "gap:bb14251a9c7c8e20",
+        "question": "dynograph-cluster does DBSCAN over a precomputed distance matrix, and its own doc is careful that it is NOT a graph algorithm. Same question: which consumer asked for density clustering, and is it earning its place in a graph foundation?",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "rel:v0110",
+      "node_type": "Release",
+      "properties": {
+        "description": "Ranked-disjunction full-text search. The release reflow2 depends on by tag.",
+        "name": "v0.11.0",
+        "released_at": "2026-07-24",
+        "status": "deployed",
+        "unit_type": "container",
+        "version": "0.11.0"
+      }
+    },
+    {
+      "node_id": "req:algorithms-exact",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "Graph algorithms must be exact, not approximate",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "dynograph-graph's own doc: consumer graphs are small (10^2-10^3 nodes), so every algorithm is exact — no approximate or streaming variants. A scale assumption stated as a design rule.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:alias-needs-corroboration",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "An alias-sourced match must not auto-merge on name similarity alone",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "The resolution crate doc, from v0.9.3: auto-merge is reserved for name-to-name evidence, alias-sourced matches always require vector corroboration, and an incoming alias matching two or more candidates is excluded rather than resolved. A rule about which EVIDENCE justifies which action.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:backend-swappable",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "Changing the storage backend must not change the engine",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "README: all schema-aware logic sits above a narrow KvBackend trait, and moving to PostgreSQL, SQLite or sled is 'a matter of implementing that one trait; nothing in the graph engine has to change.'",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:communities-connected",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "Every returned community must be internally connected",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "CHANGELOG v0.10.0: Leiden replaced Louvain specifically because Louvain could return communities that were badly connected or internally disconnected; the guarantee comes from the refinement structure.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:consume-by-tag",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "business",
+        "lineage": "original",
+        "name": "Consumers depend on these crates by git tag, not crates.io",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "README and the manifest: nothing is published to crates.io, publish=false is set at the workspace level, and the documented dependency form is a git tag. The manifest comment records what publishing would require, so this is a considered position rather than an oversight.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:contract-cannot-drift",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "The published API contract must not be able to drift from the code",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "README: the OpenAPI document is generated from the handlers and wire types 'so it can't drift from the running code', and a CI test fails if the code changes the contract without the committed spec being regenerated.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:deterministic-results",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "Algorithm results must be reproducible run to run",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "CHANGELOG v0.10.0: the deterministic greedy Leiden variant was chosen over the randomized one to preserve the suite's reproducibility invariant.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:docs-match-version",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "Published facts in the docs must match the code, and the check must not be able to go quiet",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "scripts/check-doc-versions.sh, run in CI, catches the class of drift where a release bump lands in Cargo.toml while the docs still advertise the previous tag, and where a documented route count no longer matches the published contract (counted from docs/openapi.json, which a contract-gate test pins to the generated spec). Because each check is anchored on a literal doc phrase, a reworded doc would otherwise disable it silently, so a pattern that matches nothing anywhere fails the run: a check that has stopped looking must not be able to report the same clean result as a check that looked and found nothing.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:domain-neutral",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "Foundation crates stay domain-agnostic",
+        "priority": "critical",
+        "provenance": "inferred",
+        "statement": "The workspace manifest states it as a rule rather than an observation: crates here are INTENTIONALLY domain-neutral, and domain-specific extractors, schemas and servers live in consumer projects that depend on these crates. The pure-math crates go further and take no dependency even on dynograph-core.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:feature-off-is-501",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "A route behind an unbuilt feature must exist and answer 501",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "docs/endpoints.md: the routes and the OpenAPI contract ALWAYS exist; a surface whose build feature is off returns 501. So the contract does not change shape with the feature set — a consumer sees the same API and a specific, diagnosable refusal.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:fulltext-derived",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "The full-text index must be a derived, rebuildable view",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "docs/design-fulltext-primitive.md and the crate doc: Tantivy has its own commit lifecycle and cannot join RocksDB's atomic batch, so the primary store is the source of truth and the index is rebuildable rather than authoritative.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:image-size",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "nonfunctional",
+        "lineage": "original",
+        "name": "The published image should stay near the ~80 MB target",
+        "priority": "low",
+        "provenance": "inferred",
+        "statement": "The manifest comment on strip=debuginfo: symbols are kept for readable backtraces, debuginfo is dropped, and the stated aim is bringing a 99.8 MB image down to the canonical ~80 MB target.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:msrv-locked-to-image",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "The MSRV must be pinned in lockstep with the container toolchain",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "The manifest comment: rust-version is bumped in lockstep with the Dockerfile pin so a local cargo build 'fails loudly on older toolchains rather than via a missing-method error'.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:multi-tenant",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "One deployment hosts many independent graphs",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "README: one service hosts many graphs, each with its own schema, so a single deployment is multi-tenant and turnkey.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:no-silent-breaking-change",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "A breaking API change must be caught before release",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "CI runs cargo-semver-checks against a baseline revision across the workspace. Given consumers pin by git tag and link these crates directly, an unnoticed breaking change lands in their build, not in a registry's version resolution.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:query-grammar-not-injectable",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "A caller's raw query string must never reach the query parser",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "CHANGELOG v0.11.0 states the guarantee is preserved across the ranking change: the raw string is never fed to Tantivy's parser, so `field:value` input cannot inject a filter. A security property held constant while behaviour around it changed.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:rocksdb-optional",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "A build without RocksDB must work, and must fail loud rather than fall back",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "README: RocksDB sits behind a default-on cargo feature; --no-default-features drops it and its ~10-minute C++ compile, leaving the in-memory backend. Such a build 'fails loud if asked to use on-disk storage rather than silently falling back to memory' — the silent-fallback behaviour is explicitly rejected.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:schema-driven",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "One generic engine, configured by a schema, becomes a typed graph service",
+        "priority": "critical",
+        "provenance": "inferred",
+        "statement": "README's headline claim, verbatim in intent: 'one generic engine, configured by a schema, becomes a typed, indexed, searchable graph service — with no code, no migration, and no redeploy.' Each schema declaration is what turns a capability on; the engine must have no hardcoded domain types.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:scoped-analytics",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "Analytics must be scopable to a logical sub-graph",
+        "priority": "medium",
+        "provenance": "inferred",
+        "statement": "README: because a partitioning field is an indexed PROPERTY rather than a type, the algo/* endpoints can scope analytics to one logical sub-graph inside a shared graph via a where predicate — per-story PageRank being the worked example.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:search-must-not-manufacture-duplicates",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "Search must not return zero hits for a query that has good partial matches",
+        "priority": "critical",
+        "provenance": "inferred",
+        "statement": "CHANGELOG v0.11.0, and this is the sharpest recovered requirement in the repo: consumers search BEFORE creating a node and treat an empty result as licence to create, so a false negative manufactured duplicates — 'the index degraded the graph it exists to protect.' The requirement is about what an empty answer MEANS to the caller, not about ranking.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:uds-no-panic-on-bad-path",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "quality",
+        "lineage": "original",
+        "name": "A malformed request path must not panic the request",
+        "priority": "high",
+        "provenance": "inferred",
+        "statement": "CHANGELOG v0.9.4: a path segment with an RFC-3986-invalid character hit an internal unwrap in the UDS transport and panicked the in-flight request, dropping the connection. Recovered as a requirement because the fix states the general rule, not just the instance.",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "ver:client-it",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "integration",
+        "method": "test",
+        "name": "Client integration suite plus a Unix-socket transport suite",
+        "status": "passing"
+      }
+    },
+    {
+      "node_id": "ver:clippy",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "level": "unit",
+        "method": "analysis",
+        "name": "cargo clippy --workspace --all-targets -D warnings, across the feature matrix",
+        "status": "planned"
+      }
+    },
+    {
+      "node_id": "ver:doc-versions",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "unit",
+        "method": "inspection",
+        "name": "scripts/check-doc-versions.sh",
+        "status": "passing"
+      }
+    },
+    {
+      "node_id": "ver:feature-matrix",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "level": "system",
+        "method": "test",
+        "name": "Builds and tests across the feature matrix: default, dynograph-service/fulltext, graph, and --no-default-features",
+        "status": "planned"
+      }
+    },
+    {
+      "node_id": "ver:fmt",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "unit",
+        "method": "inspection",
+        "name": "cargo fmt --all --check",
+        "status": "passing"
+      }
+    },
+    {
+      "node_id": "ver:openapi-drift",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "system",
+        "method": "test",
+        "name": "openapi_spec test — the committed contract must match the code",
+        "status": "passing"
+      }
+    },
+    {
+      "node_id": "ver:release-mode",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "level": "system",
+        "method": "test",
+        "name": "cargo test --workspace --release",
+        "status": "planned"
+      }
+    },
+    {
+      "node_id": "ver:semver",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "level": "system",
+        "method": "analysis",
+        "name": "cargo semver-checks --workspace against a baseline revision",
+        "status": "planned"
+      }
+    },
+    {
+      "node_id": "ver:service-it",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "integration",
+        "method": "test",
+        "name": "Service integration suites (13 files: nodes, edges, lifecycle, batch, search, embeddings, primitives, algo, game, util, ops)",
+        "status": "passing"
+      }
+    },
+    {
+      "node_id": "ver:smoke",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "level": "acceptance",
+        "method": "test",
+        "name": "scripts/smoke-test.sh against the built dynograph binary",
+        "status": "planned"
+      }
+    },
+    {
+      "node_id": "ver:text-concurrency",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "integration",
+        "method": "test",
+        "name": "readers_beside_a_writer — Tantivy readers against a live writer",
+        "status": "passing"
+      }
+    },
+    {
+      "node_id": "ver:workspace-tests",
+      "node_type": "Verification",
+      "properties": {
+        "kind": "verification",
+        "last_run_at": "2026-07-27",
+        "level": "unit",
+        "method": "test",
+        "name": "Workspace unit and integration tests (cargo test --workspace)",
+        "status": "passing"
+      }
+    }
+  ],
+  "prev_content_hash": "sha256:5fb38b39bc3de6107c296053efc4fef04b5d74063ac2f56f17ceb135e81ce58d",
+  "stamp": {
+    "edge_type_names": [
+      "ABOUT_ENTITY",
+      "ALLOCATED_TO",
+      "ANNOTATES",
+      "ANTICIPATES",
+      "ASKS_ABOUT",
+      "ASSESSED_ON",
+      "AT_EPOCH",
+      "AUTHORED_BY",
+      "BLOCKS",
+      "CAUSES",
+      "CHANGED",
+      "CLAIMS",
+      "COMPLIES_WITH",
+      "CONSTRAINS",
+      "CONSUMES",
+      "CONTAINS",
+      "CONTAINS_EPOCH",
+      "CONTRADICTS",
+      "DECOMPOSES",
+      "DEPENDS_ON",
+      "DEPLOYED_TO",
+      "DOCUMENTS",
+      "DUPLICATES",
+      "EVOLVES_INTO",
+      "GOVERNED_BY",
+      "HAS_OBSERVATION",
+      "HAS_SNAPSHOT",
+      "HAS_TEMPORAL_FACT",
+      "IMPOSES",
+      "INCLUDES",
+      "INTERACTS_WITH",
+      "MASKS",
+      "MITIGATES",
+      "OBSERVED_IN",
+      "OBSOLETES",
+      "OCCURS_DURING",
+      "OPERATES_IN",
+      "PART_OF_FLOW",
+      "PERFORMED_IN",
+      "PRECEDES",
+      "PRODUCES",
+      "PROVIDES",
+      "REALIZES",
+      "REQUIRES_RESOURCE",
+      "RISKS",
+      "SATISFIES",
+      "SPECIFIES",
+      "SUPERSEDES",
+      "SUPPLEMENTS",
+      "TRIGGERS",
+      "VALID_FROM",
+      "VALID_TO",
+      "VERIFIES",
+      "VIOLATES",
+      "VIOLATES_RULE",
+      "YIELDED"
+    ],
+    "edge_types": 56,
+    "node_type_names": [
+      "Actor",
+      "Anchor",
+      "Artifact",
+      "Capability",
+      "ChangeEvent",
+      "Component",
+      "Constraint",
+      "Contributor",
+      "Decision",
+      "DesignEpoch",
+      "DesignRule",
+      "DimensionAssessment",
+      "DimensionObservation",
+      "DriftEvent",
+      "Environment",
+      "EnvironmentRule",
+      "Flow",
+      "Fragment",
+      "Interface",
+      "Project",
+      "QualityGate",
+      "Question",
+      "Release",
+      "Requirement",
+      "Resource",
+      "Snapshot",
+      "TemporalFact",
+      "Verification"
+    ],
+    "node_types": 28,
+    "reflow2_version": "0.16.0",
+    "schema_version": 1
+  }
+}
