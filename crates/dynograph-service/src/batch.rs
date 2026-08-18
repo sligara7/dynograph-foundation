@@ -51,12 +51,19 @@ pub(crate) struct BatchRequest {
     /// (commit). See [`BatchValidation`].
     #[serde(default)]
     pub dry_run: bool,
+    /// With `dry_run`, keep evaluating after an op fails so the report covers
+    /// EVERY op instead of stopping at the first failure. Ignored unless
+    /// `dry_run` is set. Costs a buffer rebuild + replay per failing op — see
+    /// [`dry_run_ops_exhaustive`] for why a failure cannot simply be skipped.
+    /// Defaults to false (stop at the first failure).
+    #[serde(default)]
+    pub exhaustive: bool,
 }
 
 /// One mutation. Field names match the existing single-handler bodies
 /// so callers can translate `POST /v1/graphs/{id}/nodes` payloads into
 /// `{"op": "create_node", ...}` entries with no field renames.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub(crate) enum BatchOp {
     CreateNode {
@@ -160,16 +167,34 @@ pub(crate) struct BatchOpResult {
 }
 
 /// Response for a `dry_run` batch: a per-op pass/fail report plus an overall
-/// flag. Like the real commit, evaluation **stops at the first failing op** (a
-/// commit aborts there, so reporting failures past it would describe a sequence
-/// that can never run). `results` therefore covers the ops up to and including
-/// the first failure; when `valid` is true it covers all of them.
+/// flag.
+///
+/// In the DEFAULT mode evaluation **stops at the first failing op** (a commit
+/// aborts there, so reporting failures past it would describe a sequence that
+/// can never run), and `results` covers the ops up to and including that
+/// failure.
+///
+/// With `exhaustive` set, evaluation continues past a failure so `results`
+/// covers every op — the preview-a-heal-pass case, where the caller wants all
+/// the reasons at once rather than one per round-trip.
+///
+/// READ `truncated` BEFORE TREATING `results` AS COMPLETE. An exhaustive run
+/// rebuilds its buffer after each failure (see [`dry_run_ops_exhaustive`]) and
+/// gives up after [`MAX_DRY_RUN_RESTARTS`]; `truncated` says so explicitly
+/// rather than letting a short `results` read as "those were all the ops".
 #[derive(Debug, Serialize, ToSchema)]
 pub(crate) struct BatchValidation {
-    /// True iff every op would apply; when false, the last entry in `results`
-    /// is the first op that failed and why.
+    /// True iff every op would apply. Never true when `truncated`, because a
+    /// truncated run has not looked at every op.
     pub valid: bool,
     pub results: Vec<BatchOpResult>,
+    /// Which mode produced this report — echoes the request so a caller that
+    /// forgot to set `exhaustive` cannot misread a stop-at-first report as a
+    /// complete one.
+    pub exhaustive: bool,
+    /// True when evaluation gave up before covering every op. `results` is then
+    /// SHORTER than the submitted op list and says nothing about the remainder.
+    pub truncated: bool,
 }
 
 /// The `200 OK` body of `POST /batch`: a commit summary on the normal path, or
@@ -298,6 +323,95 @@ pub(crate) fn run_ops(
 /// evaluating later ops against it avoids mislabeling them. The caller must
 /// `discard_batch()` afterwards — a dry run never commits, so the partial entry
 /// of a failed op is thrown away with the rest.
+/// Cap on how many times an exhaustive dry run will rebuild its buffer after a
+/// failing op. Each rebuild replays every previously-successful op, so an input
+/// that fails on most of its ops is quadratic; this bounds it. Hitting the cap
+/// sets `truncated` — the report never quietly stops short.
+pub(crate) const MAX_DRY_RUN_RESTARTS: usize = 64;
+
+/// Exhaustive `dry_run`: evaluate EVERY op, not just up to the first failure.
+///
+/// Why this cannot simply keep looping past a failure — the same reason
+/// [`dry_run_ops`] stops: a node write can buffer its RocksDB put *before* a
+/// fallible full-text mirror step (`StorageEngine`'s authoritative-then-mirror
+/// order), so a failed op may leave a PARTIAL entry in the buffer. Evaluating
+/// later ops against that entry would mislabel them — the exact silent-wrong
+/// answer the stop-at-first rule exists to prevent.
+///
+/// So a failure is followed by a REBUILD: discard the poisoned buffer, begin a
+/// fresh one, and replay the ops that already passed (skipping the failed one).
+/// Later ops are then judged against a clean buffer that still carries the
+/// read-your-own-writes effects of everything that genuinely succeeded — which
+/// is what a caller previewing a heal pass is asking about.
+///
+/// Two honest limits, both reported rather than hidden:
+/// - after [`MAX_DRY_RUN_RESTARTS`] rebuilds it stops and sets `truncated`;
+/// - if replaying an op that previously PASSED fails, the buffer is not
+///   reproducible, so it stops and sets `truncated` rather than emitting a
+///   verdict it cannot stand behind.
+///
+/// The caller must `discard_batch()` afterwards, exactly as for [`dry_run_ops`].
+pub(crate) fn dry_run_ops_exhaustive(
+    engine: &mut StorageEngine,
+    graph_id: &str,
+    ops: Vec<BatchOp>,
+) -> BatchValidation {
+    let mut results = Vec::with_capacity(ops.len());
+    // Ops that applied cleanly, in order — the replay script for a rebuild.
+    let mut passed: Vec<BatchOp> = Vec::new();
+    let mut restarts = 0usize;
+    let mut truncated = false;
+
+    for (index, op) in ops.into_iter().enumerate() {
+        let op_type = op.kind();
+        match apply_op(engine, graph_id, op.clone()) {
+            Ok(_) => {
+                passed.push(op);
+                results.push(BatchOpResult {
+                    index,
+                    op: op_type,
+                    ok: true,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                results.push(BatchOpResult {
+                    index,
+                    op: op_type,
+                    ok: false,
+                    error: Some(e),
+                });
+                if restarts >= MAX_DRY_RUN_RESTARTS {
+                    truncated = true;
+                    break;
+                }
+                restarts += 1;
+                engine.discard_batch();
+                engine.begin_batch();
+                let mut replay_ok = true;
+                for prior in &passed {
+                    if apply_op(engine, graph_id, prior.clone()).is_err() {
+                        replay_ok = false;
+                        break;
+                    }
+                }
+                if !replay_ok {
+                    truncated = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    BatchValidation {
+        // A truncated run has not seen every op, so it can never claim validity.
+        valid: !truncated && results.iter().all(|r| r.ok),
+        results,
+        exhaustive: true,
+        truncated,
+    }
+}
+
 pub(crate) fn dry_run_ops(
     engine: &mut StorageEngine,
     graph_id: &str,
@@ -323,6 +437,8 @@ pub(crate) fn dry_run_ops(
                 return BatchValidation {
                     valid: false,
                     results,
+                    exhaustive: false,
+                    truncated: false,
                 };
             }
         }
@@ -330,5 +446,7 @@ pub(crate) fn dry_run_ops(
     BatchValidation {
         valid: true,
         results,
+        exhaustive: false,
+        truncated: false,
     }
 }

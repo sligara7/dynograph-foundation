@@ -1092,7 +1092,7 @@
           "primitives"
         ],
         "summary": "Atomic multi-op transaction. See `crate::batch` for the wire shape\nand design rationale. Whole batch runs under one `with_state_write`\nlock so (a) ops and HNSW maintenance for any `delete_node` happen\nin lockstep, and (b) concurrent readers either see pre-batch or\npost-batch state, never a torn intermediate.",
-        "description": "With `dry_run: true` the ops run against the batch buffer for a per-op\nvalidation report and are then discarded — the graph is never mutated and\nthe response is a `BatchValidation` (HTTP 200 regardless of `valid`).",
+        "description": "With `dry_run: true` the ops run against the batch buffer for a per-op\nvalidation report and are then discarded — the graph is never mutated and\nthe response is a `BatchValidation` (HTTP 200 regardless of `valid`).\nAdding `exhaustive: true` keeps evaluating past a failing op so the report\ncovers every op (preview-a-heal-pass); the report's `truncated` flag says\nwhen even that stopped short.",
         "operationId": "batch",
         "parameters": [
           {
@@ -3937,6 +3937,10 @@
             "type": "boolean",
             "description": "Validate-only: run every op against the batch buffer (read-your-own-\nwrites intact) to compute a per-op pass/fail report, then discard\nwithout committing. The graph is never mutated. Defaults to false\n(commit). See [`BatchValidation`]."
           },
+          "exhaustive": {
+            "type": "boolean",
+            "description": "With `dry_run`, keep evaluating after an op fails so the report covers\nEVERY op instead of stopping at the first failure. Ignored unless\n`dry_run` is set. Costs a buffer rebuild + replay per failing op — see\n[`dry_run_ops_exhaustive`] for why a failure cannot simply be skipped.\nDefaults to false (stop at the first failure)."
+          },
           "ops": {
             "type": "array",
             "items": {
@@ -3989,21 +3993,31 @@
       },
       "BatchValidation": {
         "type": "object",
-        "description": "Response for a `dry_run` batch: a per-op pass/fail report plus an overall\nflag. Like the real commit, evaluation **stops at the first failing op** (a\ncommit aborts there, so reporting failures past it would describe a sequence\nthat can never run). `results` therefore covers the ops up to and including\nthe first failure; when `valid` is true it covers all of them.",
+        "description": "Response for a `dry_run` batch: a per-op pass/fail report plus an overall\nflag.\n\nIn the DEFAULT mode evaluation **stops at the first failing op** (a commit\naborts there, so reporting failures past it would describe a sequence that\ncan never run), and `results` covers the ops up to and including that\nfailure.\n\nWith `exhaustive` set, evaluation continues past a failure so `results`\ncovers every op — the preview-a-heal-pass case, where the caller wants all\nthe reasons at once rather than one per round-trip.\n\nREAD `truncated` BEFORE TREATING `results` AS COMPLETE. An exhaustive run\nrebuilds its buffer after each failure (see [`dry_run_ops_exhaustive`]) and\ngives up after [`MAX_DRY_RUN_RESTARTS`]; `truncated` says so explicitly\nrather than letting a short `results` read as \"those were all the ops\".",
         "required": [
           "valid",
-          "results"
+          "results",
+          "exhaustive",
+          "truncated"
         ],
         "properties": {
+          "exhaustive": {
+            "type": "boolean",
+            "description": "Which mode produced this report — echoes the request so a caller that\nforgot to set `exhaustive` cannot misread a stop-at-first report as a\ncomplete one."
+          },
           "results": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/BatchOpResult"
             }
           },
+          "truncated": {
+            "type": "boolean",
+            "description": "True when evaluation gave up before covering every op. `results` is then\nSHORTER than the submitted op list and says nothing about the remainder."
+          },
           "valid": {
             "type": "boolean",
-            "description": "True iff every op would apply; when false, the last entry in `results`\nis the first op that failed and why."
+            "description": "True iff every op would apply. Never true when `truncated`, because a\ntruncated run has not looked at every op."
           }
         }
       },

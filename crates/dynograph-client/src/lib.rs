@@ -885,6 +885,33 @@ impl DynographClient {
             .await
     }
 
+    /// `POST /v1/graphs/{id}/batch` with `dry_run: true, exhaustive: true` —
+    /// validate-only, and keep going past a failing op so the report covers
+    /// EVERY op rather than stopping at the first. The preview-a-heal-pass
+    /// call: all the reasons in one round-trip.
+    ///
+    /// Check [`BatchValidation::truncated`] before treating the report as
+    /// complete — the server bounds how many failures it will rebuild around.
+    /// Against a server that predates the flag it is ignored and the reply
+    /// deserializes with `exhaustive: false`, so READ THAT FIELD rather than
+    /// assuming the mode you asked for is the mode you got — a stop-at-first
+    /// report and a complete one are otherwise the same shape.
+    pub async fn batch_dry_run_exhaustive(
+        &self,
+        id: &str,
+        body: &serde_json::Value,
+    ) -> Result<BatchValidation, ClientError> {
+        let mut body = body.clone();
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("dry_run".to_string(), serde_json::Value::Bool(true));
+            obj.insert("exhaustive".to_string(), serde_json::Value::Bool(true));
+        }
+        // A non-object body passes through unmodified — same fail-loud rationale
+        // as `batch_dry_run`.
+        self.post_json(&format!("/v1/graphs/{id}/batch"), &body)
+            .await
+    }
+
     /// `POST /v1/graphs/{id}/resolve-or-create` — fuzzy/vector entity
     /// resolution with create-on-miss. `body` carries
     /// `{node_type, properties, embedding?, scope?}`.

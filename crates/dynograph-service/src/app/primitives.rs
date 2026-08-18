@@ -13,6 +13,9 @@ use super::*;
 /// With `dry_run: true` the ops run against the batch buffer for a per-op
 /// validation report and are then discarded — the graph is never mutated and
 /// the response is a `BatchValidation` (HTTP 200 regardless of `valid`).
+/// Adding `exhaustive: true` keeps evaluating past a failing op so the report
+/// covers every op (preview-a-heal-pass); the report's `truncated` flag says
+/// when even that stopped short.
 #[utoipa::path(
     post,
     path = "/v1/graphs/{id}/batch",
@@ -47,10 +50,17 @@ pub(crate) async fn batch(
     // Validate-only: run ops against the buffer, then discard. Always 200 —
     // the dry run itself succeeded; `valid` reports whether the ops would.
     if req.dry_run {
+        let exhaustive = req.exhaustive;
         let validation = entry
             .with_state_write(move |engine, _indexes| {
                 engine.begin_batch();
-                let validation = dry_run_ops(engine, &id, req.ops);
+                // Exhaustive mode rebuilds the buffer after each failure, so it
+                // may leave a fresh batch open; both paths discard below.
+                let validation = if exhaustive {
+                    dry_run_ops_exhaustive(engine, &id, req.ops)
+                } else {
+                    dry_run_ops(engine, &id, req.ops)
+                };
                 engine.discard_batch();
                 validation
             })
