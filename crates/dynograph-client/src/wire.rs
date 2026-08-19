@@ -379,7 +379,13 @@ pub struct CommunitiesResponse {
 }
 
 /// One op's outcome in a `/batch` `dry_run` report.
+///
+/// `#[non_exhaustive]` from this release: it is a wire-response type that will
+/// gain fields as `/batch` grows, and each addition would otherwise be another
+/// breaking change. Same reasoning the v0.12.0 release applied to `FulltextHit`
+/// and `TextError`.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct BatchOpResult {
     pub index: usize,
     pub op: String,
@@ -395,6 +401,7 @@ pub struct BatchOpResult {
 /// With `exhaustive` requested it covers every op — but read [`Self::truncated`]
 /// before treating it as complete.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct BatchValidation {
     pub valid: bool,
     pub results: Vec<BatchOpResult>,
