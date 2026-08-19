@@ -167,6 +167,149 @@ async fn batch_dry_run_stops_at_the_first_failure() {
     assert!(!node_exists(&app, "Item", "ok").await, "atomic rollback");
 }
 
+/// EXHAUSTIVE dry_run reports EVERY op, not just up to the first failure.
+/// This is the preview-a-heal-pass case: the caller wants all the reasons in
+/// one round-trip rather than one failure per request.
+#[tokio::test]
+async fn batch_dry_run_exhaustive_reports_every_op() {
+    let app = build_app_with_item_graph().await;
+    let ops = json!({
+        "dry_run": true,
+        "exhaustive": true,
+        "ops": [
+            {"op": "replace_node", "node_type": "Item", "node_id": "nope1", "properties": {}},
+            {"op": "create_node", "node_type": "Item", "node_id": "ok", "properties": {"name": "ok"}},
+            {"op": "replace_node", "node_type": "Item", "node_id": "nope2", "properties": {}},
+        ]
+    });
+    let (status, resp) = post_batch(&app, ops).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["valid"], false, "two ops fail: {resp}");
+    assert_eq!(resp["exhaustive"], true, "mode is echoed: {resp}");
+    assert_eq!(
+        resp["truncated"], false,
+        "3 ops is far under the cap: {resp}"
+    );
+    let results = resp["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3, "every op evaluated: {resp}");
+    assert_eq!(results[0]["ok"], false, "{resp}");
+    assert_eq!(
+        results[1]["ok"], true,
+        "the valid op past a failure IS reached: {resp}"
+    );
+    assert_eq!(
+        results[2]["ok"], false,
+        "the SECOND failure is reported too: {resp}"
+    );
+    assert!(
+        results[2]["error"].is_string(),
+        "with its own reason: {resp}"
+    );
+    // Still a dry run: nothing persisted.
+    assert!(
+        !node_exists(&app, "Item", "ok").await,
+        "dry run must not commit"
+    );
+}
+
+/// The rebuild after a failure must PRESERVE read-your-own-writes for the ops
+/// that already passed. This is the test that fails if the rebuild starts a
+/// clean buffer without replaying them.
+///
+/// ⚠️ IT MUST USE `replace_node` AS THE DEPENDENT OP, NOT `create_edge`. The
+/// first version of this test used `create_edge x->y` and was VACUOUS — it
+/// passed with the replay loop deleted, because `StorageEngine::create_edge`
+/// documents that it "does not require the endpoints to pre-exist", so the edge
+/// applies whether or not `y` is in the buffer. `replace_node` returns
+/// `Ok(None)` for a missing node, which `apply_op` turns into a per-op error —
+/// so op 2 can only pass if the replay actually restored op 0's `y`.
+/// CONTROL RUN: with the replay loop disabled this test FAILS (results[2].ok
+/// == false) while the other 14 still pass.
+#[tokio::test]
+async fn batch_dry_run_exhaustive_replays_prior_writes_after_a_rebuild() {
+    let app = build_app_with_item_graph().await;
+    let ops = json!({
+        "dry_run": true,
+        "exhaustive": true,
+        "ops": [
+            {"op": "create_node", "node_type": "Item", "node_id": "y", "properties": {"name": "y"}},
+            {"op": "replace_node", "node_type": "Item", "node_id": "missing", "properties": {}},
+            {"op": "replace_node", "node_type": "Item", "node_id": "y", "properties": {"name": "y2"}},
+        ]
+    });
+    let (status, resp) = post_batch(&app, ops).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    let results = resp["results"].as_array().unwrap();
+    assert_eq!(results.len(), 3, "{resp}");
+    assert_eq!(results[0]["ok"], true, "{resp}");
+    assert_eq!(results[1]["ok"], false, "the deliberate failure: {resp}");
+    assert_eq!(
+        results[2]["ok"], true,
+        "replace_node y must still see the buffered y after the rebuild — \
+         if this is false the replay did not happen: {resp}"
+    );
+    assert_eq!(resp["valid"], false, "one op did fail: {resp}");
+    assert!(
+        !node_exists(&app, "Item", "y").await,
+        "dry run must not commit"
+    );
+}
+
+/// Omitting `exhaustive` must behave EXACTLY as before — the default path is a
+/// regression guard, since this change touched the shared BatchValidation shape.
+#[tokio::test]
+async fn batch_dry_run_default_still_stops_and_says_it_is_not_exhaustive() {
+    let app = build_app_with_item_graph().await;
+    let (status, resp) = post_batch(
+        &app,
+        json!({
+            "dry_run": true,
+            "ops": [
+                {"op": "replace_node", "node_type": "Item", "node_id": "nope1", "properties": {}},
+                {"op": "create_node", "node_type": "Item", "node_id": "ok", "properties": {"name": "ok"}},
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(
+        resp["results"].as_array().unwrap().len(),
+        1,
+        "unchanged: {resp}"
+    );
+    assert_eq!(
+        resp["exhaustive"], false,
+        "the mode is stated, not inferred: {resp}"
+    );
+    assert_eq!(resp["truncated"], false, "{resp}");
+}
+
+/// An all-valid exhaustive run is indistinguishable in verdict from the default
+/// mode — `valid: true`, every op ok, nothing truncated. Guards against the
+/// rebuild path firing when it should not.
+#[tokio::test]
+async fn batch_dry_run_exhaustive_all_valid_matches_the_default_verdict() {
+    let app = build_app_with_item_graph().await;
+    create_item(&app, "x").await;
+    let ops = json!({
+        "dry_run": true,
+        "exhaustive": true,
+        "ops": [
+            {"op": "create_node", "node_type": "Item", "node_id": "y", "properties": {"name": "y"}},
+            {"op": "create_edge", "edge_type": "Likes", "from_type": "Item", "from_id": "x", "to_type": "Item", "to_id": "y", "properties": {"weight": 0.5}},
+        ]
+    });
+    let (status, resp) = post_batch(&app, ops).await;
+    assert_eq!(status, StatusCode::OK, "body: {resp}");
+    assert_eq!(resp["valid"], true, "{resp}");
+    assert_eq!(resp["truncated"], false, "{resp}");
+    assert_eq!(resp["results"].as_array().unwrap().len(), 2, "{resp}");
+    assert!(
+        !node_exists(&app, "Item", "y").await,
+        "dry run must not commit"
+    );
+}
+
 /// Cascade-delete sees in-batch edges via buffer-aware reads (v0.5.5+).
 /// Pre-v0.5.5 this test asserted the opposite — that the cascade missed
 /// in-batch edges and left orphans. The engine grew buffer-aware reads

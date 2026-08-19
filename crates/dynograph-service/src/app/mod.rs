@@ -32,7 +32,7 @@ use crate::{
     auth::{AuthProvider, NoAuth},
     batch::{
         BatchOk, BatchOp, BatchOpError, BatchOpResult, BatchRequest, BatchResponse,
-        BatchValidation, MAX_BATCH_OPS, dry_run_ops, run_ops,
+        BatchValidation, MAX_BATCH_OPS, dry_run_ops, dry_run_ops_exhaustive, run_ops,
     },
     buildinfo_response::{BuildInfoResponse, GIT_DIRTY, GIT_SHA},
     config::ServerLimits,

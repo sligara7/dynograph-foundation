@@ -379,7 +379,13 @@ pub struct CommunitiesResponse {
 }
 
 /// One op's outcome in a `/batch` `dry_run` report.
+///
+/// `#[non_exhaustive]` from this release: it is a wire-response type that will
+/// gain fields as `/batch` grows, and each addition would otherwise be another
+/// breaking change. Same reasoning the v0.12.0 release applied to `FulltextHit`
+/// and `TextError`.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct BatchOpResult {
     pub index: usize,
     pub op: String,
@@ -389,10 +395,25 @@ pub struct BatchOpResult {
 }
 
 /// Returned by `POST /v1/graphs/{id}/batch` with `dry_run: true`: a per-op
-/// pass/fail report (covering ops up to and including the first failure) and an
-/// overall `valid` flag. The graph is never mutated.
+/// pass/fail report and an overall `valid` flag. The graph is never mutated.
+///
+/// By default `results` covers the ops up to and including the FIRST failure.
+/// With `exhaustive` requested it covers every op — but read [`Self::truncated`]
+/// before treating it as complete.
 #[derive(Debug, Clone, Deserialize)]
+#[non_exhaustive]
 pub struct BatchValidation {
     pub valid: bool,
     pub results: Vec<BatchOpResult>,
+    /// Which mode the server ran. `#[serde(default)]` so a report from a server
+    /// that predates this field (and so omits it) deserializes as `false` — the
+    /// stop-at-first behaviour such a server actually has.
+    #[serde(default)]
+    pub exhaustive: bool,
+    /// True when the server gave up before covering every op; `results` is then
+    /// SHORTER than the op list and says nothing about the remainder. Defaults
+    /// to `false` against a server that predates the field — such a server stops
+    /// at the first failure and so never truncates in this sense.
+    #[serde(default)]
+    pub truncated: bool,
 }

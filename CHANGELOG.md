@@ -4,6 +4,59 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.13.0 — 2026-08-18
+
+### Changed (breaking, library consumers)
+
+- **`dynograph_client::BatchValidation` gains two public fields** (`exhaustive`,
+  `truncated`), which breaks any exhaustive struct literal. Nothing outside this
+  repo names the type — checked across storyflow, reflow2, ir2 and market_graph,
+  which have zero references — so the practical break is empty; the version bump
+  is because `cargo-semver-checks` is right in principle and consumers pin by git
+  tag, where a break lands in their build rather than in version resolution.
+
+- **`BatchValidation` and `BatchOpResult` are now `#[non_exhaustive]`.** Itself
+  breaking for anyone constructing them today, and taken now precisely because
+  this release is already breaking: both are wire-response types that will gain
+  fields as `/batch` grows, and each addition would otherwise be another break.
+  Same reasoning v0.12.0 applied to `FulltextHit` ("non_exhaustive from birth")
+  and `TextError`. Deserialization is unaffected.
+
+### Added
+
+- **`/batch` `dry_run` gains an `exhaustive` mode.** The default validate-only
+  run stops at the first failing op; `{"dry_run": true, "exhaustive": true}`
+  keeps going so the report covers EVERY op. This is the preview-a-heal-pass
+  case — a caller wants all the reasons in one round-trip, not one failure per
+  request.
+
+  A failure cannot simply be stepped over: a node write can buffer its RocksDB
+  put *before* a fallible full-text mirror step, so a failed op may leave a
+  partial buffer entry and judging later ops against it would mislabel them
+  (this is why the default mode stops). Exhaustive mode therefore **rebuilds**
+  after each failure — discard the buffer, begin a fresh one, replay the ops
+  that passed — so later ops are judged against a clean buffer that still
+  carries the read-your-own-writes effects of everything that genuinely
+  succeeded.
+
+  `BatchValidation` gains two fields, both about not over-reading the report:
+  `exhaustive` echoes the mode the server actually ran (so a caller who forgot
+  the flag cannot mistake a stop-at-first report for a complete one), and
+  `truncated` is set when evaluation gave up before covering every op — after
+  `MAX_DRY_RUN_RESTARTS` (64) rebuilds, or if replaying an op that previously
+  passed fails. `valid` is never true when `truncated`. **The bound is
+  reported, never silent.**
+
+  Commit-path behaviour and the default `dry_run` path are byte-for-byte
+  unchanged; the 11 pre-existing `/batch` tests pass untouched.
+
+### Added (`dynograph-client`)
+
+- **`batch_dry_run_exhaustive`** — the typed call for the above. `BatchValidation`
+  mirrors the two new fields with `#[serde(default)]`, so a report from a server
+  that predates them deserializes as `exhaustive: false, truncated: false`,
+  which is that server's real behaviour rather than a guess.
+
 ## v0.12.0 — 2026-07-28
 
 Found by a seam-analysis exercise between this repo and `reflow2`, in which the
