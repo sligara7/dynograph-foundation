@@ -4,6 +4,65 @@ Notable changes to `dynograph-foundation`. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions match the
 workspace `version` in `Cargo.toml`.
 
+## v0.14.0 — 2026-08-24
+
+### Changed
+
+- **RocksDB engine: C++ 10.4.2 → 11.8.1** (`rocksdb` crate 0.24 → 0.25,
+  `librocksdb-sys` 0.17.3 → 0.19.0). Adds one transitive dependency,
+  `rustflags 0.1.7`; `cargo deny` is clean on it.
+
+  **A minor bump, not a patch, and deliberately so.** The public Rust API does
+  not move, so `cargo-semver-checks` passes and would call this a patch. It
+  cannot see the change that matters: the on-disk storage engine underneath
+  consumers who pin by git tag and hold live stores. If you keep data in a
+  RocksDB store, this release changes the engine writing it, and a patch number
+  would have said otherwise.
+
+  **Your existing stores are safe, and rollback works.** Verified, not assumed:
+  a store written by 10.4.2 was opened, read and written by 11.8.1, then
+  reopened and read by 10.4.2 with every record intact. Moving to this release
+  is not a one-way door. The probe used a small store with default options and
+  no compaction pressure — it shows the format is not gratuitously one-way; it
+  is not a guarantee for a large store under compaction or for every option
+  combination.
+
+  **No performance claim is made.** RocksDB 11.8.1 carries upstream LSM-tree
+  work, and this release does NOT claim you will see it. At the store sizes any
+  known consumer actually holds, the data does not fill a single memtable, so
+  there is no level structure to optimise and no benchmark would show a
+  difference either way. The honest reason for this upgrade is currency —
+  staying on a maintained line and its security patches — not speed.
+
+  **Cost, measured:** a cold build of the storage crate goes 414.5s → 626.6s
+  (+51%). This lands on cold builds only: fresh CI runs, the container image
+  build, fresh clones. Warm incremental builds are unaffected — `librocksdb-sys`
+  emits `rerun-if-changed` and the Dockerfile uses BuildKit cache mounts, both
+  already true before this change.
+
+  **Why the mainline crate and not the `rust-rocksdb` fork.** These are two
+  different crates, not two versions of one: `rocksdb` is the rust-rocksdb
+  organisation's crate, published since 2014; `rust-rocksdb` is a fork by a
+  single maintainer, first published 2024. Mainline 0.25.0 carries the same
+  RocksDB 11.8.1, so the fork offered no engine the incumbent lacked — only a
+  new maintainer and advisory surface to track.
+
+### Added
+
+- **`examples/rocksdb_roundtrip`** (dynograph-storage) — a manual probe for
+  cross-version on-disk compatibility, for use at the next engine bump. Run it
+  from two checkouts differing only in the `rocksdb` version. Each marker
+  records the size of the binary that wrote it, and `read` reports SAME BINARY
+  / DIFFERENT BINARY: cargo reuses cached artifacts aggressively, so a rebuild
+  after a version change can hand back the same binary and produce a green
+  round-trip that crossed nothing.
+
+### Internal
+
+- The committed design export (`docs/design/dynograph-foundation.json`) was one
+  release stale and is refreshed, and consumer projects are now described
+  generically throughout it.
+
 ## v0.13.0 — 2026-08-18
 
 ### Changed (breaking, library consumers)
