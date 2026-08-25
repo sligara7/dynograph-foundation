@@ -1,5 +1,5 @@
 {
-  "content_hash": "sha256:5a593a3f1655f73f54a362355b4ab616ce8fdb9864c9c9b6eadb76612c06f0c3",
+  "content_hash": "sha256:d28bee59747dc66cd027574a08445f788bd60b10e00f7e51551555d2eb41fab7",
   "edges": [
     {
       "edge_type": "ALLOCATED_TO",
@@ -348,6 +348,24 @@
         "role": "approver"
       },
       "to_id": "con:anthony"
+    },
+    {
+      "edge_type": "AUTHORED_BY",
+      "from_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "properties": {
+        "acted_at": "2026-08-24",
+        "role": "approver"
+      },
+      "to_id": "con:anthony"
+    },
+    {
+      "edge_type": "BLOCKS",
+      "from_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "properties": {
+        "confidence": 0.6,
+        "evidence": "The engine bump is committed and probed, but what version number it ships under is unsettled until this is answered."
+      },
+      "to_id": "dec:rocksdb-engine-from-mainline"
     },
     {
       "edge_type": "CHANGED",
@@ -775,6 +793,16 @@
       "to_id": "cmp:surface"
     },
     {
+      "edge_type": "CONTRADICTS",
+      "from_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "properties": {
+        "alignment": "opposing",
+        "confidence": 0.8,
+        "evidence": "cap:semver-guard runs cargo semver-checks over the public API surface, which cannot observe a storage-engine swap underneath an unchanged surface. The guard passes green on this class of change."
+      },
+      "to_id": "cap:semver-guard"
+    },
+    {
       "edge_type": "DEPENDS_ON",
       "from_id": "cmp:client",
       "properties": {
@@ -1120,6 +1148,12 @@
       "from_id": "cmp:storage",
       "properties": {},
       "to_id": "fact:rocksdb-cold-build-baseline-2026-08-24"
+    },
+    {
+      "edge_type": "HAS_TEMPORAL_FACT",
+      "from_id": "cmp:storage",
+      "properties": {},
+      "to_id": "fact:rocksdb-test-coverage-thin-2026-08-24"
     },
     {
       "edge_type": "HAS_TEMPORAL_FACT",
@@ -2303,7 +2337,7 @@
       "properties": {
         "actor_type": "external_system",
         "description": "A downstream Rust project that depends on these crates BY GIT TAG and builds a domain on top of them. The reason domain-neutrality is a requirement rather than a preference.",
-        "name": "Consumer project (reflow2, storyflow)"
+        "name": "Consumer project"
       }
     },
     {
@@ -2767,7 +2801,7 @@
       "node_id": "cap:embedded-use",
       "node_type": "Capability",
       "properties": {
-        "description": "Consumers can link StorageEngine directly and skip HTTP entirely — the mode reflow2 and storyflow actually use.",
+        "description": "Consumers can link StorageEngine directly and skip HTTP entirely — the mode consumer projects actually use.",
         "is_entry_point": false,
         "is_exit_point": false,
         "name": "Be used as a library, not only as a service",
@@ -3381,9 +3415,9 @@
       "node_id": "dec:rocksdb-engine-from-mainline",
       "node_type": "Decision",
       "properties": {
-        "decision": "Reach RocksDB C++ 11.8.1 by bumping the existing `rocksdb` dependency 0.24 -> 0.25, rather than by switching to the `rust-rocksdb` crate.\n\nSTATUS 2026-08-24: route chosen and the bump is made on branch chore/rocksdb-0.25; the on-disk rollback probe that gates shipping it had not finished when this was written.\n\nWHY THE FORK LOST. The upgrade was first framed as \"update from rocksdb to rust-rocksdb, which is at v0.52.0\", on the understanding that 0.24 -> 0.52 was a version gap. It is not. They are two crates:\n  `rocksdb`      github.com/rust-rocksdb/rust-rocksdb (the org). Published since 2014-11-29. 52.8M downloads total, 6.4M recent.\n  `rust-rocksdb` github.com/zaidoon1/rust-rocksdb — a fork by one individual, first published 2024-02-10. 804K total, 550K recent. No maintainers named besides the owner.\nSo adopting it would have been a fork adoption — new maintainer, single-person bus factor, its own advisory surface to track under deny.toml — and not the version bump it looked like.\n\nWHAT DECIDED IT. Mainline `rocksdb` 0.25.0 was released 2026-08-16, eight days before this session, and depends on librocksdb-sys 0.19.0+11.8.1 — the exact C++ engine version wanted from the fork. The engine was reachable without leaving the crate we already use, for a one-line change.\n\nWHAT THE FORK STILL HAS, so this can be revisited honestly: a much faster release cadence against a slow upstream (mainline went 0.23 Dec-2024 -> 0.24 Aug-2025 -> 0.25 Aug-2026). If mainline stalls again, that argument returns. It was simply at its weakest possible moment here.\n\nCORRECTION WORTH KEEPING: the fork's README states a rolling 6-month MSRV policy at 1.91.0, not the 1.88.0 in the notes this was argued from — so that source was imprecise, which matters when it is the basis for a decision.\n\nTWO OF THE FOUR ADVERTISED BENEFITS DO NOT REACH THIS PROJECT AT ALL, checked against the repo rather than assumed: the MSRV floor is moot (workspace already at rust-version 1.94, toolchain 1.95.0), and the jemalloc 0.7 change is invisible (jemalloc appears zero times in Cargo.lock). AIX is irrelevant to a Linux x86_64 container. Only the engine bump had substance.",
+        "decision": "Reach RocksDB C++ 11.8.1 by bumping the existing `rocksdb` dependency 0.24 -> 0.25, rather than by switching to the `rust-rocksdb` crate.\n\nSTATUS 2026-08-24: committed on branch chore/rocksdb-0.25 at b4d31eb. The gating on-disk rollback probe PASSED — see frag:idea-rocksdb-ondisk-format for the method and its limits. Cold-build cost measured at +51% (fact:rocksdb-cold-build-baseline-2026-08-24). Not yet pushed, reviewed, or released.\n\nWHY THE FORK LOST. The upgrade was first framed as \"update from rocksdb to rust-rocksdb, which is at v0.52.0\", on the understanding that 0.24 -> 0.52 was a version gap. It is not. They are two crates:\n  `rocksdb`      github.com/rust-rocksdb/rust-rocksdb (the org). Published since 2014-11-29. 52.8M downloads total, 6.4M recent.\n  `rust-rocksdb` github.com/zaidoon1/rust-rocksdb — a fork by one individual, first published 2024-02-10. 804K total, 550K recent. No maintainers named besides the owner.\nSo adopting it would have been a fork adoption — new maintainer, single-person bus factor, its own advisory surface to track under deny.toml — and not the version bump it looked like.\n\nWHAT DECIDED IT. Mainline `rocksdb` 0.25.0 was released 2026-08-16, eight days before this session, and depends on librocksdb-sys 0.19.0+11.8.1 — the exact C++ engine version wanted from the fork. The engine was reachable without leaving the crate we already use, for a one-line change.\n\nWHAT THE FORK STILL HAS, so this can be revisited honestly: a much faster release cadence against a slow upstream (mainline went 0.23 Dec-2024 -> 0.24 Aug-2025 -> 0.25 Aug-2026). If mainline stalls again, that argument returns. It was simply at its weakest possible moment here.\n\nCORRECTION WORTH KEEPING: the fork's README states a rolling 6-month MSRV policy at 1.91.0, not the 1.88.0 in the notes this was argued from — so that source was imprecise, which matters when it is the basis for a decision.\n\nTWO OF THE FOUR ADVERTISED BENEFITS DO NOT REACH THIS PROJECT AT ALL, checked against the repo rather than assumed: the MSRV floor is moot (workspace already at rust-version 1.94, toolchain 1.95.0), and the jemalloc 0.7 change is invisible (jemalloc appears zero times in Cargo.lock). AIX is irrelevant to a Linux x86_64 container. Only the engine bump had substance.\n\nWHAT WAS NEVER MEASURED, and should not be claimed: whether 11.8.1's LSM-tree work actually helps this project. No performance baseline exists and no consumer's real on-disk store size is known (frag:idea-rocksdb-real-data-scale). The honest case for this bump is currency, not speed.",
         "name": "Take RocksDB 11.8.1 from mainline `rocksdb` 0.25, not the zaidoon1 fork",
-        "rationale": "The engine version wanted was available on the incumbent crate; adopting a single-maintainer fork to get the same thing would have added supply-chain surface for no gain.",
+        "rationale": "The engine version wanted was available on the incumbent crate; adopting a single-maintainer fork to get the same thing would have added supply-chain surface for no gain. The gating on-disk rollback probe subsequently PASSED (2026-08-24), and the cold-build cost was measured at +51%.",
         "status": "accepted"
       }
     },
@@ -3398,12 +3432,21 @@
       }
     },
     {
+      "node_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "OPEN — raised 2026-08-24 during the RocksDB 10.4.2 -> 11.8.1 bump, not settled. Recorded so the next engine bump does not re-derive it.\n\nTHE PROBLEM. The Rust API does not move across this bump, so semver says patch. But the on-disk engine underneath changes, and req:consume-by-tag says consumers pin these crates BY GIT TAG and hold live on-disk stores. 'Your storage engine changed' is arguably not a patch-level fact even when every type signature is identical.\n\nTHE PART THAT MAKES THIS MORE THAN A NAMING QUESTION, found while looking: this project already HAS a guard for exactly this worry — cap:semver-guard / ver:semver, running `cargo semver-checks --workspace against a baseline revision`, existing to satisfy req:no-silent-breaking-change. IT STRUCTURALLY CANNOT SEE THIS CLASS OF CHANGE. semver-checks reads the public API surface; an engine swap underneath an unchanged surface is invisible to it. So the guard would pass, green, on a change that alters what happens to consumers' data.\n\nWHAT IS NOT AT STAKE: this particular bump was probed and rolls back (frag:idea-rocksdb-ondisk-format), so it is not a one-way door. The question is about the CLASS, not this instance — a future engine bump that IS one-way would clear the same green guard.\n\nOPTIONS NOT YET WEIGHED: treat storage-engine version as part of the published contract the way req:feature-names-are-contract treats feature names; or add a separate check that fails when librocksdb-sys's bundled version moves; or decide the tag+CHANGELOG is enough and this is a documentation duty, not a gate.",
+        "name": "How to classify a release whose API is unchanged but whose storage engine is not",
+        "status": "proposed"
+      }
+    },
+    {
       "node_id": "dec:storage-owns-its-hit-type",
       "node_type": "Decision",
       "properties": {
         "decision": "StorageEngine::search_fulltext returns dynograph_storage::FulltextHit rather than dynograph_text::TextHit. The new type carries the same three fields, converts From<TextHit> inside the storage crate, and is #[non_exhaustive] so a later field is not a breaking change. TextError also becomes #[non_exhaustive].",
         "name": "Give the storage boundary its own full-text hit type",
-        "rationale": "Found by the seam exercise with reflow2: they consume search_fulltext and read all three fields, so a change to a dynograph-text type would break a consumer that never names dynograph-text and could not have learned the coupling from the published surface. Owning the type at the boundary that publishes it makes the dependency honest. Chosen over re-exporting TextHit, which would have stabilised the path without removing the coupling. Breaking in the semver sense but source-compatible for every known consumer: both call sites in this workspace and reflow2's read fields rather than naming the type, and storyflow has no Rust use of this surface at all.",
+        "rationale": "Found by the seam exercise with a consumer project: it consumes search_fulltext and reads all three fields, so a change to a dynograph-text type would break a consumer that never names dynograph-text and could not have learned the coupling from the published surface. Owning the type at the boundary that publishes it makes the dependency honest. Chosen over re-exporting TextHit, which would have stabilised the path without removing the coupling. Breaking in the semver sense but source-compatible for every known consumer: both call sites in this workspace, and that consumer's, read fields rather than naming the type; the other known consumer has no Rust use of this surface at all.",
         "status": "accepted"
       }
     },
@@ -3763,9 +3806,9 @@
         "note_kind": "author",
         "phase": "P0",
         "provenance": "authored",
-        "status": "ingested",
-        "summary": "Can an existing on-disk store survive the engine bump, and can it be rolled back?\n\nA major C++ engine bump can write manifest/SST in a format the old engine cannot read, making the upgrade FORWARD-ONLY. req:consume-by-tag records that consumers pin these crates by git tag, and they hold live on-disk stores — so a storage-format change is breaking for them even though the Rust API never moves, and semver has no way to express it.\n\nThis needs an explicit answer BEFORE the engine bump ships, not after. It is also the cheapest high-value measurement available: open an existing store with the new engine, then try to reopen it with the old binary. A yes/no answerable in an afternoon.",
-        "title": "IDEA (raised by Claude): on-disk format compatibility and rollback"
+        "status": "integrated",
+        "summary": "PROBED 2026-08-24 with crates/dynograph-storage/examples/rocksdb_roundtrip, a scratch harness run from two checkouts differing only in the rocksdb crate version.\n\nRESULT — the full cycle passed:\n  1. 10.4.2 created the store and wrote a marker.\n  2. 11.8.1 opened it, READ the 10.4.2 marker, and wrote its own.\n  3. 10.4.2 REOPENED it and read BOTH markers.\n\nSo the upgrade is not one-way. A consumer pinning by git tag (req:consume-by-tag) can move to 11.8.1 and back again against the same on-disk store.\n\nVERIFIED BEFORE BELIEVING IT: the 0.24 rebuild finished in 0.65 s because cargo reused cached artifacts, which would have made the rollback leg meaningless if it had actually reused the 11.8.1 binary. Checked — the two binaries differ in hash and size (225,937,432 vs 256,184,864 bytes) and embed different engine version strings (10.4.2 vs 11.8.1). The test is valid.\n\nLIMITS, so this is not read as more than it is: a small store, default options, no compaction pressure, a single schema, one column-family layout. It shows the format is not GRATUITOUSLY one-way. It does not prove rollback safety for a large production store under compaction, nor for every option combination — new table formats are typically opt-in, so a future option change could still create a one-way door.",
+        "title": "ANSWERED: on-disk format survives 10.4.2 -> 11.8.1, and rolls back"
       }
     },
     {
@@ -3778,9 +3821,9 @@
         "note_kind": "author",
         "phase": "P0",
         "provenance": "authored",
-        "status": "ingested",
-        "summary": "How big is the largest real graph any consumer actually holds on disk?\n\nLSM-tree optimizations only become visible at scale. If the biggest live store is small, then no measurable difference is POSSIBLE, and the engine-bump question answers itself: stop, and bump for supply-chain currency alone rather than for performance.\n\nThis is the cheapest question in the whole brainstorm and the one most likely to close the expensive ones, so it should be answered FIRST. Answering it needs no harness — ask the consumers, or measure a live store's directory size.",
-        "title": "IDEA (raised by Claude): how big is the largest real on-disk graph?"
+        "status": "integrated",
+        "summary": "MEASURED 2026-08-24 by sweeping the development workstation where the consumer projects live.\n\nEvery RocksDB store found belonging to a consumer of these crates: ONE, at 152 KB.\n\n(Several larger RocksDB stores exist on that machine — 244 KB to 89 MB — but they belong to a different product's design graphs, not to consumers of dynograph.)\n\nA FALSE LEAD WORTH RECORDING so it is not re-followed: `du` first showed three data directories at 84 MB, 3.0 MB and 28 KB, which looked like substantial consumer stores. None are RocksDB — no CURRENT file, and their contents are JSON corpora and a SQLite database. None of those projects has a dynograph dependency in its Cargo.toml. The 84 MB figure meant nothing.\n\nCONSEQUENCE, and it closes the performance half of the engine question: at 152 KB the data does not fill one memtable. There is no level structure and no compaction pressure, so RocksDB 11.8.1's LSM-tree optimizations CANNOT produce a measurable difference here. No benchmark would show anything, which means the benchmark harness contemplated in this brainstorm — the largest single piece of work proposed — should NOT be built. There is nothing for it to measure.\n\nSo the +51% cold-build cost buys zero performance for any consumer that exists today, and the honest case for the bump is currency alone. That was already the stated position; it is now measured rather than suspected.\n\nLIMIT: one machine was swept. Consumers running elsewhere — a deployed container, another workstation, a machine not reachable from here — were not measured and could hold larger stores. This is evidence about the development estate, not proof about every deployment.",
+        "title": "ANSWERED: the largest real consumer store is 152 KB — LSM gains are unobservable"
       }
     },
     {
@@ -4118,7 +4161,7 @@
         "payload_format": "unspecified",
         "payload_schema": "Types crossing this boundary are owned by dynograph-storage: Schema and Value from dynograph-core (the shared vocabulary), StoredNode, StoredEdge, CacheConfig, and FulltextHit. `search_fulltext` returns FulltextHit, NOT dynograph_text::TextHit — see dec:storage-owns-its-hit-type. The `rocksdb` and `fulltext` Cargo feature names are part of this contract because consumers forward to them by name (dec:feature-names-committed, awaiting ratification).",
         "provenance": "inferred",
-        "spec": "The embedded-library entry point: `StorageEngine::new_in_memory(schema)` or a RocksDB path, then typed CRUD validated against the schema. This is the contract reflow2 and storyflow are built on, so its stability matters more than its elegance.",
+        "spec": "The embedded-library entry point: `StorageEngine::new_in_memory(schema)` or a RocksDB path, then typed CRUD validated against the schema. This is the contract consumer projects are built on, so its stability matters more than its elegance.",
         "transport_security": "unspecified"
       }
     },
@@ -4173,7 +4216,7 @@
       "node_id": "prj:dynograph-foundation",
       "node_type": "Project",
       "properties": {
-        "description": "Rust workspace of domain-agnostic foundation crates for graph-based projects: schema-driven graph storage on RocksDB, HNSW vector search, BM25 full-text, entity resolution, pure graph/game/cluster math, and an HTTP service over all of it. Usable as embedded library crates or as the `dynograph` binary. Deliberately domain-neutral — extractors, schemas and servers for a domain live in CONSUMER projects (reflow2, storyflow) and depend on these crates by git tag.",
+        "description": "Rust workspace of domain-agnostic foundation crates for graph-based projects: schema-driven graph storage on RocksDB, HNSW vector search, BM25 full-text, entity resolution, pure graph/game/cluster math, and an HTTP service over all of it. Usable as embedded library crates or as the `dynograph` binary. Deliberately domain-neutral — extractors, schemas and servers for a domain live in CONSUMER projects and depend on these crates by git tag.",
         "mode": "flexible",
         "name": "dynograph-foundation",
         "status": "active"
@@ -4623,13 +4666,35 @@
       }
     },
     {
+      "node_id": "fact:largest-consumer-store-2026-08-24",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact_type": "property",
+        "statement": "The largest dynograph on-disk store held by any consumer on the development workstation is 152 KB, measured 2026-08-24. It is the only dynograph RocksDB store found there.\n\nWhy the number matters: every performance argument about the storage engine, including the RocksDB 11.8.1 LSM-tree work, is unfalsifiable below the scale where an LSM tree has levels to optimize. At 152 KB there is no compaction pressure and the data does not fill a single memtable. No benchmark run against real consumer data would show a difference either way.\n\nThis is the number that was missing when the design was found to contain no latency or throughput requirement at all: not only was there no stated budget, there is no workload large enough for one to bind on.\n\nLIMIT: one machine swept. Stores on deployed containers or other hosts were not measured.",
+        "subject_id": "cmp:storage",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
       "node_id": "fact:rocksdb-cold-build-baseline-2026-08-24",
       "node_type": "TemporalFact",
       "properties": {
         "basis": "measured",
         "fact": "",
         "fact_type": "property",
-        "statement": "Cold build baseline measured 2026-08-24 on the maintainer's Linux workstation: `cargo build -p dynograph-storage --example rocksdb_roundtrip --features rocksdb` against rocksdb 0.24 / librocksdb-sys 0.17.3+10.4.2 took 414.5 s (6m54s), dominated by compiling the C++ engine.\n\nRecorded because the design had NO build-time or performance figure of any kind, which is why the cost side of the engine upgrade could not be argued. This is the before-number the 0.25 / RocksDB 11.8.1 build is measured against.\n\nSCOPE, because the distinction was got wrong once in this session and corrected: this is a COLD build. Warm incremental builds are NOT affected by the engine version — librocksdb-sys ships a build.rs emitting rerun-if-changed (2 directives, present in 0.17.3 already), so editing Rust code does not rebuild the C++ engine, and the Dockerfile already uses BuildKit cache mounts for /build/target and the cargo registry. The cost lands only on cold builds: fresh CI runs, the published image build, fresh clones, and any Cargo.toml or feature-flag change that invalidates the cache.",
+        "statement": "Cold build cost of the RocksDB engine bump, measured 2026-08-24 on the maintainer's Linux workstation with `cargo build -p dynograph-storage --example rocksdb_roundtrip --features rocksdb`:\n\n  rocksdb 0.24 / librocksdb-sys 0.17.3+10.4.2 — 414.5 s (6m54s)\n  rocksdb 0.25 / librocksdb-sys 0.19.0+11.8.1 — 626.6 s (10m26s)\n\n  +212 s, +51%. Dominated by compiling the C++ engine.\n\nRecorded because the design had NO build-time or performance figure of any kind, which is why the cost side of the upgrade could not be argued at all before this.\n\nSCOPE, because the distinction was got wrong once and corrected: these are COLD builds. Warm incremental builds are NOT affected by the engine version — librocksdb-sys ships a build.rs emitting rerun-if-changed (2 directives, present in 0.17.3 already), so editing Rust code does not rebuild the C++ engine, and the Dockerfile already uses BuildKit cache mounts for /build/target and the cargo registry. Both were true BEFORE this change, so neither is a gain from it. The +51% lands only on fresh CI runs, the published image build, fresh clones, and any Cargo.toml or feature-flag change that invalidates the cache.\n\nCOROLLARY WORTH KEEPING: a rebuild of 0.24 forty minutes later took 0.65 s because cargo still held its artifacts — the workstation's target/ directory is 144 GB. Cold-build cost is invisible locally and paid entirely by CI and the image build.",
+        "subject_id": "cmp:storage",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
+      "node_id": "fact:rocksdb-test-coverage-thin-2026-08-24",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact_type": "property",
+        "statement": "How much of the test suite actually exercises the on-disk backend, measured 2026-08-24 while validating the RocksDB 11.8.1 bump:\n\n  cargo test --workspace (rocksdb feature ON)                952 s\n  DYNOGRAPH_TEST_BACKEND=rocksdb cargo test -p dynograph-storage   39 s wall,\n      of which 88 tests executing in 0.65 s\n\nThe backend-matrix job is the ONLY one that forces the on-disk path — storage tests default to the in-memory backend — and it is the whole of this project's RocksDB coverage. Everything else in that 952 s runs against the in-memory map.\n\nWHY THIS IS WORTH HAVING A NUMBER FOR: a green suite after a storage-engine change is much weaker evidence than it looks. 88 tests in two thirds of a second is what 'the engine still works' rests on. This is thin BY DESIGN and the design says so — RocksDB's cost is compile time, so tests deliberately use the in-memory backend and the rocksdb matrix is a separate CI job — but the consequence is that the code being upgraded is the least-exercised path in the suite. It is also why the C1 batch panic in this project's history reproduced only on RocksDB.\n\nCAVEAT ON COMPLETENESS: recorded while the suite was still running. Three of six debug jobs had finished at the time of writing (default, backend-matrix, fulltext — all rc=0); graph, no-default-features and nodefault+storage-fulltext had not, and the fmt/clippy/release gates had not started. The two timings above are final for their jobs.",
         "subject_id": "cmp:storage",
         "valid_from": "2026-08-24"
       }
@@ -4786,7 +4851,7 @@
       }
     }
   ],
-  "prev_content_hash": "sha256:0070b59fe705b771022ea6d46bf8a5ed31e680960b48242485bf9b2af7358b50",
+  "prev_content_hash": "sha256:9225ac807d2e1fe96f4434b7560e4003a52f4e39d4aefd54c8dd4614d0489662",
   "stamp": {
     "edge_type_names": [
       "ABOUT_ENTITY",
