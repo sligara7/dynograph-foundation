@@ -1,5 +1,5 @@
 {
-  "content_hash": "sha256:0070b59fe705b771022ea6d46bf8a5ed31e680960b48242485bf9b2af7358b50",
+  "content_hash": "sha256:d28bee59747dc66cd027574a08445f788bd60b10e00f7e51551555d2eb41fab7",
   "edges": [
     {
       "edge_type": "ALLOCATED_TO",
@@ -194,6 +194,105 @@
       "to_id": "cmp:vector"
     },
     {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-crate-identity",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-crate-identity",
+      "properties": {
+        "note_kind": "author",
+        "resolved": true
+      },
+      "to_id": "dec:rocksdb-engine-from-mainline"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-engine-11",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-engine-11",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "dec:rocksdb-default-on"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-gcc15",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-jemalloc",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "cmp:storage"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-mainline-025",
+      "properties": {
+        "note_kind": "author",
+        "resolved": true
+      },
+      "to_id": "dec:rocksdb-engine-from-mainline"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-measurement-yardstick",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "req:image-size"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-msrv",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "req:msrv-locked-to-image"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-ondisk-format",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "req:consume-by-tag"
+    },
+    {
+      "edge_type": "ANNOTATES",
+      "from_id": "frag:idea-rocksdb-real-data-scale",
+      "properties": {
+        "note_kind": "author",
+        "resolved": false
+      },
+      "to_id": "cmp:storage"
+    },
+    {
       "edge_type": "ASKS_ABOUT",
       "from_id": "question:51d70bc51fe74bbf",
       "properties": {},
@@ -230,6 +329,45 @@
       "to_id": "cap:clustering"
     },
     {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:eefecc6c8622fcb2",
+      "properties": {},
+      "to_id": "req:boundaries-own-their-types"
+    },
+    {
+      "edge_type": "ASKS_ABOUT",
+      "from_id": "question:f97b92c3973333e1",
+      "properties": {},
+      "to_id": "req:feature-names-are-contract"
+    },
+    {
+      "edge_type": "AUTHORED_BY",
+      "from_id": "dec:rocksdb-engine-from-mainline",
+      "properties": {
+        "acted_at": "2026-08-24",
+        "role": "approver"
+      },
+      "to_id": "con:anthony"
+    },
+    {
+      "edge_type": "AUTHORED_BY",
+      "from_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "properties": {
+        "acted_at": "2026-08-24",
+        "role": "approver"
+      },
+      "to_id": "con:anthony"
+    },
+    {
+      "edge_type": "BLOCKS",
+      "from_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "properties": {
+        "confidence": 0.6,
+        "evidence": "The engine bump is committed and probed, but what version number it ships under is unsettled until this is answered."
+      },
+      "to_id": "dec:rocksdb-engine-from-mainline"
+    },
+    {
       "edge_type": "CHANGED",
       "from_id": "chg:accept-71554c094a0c1b25",
       "properties": {
@@ -246,6 +384,42 @@
         "action": "modified"
       },
       "to_id": "art:endpoints-doc"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:decouple-fulltext-hit",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "art:storage-lib"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:decouple-fulltext-hit",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "art:text-lib"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:decouple-fulltext-hit",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "ifc:storage-api"
+    },
+    {
+      "edge_type": "CHANGED",
+      "from_id": "chg:decouple-fulltext-hit",
+      "properties": {
+        "accepted_baseline": false,
+        "action": "modified"
+      },
+      "to_id": "ifc:text-api"
     },
     {
       "edge_type": "CHANGED",
@@ -619,6 +793,16 @@
       "to_id": "cmp:surface"
     },
     {
+      "edge_type": "CONTRADICTS",
+      "from_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "properties": {
+        "alignment": "opposing",
+        "confidence": 0.8,
+        "evidence": "cap:semver-guard runs cargo semver-checks over the public API surface, which cannot observe a storage-engine swap underneath an unchanged surface. The guard passes green on this class of change."
+      },
+      "to_id": "cap:semver-guard"
+    },
+    {
       "edge_type": "DEPENDS_ON",
       "from_id": "cmp:client",
       "properties": {
@@ -893,6 +1077,12 @@
     },
     {
       "edge_type": "GOVERNED_BY",
+      "from_id": "cap:semver-guard",
+      "properties": {},
+      "to_id": "dec:feature-names-committed"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
       "from_id": "cmp:graph",
       "properties": {},
       "to_id": "dec:exact-only"
@@ -911,6 +1101,14 @@
     },
     {
       "edge_type": "GOVERNED_BY",
+      "from_id": "cmp:storage",
+      "properties": {
+        "note": "Which RocksDB crate and C++ engine version the on-disk backend is built against."
+      },
+      "to_id": "dec:rocksdb-engine-from-mainline"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
       "from_id": "cmp:text",
       "properties": {},
       "to_id": "dec:fulltext-derived-view"
@@ -923,6 +1121,18 @@
     },
     {
       "edge_type": "GOVERNED_BY",
+      "from_id": "ifc:storage-api",
+      "properties": {},
+      "to_id": "dec:feature-names-committed"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
+      "from_id": "ifc:storage-api",
+      "properties": {},
+      "to_id": "dec:storage-owns-its-hit-type"
+    },
+    {
+      "edge_type": "GOVERNED_BY",
       "from_id": "ifc:text-api",
       "properties": {},
       "to_id": "dec:ranked-disjunction"
@@ -932,6 +1142,30 @@
       "from_id": "prj:dynograph-foundation",
       "properties": {},
       "to_id": "dec:no-crates-io"
+    },
+    {
+      "edge_type": "HAS_TEMPORAL_FACT",
+      "from_id": "cmp:storage",
+      "properties": {},
+      "to_id": "fact:rocksdb-cold-build-baseline-2026-08-24"
+    },
+    {
+      "edge_type": "HAS_TEMPORAL_FACT",
+      "from_id": "cmp:storage",
+      "properties": {},
+      "to_id": "fact:rocksdb-test-coverage-thin-2026-08-24"
+    },
+    {
+      "edge_type": "HAS_TEMPORAL_FACT",
+      "from_id": "prj:dynograph-foundation",
+      "properties": {},
+      "to_id": "fact:committed-export-drifted-2026-08-24"
+    },
+    {
+      "edge_type": "HAS_TEMPORAL_FACT",
+      "from_id": "prj:dynograph-foundation",
+      "properties": {},
+      "to_id": "fact:verifies-project-edges-unrepresentable"
     },
     {
       "edge_type": "INCLUDES",
@@ -1189,14 +1423,17 @@
     {
       "edge_type": "REALIZES",
       "from_id": "art:ci",
-      "properties": {},
+      "properties": {
+        "conformance": "unchecked"
+      },
       "to_id": "cap:semver-guard"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:ci",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "ver:feature-matrix"
     },
@@ -1204,7 +1441,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:client-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:client"
     },
@@ -1212,49 +1450,59 @@
       "edge_type": "REALIZES",
       "from_id": "art:cluster-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:cluster"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:compose",
-      "properties": {},
+      "properties": {
+        "conformance": "unchecked"
+      },
       "to_id": "cap:containerized-deploy"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:core-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:core"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:doc-version-script",
-      "properties": {},
+      "properties": {
+        "conformance": "unchecked"
+      },
       "to_id": "cap:doc-version-guard"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:doc-version-script",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "ver:doc-versions"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:dockerfile",
-      "properties": {},
+      "properties": {
+        "conformance": "unchecked"
+      },
       "to_id": "cap:containerized-deploy"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:game-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:game"
     },
@@ -1262,27 +1510,33 @@
       "edge_type": "REALIZES",
       "from_id": "art:graph-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:graph"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:openapi",
-      "properties": {},
+      "properties": {
+        "conformance": "unchecked"
+      },
       "to_id": "cap:generated-openapi"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:release-workflow",
-      "properties": {},
+      "properties": {
+        "conformance": "unchecked"
+      },
       "to_id": "cap:containerized-deploy"
     },
     {
       "edge_type": "REALIZES",
       "from_id": "art:resolution-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:resolution"
     },
@@ -1290,7 +1544,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:service-auth",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "ifc:auth-provider"
     },
@@ -1298,7 +1553,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:service-config",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:service"
     },
@@ -1306,7 +1562,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:service-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:service"
     },
@@ -1314,7 +1571,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:service-registry",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cap:graph-isolation"
     },
@@ -1322,7 +1580,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:smoke-script",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "ver:smoke"
     },
@@ -1330,7 +1589,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:storage-backend",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "ifc:kv-backend"
     },
@@ -1338,7 +1598,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:storage-cache",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:storage"
     },
@@ -1346,7 +1607,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:storage-keys",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:storage"
     },
@@ -1354,7 +1616,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:storage-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:storage"
     },
@@ -1362,7 +1625,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:text-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:text"
     },
@@ -1370,7 +1634,8 @@
       "edge_type": "REALIZES",
       "from_id": "art:vector-lib",
       "properties": {
-        "completeness": "complete"
+        "completeness": "complete",
+        "conformance": "unchecked"
       },
       "to_id": "cmp:vector"
     },
@@ -1549,6 +1814,12 @@
       "edge_type": "SATISFIES",
       "from_id": "cap:semver-guard",
       "properties": {},
+      "to_id": "req:feature-names-are-contract"
+    },
+    {
+      "edge_type": "SATISFIES",
+      "from_id": "cap:semver-guard",
+      "properties": {},
       "to_id": "req:no-silent-breaking-change"
     },
     {
@@ -1621,14 +1892,6 @@
     },
     {
       "edge_type": "VERIFIES",
-      "from_id": "ver:clippy",
-      "properties": {
-        "coverage": "partial"
-      },
-      "to_id": "prj:dynograph-foundation"
-    },
-    {
-      "edge_type": "VERIFIES",
       "from_id": "ver:doc-versions",
       "properties": {},
       "to_id": "cmp:engine"
@@ -1644,14 +1907,6 @@
       "from_id": "ver:doc-versions",
       "properties": {},
       "to_id": "cmp:surface"
-    },
-    {
-      "edge_type": "VERIFIES",
-      "from_id": "ver:doc-versions",
-      "properties": {
-        "coverage": "partial"
-      },
-      "to_id": "prj:dynograph-foundation"
     },
     {
       "edge_type": "VERIFIES",
@@ -1673,14 +1928,6 @@
     },
     {
       "edge_type": "VERIFIES",
-      "from_id": "ver:feature-matrix",
-      "properties": {
-        "coverage": "partial"
-      },
-      "to_id": "prj:dynograph-foundation"
-    },
-    {
-      "edge_type": "VERIFIES",
       "from_id": "ver:fmt",
       "properties": {},
       "to_id": "cmp:engine"
@@ -1696,14 +1943,6 @@
       "from_id": "ver:fmt",
       "properties": {},
       "to_id": "cmp:surface"
-    },
-    {
-      "edge_type": "VERIFIES",
-      "from_id": "ver:fmt",
-      "properties": {
-        "coverage": "partial"
-      },
-      "to_id": "prj:dynograph-foundation"
     },
     {
       "edge_type": "VERIFIES",
@@ -1730,14 +1969,6 @@
       "from_id": "ver:release-mode",
       "properties": {},
       "to_id": "cmp:surface"
-    },
-    {
-      "edge_type": "VERIFIES",
-      "from_id": "ver:release-mode",
-      "properties": {
-        "coverage": "partial"
-      },
-      "to_id": "prj:dynograph-foundation"
     },
     {
       "edge_type": "VERIFIES",
@@ -2106,7 +2337,7 @@
       "properties": {
         "actor_type": "external_system",
         "description": "A downstream Rust project that depends on these crates BY GIT TAG and builds a domain on top of them. The reason domain-neutrality is a requirement rather than a preference.",
-        "name": "Consumer project (reflow2, storyflow)"
+        "name": "Consumer project"
       }
     },
     {
@@ -2570,7 +2801,7 @@
       "node_id": "cap:embedded-use",
       "node_type": "Capability",
       "properties": {
-        "description": "Consumers can link StorageEngine directly and skip HTTP entirely — the mode reflow2 and storyflow actually use.",
+        "description": "Consumers can link StorageEngine directly and skip HTTP entirely — the mode consumer projects actually use.",
         "is_entry_point": false,
         "is_exit_point": false,
         "name": "Be used as a library, not only as a service",
@@ -2778,7 +3009,7 @@
       "node_id": "cap:semver-guard",
       "node_type": "Capability",
       "properties": {
-        "description": "cargo-semver-checks runs in CI against a baseline revision across the workspace. It matters more here than in a published crate: consumers pin by git tag and link these crates directly, so an unnoticed breaking change lands in their build rather than in a registry's version resolution.",
+        "description": "cargo-semver-checks runs in CI across the workspace against the most recent release tag, DERIVED at run time via `git describe --tags --abbrev=0` rather than a hand-maintained literal, and the job fails loudly if no tag exists instead of treating an absent baseline as a pass. It matters more here than in a published crate: consumers pin by git tag and link these crates directly, so an unnoticed breaking change lands in their build rather than in a registry's version resolution. It is also the only check that can catch a Cargo FEATURE rename, which is a downstream build break that no public-API diff, OpenAPI document or published surface would mention (req:feature-names-are-contract). The baseline was a literal `v0.4.0` until 2026-07-28 while the workspace was at 0.11.0 — seven minors of drift, during which Cargo's 0.x rules made the comparison permit every breaking change it was meant to catch.",
         "is_entry_point": false,
         "is_exit_point": false,
         "name": "Catch a breaking API change before it reaches a consumer",
@@ -2842,6 +3073,14 @@
         "change_type": "test_failure_fix",
         "detected_at": "2026-07-27",
         "name": "Stale version header corrected v0.9.1 -> v0.11.0. The design was right and the doc was wrong; no design meaning to the change. The \"80 routes\" claim was checked against docs/openapi.json and is correct (76 /v1 operations + 4 operational probes = 80; GET /openapi.json is the meta route the sentence already excludes). The util/* routes are catalogued by family rather than one row per route, so the catalogue is complete despite listing 51 table rows for 80 operations."
+      }
+    },
+    {
+      "node_id": "chg:decouple-fulltext-hit",
+      "node_type": "ChangeEvent",
+      "properties": {
+        "change_type": "refactor",
+        "name": "Stop ifc:storage-api leaking a dynograph-text type through its signature"
       }
     },
     {
@@ -3074,12 +3313,31 @@
       }
     },
     {
+      "node_id": "con:anthony",
+      "node_type": "Contributor",
+      "properties": {
+        "kind": "person",
+        "name": "Anthony Sligar",
+        "role": "maintainer"
+      }
+    },
+    {
       "node_id": "dec:exact-only",
       "node_type": "Decision",
       "properties": {
         "decision": "Every algorithm in dynograph-graph is exact; no approximate or streaming variants are offered.",
         "name": "Choose exact algorithms over approximate ones",
         "rationale": "Consumer graphs are small — 10^2 to 10^3 nodes — so the usual reason to approximate does not apply, and an exact answer removes a whole class of 'is this real or is this the approximation?' questions from the consumer's side.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:feature-names-committed",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Treat `rocksdb` and `fulltext` as named, stable parts of the dynograph-storage contract. Renaming or removing either is a breaking change requiring the same care as a signature change. RATIFIED by Anthony 2026-07-28; the earlier answer given to reflow2 — that the names were an internal they relied on at their own risk — no longer stands and has been superseded in the coordination channel.",
+        "name": "Commit to the feature names rather than leave a consumer exposed",
+        "rationale": "Cargo features are public API in practice: a downstream crate forwards to them by name in its own manifest, so a rename is a downstream build break with no compile-time warning on either side. The design already commits to the CAPABILITIES being feature-gated — RocksDB ships default-on behind a switch, the full-text index is a derived view — and committing to the switch names costs almost nothing while removing a real, currently-silent exposure. The alternative, keeping the freedom to rename, is defensible but should then be stated to consumers rather than left undiscussed, which is how it stood until the seam exercise surfaced it.",
         "status": "accepted"
       }
     },
@@ -3154,12 +3412,41 @@
       }
     },
     {
+      "node_id": "dec:rocksdb-engine-from-mainline",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "Reach RocksDB C++ 11.8.1 by bumping the existing `rocksdb` dependency 0.24 -> 0.25, rather than by switching to the `rust-rocksdb` crate.\n\nSTATUS 2026-08-24: committed on branch chore/rocksdb-0.25 at b4d31eb. The gating on-disk rollback probe PASSED — see frag:idea-rocksdb-ondisk-format for the method and its limits. Cold-build cost measured at +51% (fact:rocksdb-cold-build-baseline-2026-08-24). Not yet pushed, reviewed, or released.\n\nWHY THE FORK LOST. The upgrade was first framed as \"update from rocksdb to rust-rocksdb, which is at v0.52.0\", on the understanding that 0.24 -> 0.52 was a version gap. It is not. They are two crates:\n  `rocksdb`      github.com/rust-rocksdb/rust-rocksdb (the org). Published since 2014-11-29. 52.8M downloads total, 6.4M recent.\n  `rust-rocksdb` github.com/zaidoon1/rust-rocksdb — a fork by one individual, first published 2024-02-10. 804K total, 550K recent. No maintainers named besides the owner.\nSo adopting it would have been a fork adoption — new maintainer, single-person bus factor, its own advisory surface to track under deny.toml — and not the version bump it looked like.\n\nWHAT DECIDED IT. Mainline `rocksdb` 0.25.0 was released 2026-08-16, eight days before this session, and depends on librocksdb-sys 0.19.0+11.8.1 — the exact C++ engine version wanted from the fork. The engine was reachable without leaving the crate we already use, for a one-line change.\n\nWHAT THE FORK STILL HAS, so this can be revisited honestly: a much faster release cadence against a slow upstream (mainline went 0.23 Dec-2024 -> 0.24 Aug-2025 -> 0.25 Aug-2026). If mainline stalls again, that argument returns. It was simply at its weakest possible moment here.\n\nCORRECTION WORTH KEEPING: the fork's README states a rolling 6-month MSRV policy at 1.91.0, not the 1.88.0 in the notes this was argued from — so that source was imprecise, which matters when it is the basis for a decision.\n\nTWO OF THE FOUR ADVERTISED BENEFITS DO NOT REACH THIS PROJECT AT ALL, checked against the repo rather than assumed: the MSRV floor is moot (workspace already at rust-version 1.94, toolchain 1.95.0), and the jemalloc 0.7 change is invisible (jemalloc appears zero times in Cargo.lock). AIX is irrelevant to a Linux x86_64 container. Only the engine bump had substance.\n\nWHAT WAS NEVER MEASURED, and should not be claimed: whether 11.8.1's LSM-tree work actually helps this project. No performance baseline exists and no consumer's real on-disk store size is known (frag:idea-rocksdb-real-data-scale). The honest case for this bump is currency, not speed.",
+        "name": "Take RocksDB 11.8.1 from mainline `rocksdb` 0.25, not the zaidoon1 fork",
+        "rationale": "The engine version wanted was available on the incumbent crate; adopting a single-maintainer fork to get the same thing would have added supply-chain surface for no gain. The gating on-disk rollback probe subsequently PASSED (2026-08-24), and the cold-build cost was measured at +51%.",
+        "status": "accepted"
+      }
+    },
+    {
       "node_id": "dec:source-aware-resolution",
       "node_type": "Decision",
       "properties": {
         "decision": "resolve_sourced is the recommended entry point: auto-merge is reserved for name-to-name evidence, alias-sourced matches always require vector corroboration, and an incoming alias matching two or more candidates is excluded.",
         "name": "Let the SOURCE of a match decide what the match may do",
         "rationale": "An alias is weaker evidence than a name, and treating them alike let a nickname collapse two real entities. Making the evidence source part of the rule keeps the strong action (auto-merge) tied to the strong evidence.",
+        "status": "accepted"
+      }
+    },
+    {
+      "node_id": "dec:storage-engine-change-is-invisible-to-semver",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "OPEN — raised 2026-08-24 during the RocksDB 10.4.2 -> 11.8.1 bump, not settled. Recorded so the next engine bump does not re-derive it.\n\nTHE PROBLEM. The Rust API does not move across this bump, so semver says patch. But the on-disk engine underneath changes, and req:consume-by-tag says consumers pin these crates BY GIT TAG and hold live on-disk stores. 'Your storage engine changed' is arguably not a patch-level fact even when every type signature is identical.\n\nTHE PART THAT MAKES THIS MORE THAN A NAMING QUESTION, found while looking: this project already HAS a guard for exactly this worry — cap:semver-guard / ver:semver, running `cargo semver-checks --workspace against a baseline revision`, existing to satisfy req:no-silent-breaking-change. IT STRUCTURALLY CANNOT SEE THIS CLASS OF CHANGE. semver-checks reads the public API surface; an engine swap underneath an unchanged surface is invisible to it. So the guard would pass, green, on a change that alters what happens to consumers' data.\n\nWHAT IS NOT AT STAKE: this particular bump was probed and rolls back (frag:idea-rocksdb-ondisk-format), so it is not a one-way door. The question is about the CLASS, not this instance — a future engine bump that IS one-way would clear the same green guard.\n\nOPTIONS NOT YET WEIGHED: treat storage-engine version as part of the published contract the way req:feature-names-are-contract treats feature names; or add a separate check that fails when librocksdb-sys's bundled version moves; or decide the tag+CHANGELOG is enough and this is a documentation duty, not a gate.",
+        "name": "How to classify a release whose API is unchanged but whose storage engine is not",
+        "status": "proposed"
+      }
+    },
+    {
+      "node_id": "dec:storage-owns-its-hit-type",
+      "node_type": "Decision",
+      "properties": {
+        "decision": "StorageEngine::search_fulltext returns dynograph_storage::FulltextHit rather than dynograph_text::TextHit. The new type carries the same three fields, converts From<TextHit> inside the storage crate, and is #[non_exhaustive] so a later field is not a breaking change. TextError also becomes #[non_exhaustive].",
+        "name": "Give the storage boundary its own full-text hit type",
+        "rationale": "Found by the seam exercise with a consumer project: it consumes search_fulltext and reads all three fields, so a change to a dynograph-text type would break a consumer that never names dynograph-text and could not have learned the coupling from the published surface. Owning the type at the boundary that publishes it makes the dependency honest. Chosen over re-exporting TextHit, which would have stabilised the path without removing the coupling. Breaking in the semver sense but source-compatible for every known consumer: both call sites in this workspace, and that consumer's, read fields rather than naming the type; the other known consumer has no Rust use of this surface at all.",
         "status": "accepted"
       }
     },
@@ -3402,6 +3689,141 @@
         "description": "ghcr.io/sligara7/dynograph-foundation, tagged per release plus :latest, published by the release workflow on every v* tag. Enables both optional features (graph and fulltext). Defaults otherwise: in-memory storage, 127.0.0.1:8080, noauth — so a bare `docker run` without DYNOGRAPH_STORAGE_ROOT persists nothing.",
         "env_type": "production",
         "name": "Published container image"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-crate-identity",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Recorded as an idea under consideration, not as intent. GATING: every other idea in this brainstorm branches on this one.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "integrated",
+        "summary": "QUESTION SETTLED 2026-08-24 by direct lookup on crates.io. They are NOT the same crate and 0.24-vs-0.52 was never a version gap — it is two separate lineages.\n\n`rocksdb` (what we depend on today)\n  repo: github.com/rust-rocksdb/rust-rocksdb (the ORG — mainline)\n  first published 2014-11-29; latest 0.25.0 on 2026-08-16\n  52,796,551 total downloads / 6,368,386 recent\n\n`rust-rocksdb` (the crate the user proposed)\n  repo: github.com/zaidoon1/rust-rocksdb — a FORK maintained by one named individual\n  first published 2024-02-10; latest 0.52.0 on 2026-08-08\n  804,046 total downloads / 549,532 recent\n  README rationale: regular RocksDB updates, rolling 6-month MSRV policy (states 1.91.0, NOT the 1.88.0 in the user's notes), active maintenance, quick issue resolution. No maintainers named besides the owner.\n\nCONSEQUENCE: adopting it is a fork adoption — new maintainer, single-person bus factor, own advisory tracking under deny.toml — exactly as the counter-argument anticipated. It is NOT a version bump.\n\nBUT SEE frag:idea-rocksdb-mainline-025 — the fork is no longer the only route to the engine the user wanted.",
+        "title": "SETTLED: `rocksdb` and `rust-rocksdb` are two different crates"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-engine-11",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Recorded as an idea under consideration. The only one of the user's four listed items with real substance.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "ingested",
+        "summary": "User: \"Underlying C++ engine upgrade v10.4.2 -> v11.8.1. This brings critical upstream LSM-tree optimizations, multi-row transactional logic changes, and internal memory architecture updates. Can we take advantage of any of these?\"\n\nCONFIRMED CURRENT STATE: Cargo.lock has librocksdb-sys 0.17.3+10.4.2, so the 10.4.2 figure checks out.\n\nUPDATE 2026-08-24: 11.8.1 is reachable via mainline `rocksdb` 0.25.0 — no fork adoption needed. See frag:idea-rocksdb-mainline-025.\n\nCOUNTER: we cannot observe the benefit. No RocksDB performance baseline exists, and the prior advanced-features assessment already concluded measure-first.\n\nBUILD-TIME COUNTER, CORRECTED after the user pushed back: the user is right that build.rs caches the compiled C++ engine in target/ and emits rerun-if-changed, so editing Rust code does not rebuild it and the warm edit-test loop stays fast. VERIFIED, and verified to be ALREADY TRUE: our current librocksdb-sys 0.17.3+10.4.2 ships that same build.rs (2 rerun-if-changed directives), and the Dockerfile already uses BuildKit cache mounts for /build/target and the cargo registry. So this is the status quo, not a v0.52 gain.\n\nThe build-time cost therefore narrows to COLD builds, which caching does not touch: fresh CI runs, the published image build, fresh clones, and any Cargo.toml/feature-flag change that invalidates the cache. A larger C++ engine makes those longer, and the image build lands on req:image-size.\n\nDEPENDS ON: frag:idea-rocksdb-ondisk-format (the real risk, unchanged) and frag:idea-rocksdb-real-data-scale (may make this moot).",
+        "title": "IDEA: take the C++ engine from RocksDB 10.4.2 to 11.8.1"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-gcc15",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Recorded as an idea. Half irrelevant, half a small genuine win.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "ingested",
+        "summary": "User: \"Native AIX & updated GCC compilation — v0.52.0 features expanded ecosystem bindings allowing it to natively build on AIX out of the box and native support for building via GCC 15.\"\n\nAIX HALF: irrelevant. We ship a Linux x86_64 container.\n\nGCC 15 HALF: possibly real. Every storage-touching build on this machine currently needs BINDGEN_EXTRA_CLANG_ARGS=\"-isystem /usr/lib/gcc/x86_64-linux-gnu/15/include\" because clang is absent and bindgen cannot find stdbool.h. If native GCC 15 support deletes that workaround it is a small but genuine papercut removal on a command run constantly.\n\nCOST: cheap to test, once the crate-identity question is settled.",
+        "title": "IDEA: does v0.52's native GCC 15 support delete our bindgen workaround?"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-jemalloc",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Recorded as considered and effectively closed. No work implied.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "ingested",
+        "summary": "User: \"Dependency refactoring — tikv-jemalloc-sys upgraded to v0.7 in the v0.52 branch, altering the internal behavior of memory-managed custom heaps in high-concurrency environments.\"\n\nCHECKED AGAINST THE REPO: `grep -c jemalloc Cargo.lock` returns 0. We do not enable that feature, so the change is invisible to us. It only becomes a live question if we deliberately opt in — which would be its own decision, not a side effect of this upgrade.",
+        "title": "IDEA (checked, effectively answered): tikv-jemalloc-sys v0.7 heap behavior"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-mainline-025",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "A third option that did not exist when the brainstorm was recorded. Found while settling the crate-identity question.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "ingested",
+        "summary": "Mainline `rocksdb` released 0.25.0 on 2026-08-16 — EIGHT DAYS before this brainstorm — and it depends on librocksdb-sys 0.19.0+11.8.1.\n\nThat is RocksDB C++ 11.8.1: the exact engine version the user wanted from the fork.\n\nlibrocksdb-sys lineage, verbatim from crates.io:\n  0.19.0+11.8.1  2026-08-16   <- available on mainline now\n  0.17.3+10.4.2  2025-08-10   <- what we are pinned to\n  0.17.1+9.9.3   2024-12-24\n\nSO THE HEADLINE ITEM IS REACHABLE WITHOUT ADOPTING A FORK: `rocksdb = \"0.24\"` -> `\"0.25\"` is a one-line change on the crate we already use, from the org that has maintained it since 2014, with 6.4M recent downloads behind it.\n\nWhat this does NOT settle: the on-disk format and rollback question (frag:idea-rocksdb-ondisk-format) is unchanged — 11.8.1 is 11.8.1 whichever crate delivers it, so the migration risk is identical and still must be answered first.\n\nWhat it DOES weaken: the fork's main selling point is release cadence against a slow upstream (mainline went 0.23 Dec-2024 -> 0.24 Aug-2025 -> 0.25 Aug-2026). With 0.25.0 just out and current on the engine, that argument is at its weakest point in two years.",
+        "title": "FINDING: mainline `rocksdb` 0.25.0 already ships RocksDB 11.8.1"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-measurement-yardstick",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "The user's follow-up question: \"there were a lot of unknowns in your statement - how can we measure to determine if an upgrade is valuable?\"",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "ingested",
+        "summary": "OBSERVATION FROM THE GRAPH: of 23 Requirements in this design, NOT ONE states a latency or throughput target. So \"is it faster\" currently has no pass/fail line to be judged against — which is why the engine-bump case could not be argued either way.\n\nThe two budgets that DO exist are req:image-size (the published image should stay near the ~80 MB target) and req:msrv-locked-to-image. Both are measurable today and both could be VIOLATED by a bigger C++ engine. So the design's existing budgets CONSTRAIN this upgrade even though none of them REWARD it.\n\nOPEN: do we want a stated performance budget at all, or is absence-of-regression the honest bar for a dependency bump? Recorded as an idea, not as a requirement.",
+        "title": "IDEA: what yardstick would tell us a RocksDB upgrade was valuable?"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-msrv",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Recorded as considered and effectively closed. No work implied.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "ingested",
+        "summary": "User: \"Upgraded MSRV: v0.24.0 requires Rust 1.85.0; v0.52.0 requires Rust 1.88.0 or newer. If your compiler toolchain is older, you will face compile-time constraints.\"\n\nCHECKED AGAINST THE REPO: workspace Cargo.toml declares rust-version = \"1.94\"; local toolchain is rustc 1.95.0. The 1.88 floor is far below where we already are. Nothing to do, nothing gained.\n\nBUT NOT A FREE VARIABLE: req:msrv-locked-to-image says the MSRV must be pinned in lockstep with the container toolchain. So even though the floor is already satisfied, MSRV is governed and cannot drift casually.",
+        "title": "IDEA (checked, effectively answered): the v0.52 MSRV bump to Rust 1.88"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-ondisk-format",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Not in the user's list. Raised during brainstorm as the real risk hiding inside the engine bump.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "integrated",
+        "summary": "PROBED 2026-08-24 with crates/dynograph-storage/examples/rocksdb_roundtrip, a scratch harness run from two checkouts differing only in the rocksdb crate version.\n\nRESULT — the full cycle passed:\n  1. 10.4.2 created the store and wrote a marker.\n  2. 11.8.1 opened it, READ the 10.4.2 marker, and wrote its own.\n  3. 10.4.2 REOPENED it and read BOTH markers.\n\nSo the upgrade is not one-way. A consumer pinning by git tag (req:consume-by-tag) can move to 11.8.1 and back again against the same on-disk store.\n\nVERIFIED BEFORE BELIEVING IT: the 0.24 rebuild finished in 0.65 s because cargo reused cached artifacts, which would have made the rollback leg meaningless if it had actually reused the 11.8.1 binary. Checked — the two binaries differ in hash and size (225,937,432 vs 256,184,864 bytes) and embed different engine version strings (10.4.2 vs 11.8.1). The test is valid.\n\nLIMITS, so this is not read as more than it is: a small store, default options, no compaction pressure, a single schema, one column-family layout. It shows the format is not GRATUITOUSLY one-way. It does not prove rollback safety for a large production store under compaction, nor for every option combination — new table formats are typically opt-in, so a future option change could still create a one-way door.",
+        "title": "ANSWERED: on-disk format survives 10.4.2 -> 11.8.1, and rolls back"
+      }
+    },
+    {
+      "node_id": "frag:idea-rocksdb-real-data-scale",
+      "node_type": "Fragment",
+      "properties": {
+        "created_at": "2026-08-24",
+        "fragment_type": "note",
+        "intent": "Not in the user's list. Raised during brainstorm as the cheapest question that could make the expensive ones moot.",
+        "note_kind": "author",
+        "phase": "P0",
+        "provenance": "authored",
+        "status": "integrated",
+        "summary": "MEASURED 2026-08-24 by sweeping the development workstation where the consumer projects live.\n\nEvery RocksDB store found belonging to a consumer of these crates: ONE, at 152 KB.\n\n(Several larger RocksDB stores exist on that machine — 244 KB to 89 MB — but they belong to a different product's design graphs, not to consumers of dynograph.)\n\nA FALSE LEAD WORTH RECORDING so it is not re-followed: `du` first showed three data directories at 84 MB, 3.0 MB and 28 KB, which looked like substantial consumer stores. None are RocksDB — no CURRENT file, and their contents are JSON corpora and a SQLite database. None of those projects has a dynograph dependency in its Cargo.toml. The 84 MB figure meant nothing.\n\nCONSEQUENCE, and it closes the performance half of the engine question: at 152 KB the data does not fill one memtable. There is no level structure and no compaction pressure, so RocksDB 11.8.1's LSM-tree optimizations CANNOT produce a measurable difference here. No benchmark would show anything, which means the benchmark harness contemplated in this brainstorm — the largest single piece of work proposed — should NOT be built. There is nothing for it to measure.\n\nSo the +51% cold-build cost buys zero performance for any consumer that exists today, and the honest case for the bump is currency alone. That was already the stated position; it is now measured rather than suspected.\n\nLIMIT: one machine was swept. Consumers running elsewhere — a deployed container, another workstation, a machine not reachable from here — were not measured and could hold larger stores. This is evidence about the development estate, not proof about every deployment.",
+        "title": "ANSWERED: the largest real consumer store is 152 KB — LSM gains are unobservable"
       }
     },
     {
@@ -3683,6 +4105,7 @@
         "name": "EntityResolver API",
         "paradigm": "synchronous",
         "payload_format": "unspecified",
+        "payload_schema": "Types crossing this boundary: Candidate, EntityResolver, MatchSource, ResolutionOutcome, ResolutionResult (owned here), plus HnswIndex and HnswConfig (dynograph-vector) and ResolutionConfig / ResolutionStrategy (dynograph-core), all RE-EXPORTED from this crate so a caller can name them without depending on the source crates directly. HnswIndex is a PARAMETER of resolve / resolve_with_aliases / resolve_sourced, so a caller must construct one — the strongest form of cross-boundary coupling here. See req:boundaries-own-their-types.",
         "provenance": "inferred",
         "spec": "resolve / resolve_sourced. The source-aware path is the recommended entry point: auto-merge is reserved for name-to-name evidence, alias-sourced matches always require vector corroboration, and an incoming alias matching two or more candidates is excluded rather than guessed at.",
         "transport_security": "unspecified"
@@ -3736,8 +4159,9 @@
         "operations": "create/read/update/delete nodes and edges, adjacency and index scans, atomic batches, embedding sidecar operations, full-text mirroring",
         "paradigm": "synchronous",
         "payload_format": "unspecified",
+        "payload_schema": "Types crossing this boundary are owned by dynograph-storage: Schema and Value from dynograph-core (the shared vocabulary), StoredNode, StoredEdge, CacheConfig, and FulltextHit. `search_fulltext` returns FulltextHit, NOT dynograph_text::TextHit — see dec:storage-owns-its-hit-type. The `rocksdb` and `fulltext` Cargo feature names are part of this contract because consumers forward to them by name (dec:feature-names-committed, awaiting ratification).",
         "provenance": "inferred",
-        "spec": "The embedded-library entry point: `StorageEngine::new_in_memory(schema)` or a RocksDB path, then typed CRUD validated against the schema. This is the contract reflow2 and storyflow are built on, so its stability matters more than its elegance.",
+        "spec": "The embedded-library entry point: `StorageEngine::new_in_memory(schema)` or a RocksDB path, then typed CRUD validated against the schema. This is the contract consumer projects are built on, so its stability matters more than its elegance.",
         "transport_security": "unspecified"
       }
     },
@@ -3792,7 +4216,7 @@
       "node_id": "prj:dynograph-foundation",
       "node_type": "Project",
       "properties": {
-        "description": "Rust workspace of domain-agnostic foundation crates for graph-based projects: schema-driven graph storage on RocksDB, HNSW vector search, BM25 full-text, entity resolution, pure graph/game/cluster math, and an HTTP service over all of it. Usable as embedded library crates or as the `dynograph` binary. Deliberately domain-neutral — extractors, schemas and servers for a domain live in CONSUMER projects (reflow2, storyflow) and depend on these crates by git tag.",
+        "description": "Rust workspace of domain-agnostic foundation crates for graph-based projects: schema-driven graph storage on RocksDB, HNSW vector search, BM25 full-text, entity resolution, pure graph/game/cluster math, and an HTTP service over all of it. Usable as embedded library crates or as the `dynograph` binary. Deliberately domain-neutral — extractors, schemas and servers for a domain live in CONSUMER projects and depend on these crates by git tag.",
         "mode": "flexible",
         "name": "dynograph-foundation",
         "status": "active"
@@ -3871,6 +4295,31 @@
       }
     },
     {
+      "node_id": "question:eefecc6c8622fcb2",
+      "node_type": "Question",
+      "properties": {
+        "asked_at": "2026-07-28",
+        "context_setter": "Nothing satisfies requirement “A published boundary must not leak a type owned by another boundary”",
+        "gap_id": "gap:eefecc6c8622fcb2",
+        "question": "Each part of this project hands out its own kinds of data at its edges. We just found a case where the storage part was handing out a piece of data that really belonged to the search part — so anyone using storage could be broken by a change to search, without ever knowing the two were connected. That case is now fixed and the rule is written down, but nothing actually checks the rule. If the same mistake were made elsewhere tomorrow, no test would catch it and it would surface only when someone else's build broke. Do you want a check built to enforce this across every boundary, is fixing the one known case enough for now, or would you rather this stay guidance for people rather than something automated?",
+        "rephrase_degraded": false,
+        "status": "asked"
+      }
+    },
+    {
+      "node_id": "question:f97b92c3973333e1",
+      "node_type": "Question",
+      "properties": {
+        "answer": "\"ratify both decisions and fix the semver baseline\" — Anthony chose the first of the three options offered: make the promise real AND make it enforced. Recorded as dec:feature-names-committed (accepted) and req:feature-names-are-contract (accepted). The enforcement half was implemented by DERIVING the semver baseline from the most recent release tag rather than bumping the hand-maintained literal, because a hand-maintained baseline is the step that had already failed for seven minors. reflow2 has been told to flip their agreement row from \"declared and refused\" to \"declared and committed\".",
+        "asked_at": "2026-07-28",
+        "context_setter": "Nothing satisfies requirement “Cargo feature names are part of the published contract”",
+        "gap_id": "gap:f97b92c3973333e1",
+        "question": "You've now written down a promise that the build switches named `rocksdb` and `fulltext` will keep those names, because reflow2's build refers to them by name and would break instantly if they changed. But nothing currently checks that promise — if someone renamed one tomorrow, no test or CI job would notice. The check that could enforce it is the semver guard, and it is comparing against a baseline seven releases out of date, so it is not really looking. Do you want the semver baseline fixed so this promise is actually enforced, do you want to keep the promise as an honest statement of intent that nothing verifies for now, or would you rather not make the promise at all and tell reflow2 they rename at their own risk?",
+        "rephrase_degraded": false,
+        "status": "answered"
+      }
+    },
+    {
       "node_id": "rel:v0110",
       "node_type": "Release",
       "properties": {
@@ -3922,6 +4371,20 @@
         "provenance": "inferred",
         "statement": "README: all schema-aware logic sits above a narrow KvBackend trait, and moving to PostgreSQL, SQLite or sled is 'a matter of implementing that one trait; nothing in the graph engine has to change.'",
         "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:boundaries-own-their-types",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "Every type crossing a published boundary must be nameable through that boundary",
+        "priority": "medium",
+        "provenance": "authored",
+        "statement": "A consumer must be able to name every type in a signature it has to satisfy, using only the crate that publishes the signature. Two remedies, chosen by whether the source crate is optional:\n\n(1) REQUIRED dependency -> RE-EXPORT. The type is always present and is usually shared vocabulary (Schema, Value, DynoError from dynograph-core; HnswIndex from dynograph-vector). Wrapping would fork the vocabulary for no gain. Without the re-export a consumer must add the source crate to its own manifest at a version nobody stated, which is an undeclared coupling and a version-sync hazard.\n\n(2) OPTIONAL dependency -> OWN THE TYPE. A consumer cannot depend on a crate that may not be compiled into the build, so re-export is not enough; the publishing crate must define its own type and convert. This is the sharper case because the coupling is invisible from both sides.\n\nWorked cases, all found by the 2026-07-28 seam exercise with reflow2. Optional: StorageEngine::search_fulltext returned dynograph_text::TextHit, reached only through the `fulltext` feature — now dynograph_storage::FulltextHit. Required: EntityResolver's resolve* methods take Option<&HnswIndex> as a PARAMETER (worse than a return type, since the caller must construct one); StoredNode/StoredEdge properties are HashMap<String, Value> and every storage method returns DynoError; GraphRegistry::create_graph takes Schema and hnsw_stats_snapshot returns HnswStats — all now re-exported.",
+        "status": "accepted"
       }
     },
     {
@@ -4006,6 +4469,20 @@
         "provenance": "inferred",
         "statement": "The workspace manifest states it as a rule rather than an observation: crates here are INTENTIONALLY domain-neutral, and domain-specific extractors, schemas and servers live in consumer projects that depend on these crates. The pure-math crates go further and take no dependency even on dynograph-core.",
         "status": "proposed"
+      }
+    },
+    {
+      "node_id": "req:feature-names-are-contract",
+      "node_type": "Requirement",
+      "properties": {
+        "concern": "core",
+        "kind": "functional",
+        "lineage": "original",
+        "name": "Cargo feature names are part of the published contract",
+        "priority": "medium",
+        "provenance": "authored",
+        "statement": "The `rocksdb` and `fulltext` feature names on dynograph-storage are public API, not internal labels, and must not be renamed or removed without the same care as a breaking change to a function signature. Consumers forward to them BY NAME from their own manifests — reflow2 declares `fulltext = [\"dynograph-storage/fulltext\"]` and `rocksdb = [\"dynograph-storage/rocksdb\"]` — so a rename breaks their build instantly, and no published surface, OpenAPI document or public-API semver check would mention it. Recorded because reflow2 declared this reliance and the honest answer at the time was that nothing on this side committed to it.",
+        "status": "accepted"
       }
     },
     {
@@ -4177,6 +4654,64 @@
       }
     },
     {
+      "node_id": "fact:committed-export-drifted-2026-08-24",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact": "",
+        "fact_type": "status",
+        "statement": "As of 2026-08-24 the committed design export at docs/design/dynograph-foundation.json had drifted behind the live design: 179 nodes / 270 edges committed, against 186 / 280 in the working store. A strict subset — the committed file held nothing the store lacked.\n\nTHE DRIFT IS EXACTLY ONE RELEASE WIDE. Checked: the repo is at v0.13.0 and level with origin/main (0 commits behind, so a pull changes nothing), but the last commit to touch the export is b5a9f74, the v0.12.0 release. v0.13.0 shipped without refreshing it.\n\nThe 7 missing nodes are the boundary-types work (req:boundaries-own-their-types, dec:storage-owns-its-hit-type, chg:decouple-fulltext-hit and the questions around them), which matches the v0.12.0 commit 'boundary-type fixes'. That work entered the graph and was never re-exported, so the drift is design work done after the last export, not corruption.\n\nWHY THIS IS WORTH KNOWING: .reflow2/ is deliberately gitignored (the comment on .gitignore:20 says the durable record is an export), and `reflow2 check --export` gates CI on the committed file. A committed export that silently lags means the gate is checking a stale design. Nothing detects the lag on its own, and the release process did not catch it — refreshing the export is not part of the release checklist.",
+        "subject_id": "prj:dynograph-foundation",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
+      "node_id": "fact:largest-consumer-store-2026-08-24",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact_type": "property",
+        "statement": "The largest dynograph on-disk store held by any consumer on the development workstation is 152 KB, measured 2026-08-24. It is the only dynograph RocksDB store found there.\n\nWhy the number matters: every performance argument about the storage engine, including the RocksDB 11.8.1 LSM-tree work, is unfalsifiable below the scale where an LSM tree has levels to optimize. At 152 KB there is no compaction pressure and the data does not fill a single memtable. No benchmark run against real consumer data would show a difference either way.\n\nThis is the number that was missing when the design was found to contain no latency or throughput requirement at all: not only was there no stated budget, there is no workload large enough for one to bind on.\n\nLIMIT: one machine swept. Stores on deployed containers or other hosts were not measured.",
+        "subject_id": "cmp:storage",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
+      "node_id": "fact:rocksdb-cold-build-baseline-2026-08-24",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact": "",
+        "fact_type": "property",
+        "statement": "Cold build cost of the RocksDB engine bump, measured 2026-08-24 on the maintainer's Linux workstation with `cargo build -p dynograph-storage --example rocksdb_roundtrip --features rocksdb`:\n\n  rocksdb 0.24 / librocksdb-sys 0.17.3+10.4.2 — 414.5 s (6m54s)\n  rocksdb 0.25 / librocksdb-sys 0.19.0+11.8.1 — 626.6 s (10m26s)\n\n  +212 s, +51%. Dominated by compiling the C++ engine.\n\nRecorded because the design had NO build-time or performance figure of any kind, which is why the cost side of the upgrade could not be argued at all before this.\n\nSCOPE, because the distinction was got wrong once and corrected: these are COLD builds. Warm incremental builds are NOT affected by the engine version — librocksdb-sys ships a build.rs emitting rerun-if-changed (2 directives, present in 0.17.3 already), so editing Rust code does not rebuild the C++ engine, and the Dockerfile already uses BuildKit cache mounts for /build/target and the cargo registry. Both were true BEFORE this change, so neither is a gain from it. The +51% lands only on fresh CI runs, the published image build, fresh clones, and any Cargo.toml or feature-flag change that invalidates the cache.\n\nCOROLLARY WORTH KEEPING: a rebuild of 0.24 forty minutes later took 0.65 s because cargo still held its artifacts — the workstation's target/ directory is 144 GB. Cold-build cost is invisible locally and paid entirely by CI and the image build.",
+        "subject_id": "cmp:storage",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
+      "node_id": "fact:rocksdb-test-coverage-thin-2026-08-24",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact_type": "property",
+        "statement": "How much of the test suite actually exercises the on-disk backend, measured 2026-08-24 while validating the RocksDB 11.8.1 bump:\n\n  cargo test --workspace (rocksdb feature ON)                952 s\n  DYNOGRAPH_TEST_BACKEND=rocksdb cargo test -p dynograph-storage   39 s wall,\n      of which 88 tests executing in 0.65 s\n\nThe backend-matrix job is the ONLY one that forces the on-disk path — storage tests default to the in-memory backend — and it is the whole of this project's RocksDB coverage. Everything else in that 952 s runs against the in-memory map.\n\nWHY THIS IS WORTH HAVING A NUMBER FOR: a green suite after a storage-engine change is much weaker evidence than it looks. 88 tests in two thirds of a second is what 'the engine still works' rests on. This is thin BY DESIGN and the design says so — RocksDB's cost is compile time, so tests deliberately use the in-memory backend and the rocksdb matrix is a separate CI job — but the consequence is that the code being upgraded is the least-exercised path in the suite. It is also why the C1 batch panic in this project's history reproduced only on RocksDB.\n\nCAVEAT ON COMPLETENESS: recorded while the suite was still running. Three of six debug jobs had finished at the time of writing (default, backend-matrix, fulltext — all rc=0); graph, no-default-features and nodefault+storage-fulltext had not, and the fmt/clippy/release gates had not started. The two timings above are final for their jobs.",
+        "subject_id": "cmp:storage",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
+      "node_id": "fact:verifies-project-edges-unrepresentable",
+      "node_type": "TemporalFact",
+      "properties": {
+        "basis": "measured",
+        "fact": "",
+        "fact_type": "status",
+        "statement": "Five VERIFIES edges from Verification to Project — ver:clippy, ver:doc-versions, ver:feature-matrix, ver:fmt, ver:release-mode, each pointing at prj:dynograph-foundation — are no longer legal under the current schema, which allows VERIFIES only to Component and Interface. They were dropped on 2026-08-24 to let an import land, because import is all-or-nothing.\n\nWHAT WAS LOST, precisely: each of those five still verifies engine, primitives and surface, but the design has 13 components, so the project-level edge was how 'this gate covers the whole thing' was recorded. That claim is no longer on the record and was NOT re-expressed by fanning the edges out to all 13 components — that would have invented specificity nobody stated.\n\nEXPECT IT TO RECUR: any future import of an export made before the schema tightened will hit the same five. This is a schema-migration artifact, not a one-off. It also means a freshly committed export will carry 275 edges where the last one carried 280, and that difference is this, not data loss in the design work.",
+        "subject_id": "prj:dynograph-foundation",
+        "valid_from": "2026-08-24"
+      }
+    },
+    {
       "node_id": "ver:client-it",
       "node_type": "Verification",
       "properties": {
@@ -4316,7 +4851,7 @@
       }
     }
   ],
-  "prev_content_hash": "sha256:5fb38b39bc3de6107c296053efc4fef04b5d74063ac2f56f17ceb135e81ce58d",
+  "prev_content_hash": "sha256:9225ac807d2e1fe96f4434b7560e4003a52f4e39d4aefd54c8dd4614d0489662",
   "stamp": {
     "edge_type_names": [
       "ABOUT_ENTITY",
@@ -4328,6 +4863,7 @@
       "AT_EPOCH",
       "AUTHORED_BY",
       "BLOCKS",
+      "CALIBRATED_AGAINST",
       "CAUSES",
       "CHANGED",
       "CLAIMS",
@@ -4343,8 +4879,10 @@
       "DOCUMENTS",
       "DUPLICATES",
       "EVOLVES_INTO",
+      "GATED_ON",
       "GOVERNED_BY",
       "HAS_OBSERVATION",
+      "HAS_READINESS",
       "HAS_SNAPSHOT",
       "HAS_TEMPORAL_FACT",
       "IMPOSES",
@@ -4356,6 +4894,7 @@
       "OBSOLETES",
       "OCCURS_DURING",
       "OPERATES_IN",
+      "OWNED_BY",
       "PART_OF_FLOW",
       "PERFORMED_IN",
       "PRECEDES",
@@ -4365,6 +4904,7 @@
       "REQUIRES_RESOURCE",
       "RISKS",
       "SATISFIES",
+      "SCHEDULED_FOR",
       "SPECIFIES",
       "SUPERSEDES",
       "SUPPLEMENTS",
@@ -4376,7 +4916,7 @@
       "VIOLATES_RULE",
       "YIELDED"
     ],
-    "edge_types": 56,
+    "edge_types": 61,
     "node_type_names": [
       "Actor",
       "Anchor",
@@ -4400,6 +4940,7 @@
       "Project",
       "QualityGate",
       "Question",
+      "ReadinessAssessment",
       "Release",
       "Requirement",
       "Resource",
@@ -4407,8 +4948,8 @@
       "TemporalFact",
       "Verification"
     ],
-    "node_types": 28,
-    "reflow2_version": "0.16.0",
+    "node_types": 29,
+    "reflow2_version": "0.39.0",
     "schema_version": 1
   }
 }
