@@ -57,7 +57,7 @@ serde_yaml = "0.9"
 rmp-serde = "1"
 
 # Storage
-rocksdb = "0.24"
+rocksdb = "0.25"
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
