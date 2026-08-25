@@ -28,11 +28,19 @@ workspace `version` in `Cargo.toml`.
   combination.
 
   **No performance claim is made.** RocksDB 11.8.1 carries upstream LSM-tree
-  work, and this release does NOT claim you will see it. At the store sizes any
-  known consumer actually holds, the data does not fill a single memtable, so
-  there is no level structure to optimise and no benchmark would show a
-  difference either way. The honest reason for this upgrade is currency —
-  staying on a maintained line and its security patches — not speed.
+  work, and this release does NOT claim you will see it, because it was not
+  measured. The honest reason for this upgrade is currency — staying on a
+  maintained line and its security patches — not speed.
+
+  > **Correction, 2026-08-25 (after publication).** This section originally
+  > justified the absence of a performance claim by asserting that consumer
+  > stores are too small for the LSM-tree work to matter — "the data does not
+  > fill a single memtable". That rested on an incomplete survey and is
+  > **withdrawn**: a live consumer store of 120 MB was found shortly after
+  > release, well past the scale at which an LSM tree has real level structure
+  > and compaction pressure. Whether 11.8.1 helps at that size is untested and
+  > genuinely open. The absence of a performance claim stands and was always
+  > the conservative reading; the reason given for it was wrong.
 
   **Cost, measured:** a cold build of the storage crate goes 414.5s → 626.6s
   (+51%). This lands on cold builds only: fresh CI runs, the container image
